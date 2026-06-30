@@ -1619,14 +1619,18 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 9126e7d74644ee7479bea464b72418ca, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  width: 40
-  depth: 150
+  width: 60
+  depth: 200
   noiseScale: 0.5
   maxHeight: 4
-  ridgeStrength: 0.4
-  chunkedBuilder: {fileID: 0}
+  ridgeStrength: 0.5
+  chunkedBuilder: {fileID: 1950520777}
   seamlessBuilder: {fileID: 0}
   smoothPasses: 2
+  shallowFlatten: 0.5
+  terraceLevels: 6
+  omutCount: 4
+  omutDepth: 0.6
   randomSeed: 1
   seed: 53692
   useJobs: 1

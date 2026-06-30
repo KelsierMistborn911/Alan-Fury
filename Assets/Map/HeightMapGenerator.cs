@@ -29,6 +29,21 @@ public class HeightMapGenerator : MonoBehaviour
     [Tooltip("Проходов box-сглаживания 3×3 по готовой карте. Убирает дырки, одиночные лужи, резкие переходы; делает берега пологими.")]
     public int smoothPasses = 2;
 
+    [Header("Карст / болото")]
+    [Range(0f, 1f)]
+    [Tooltip("Прижимает низины к плоскому дну и поднимает контраст островов. 0 = выкл (плавный fBm), 1 = острова из плоской мелкой воды.")]
+    public float shallowFlatten = 0.5f;
+
+    [Tooltip("Сколько уровней-террас. 0 = плавные острова, больше = резкие плоские уступы (карст). На блочном меше даёт чёткие обрывы.")]
+    public int terraceLevels = 6;
+
+    [Tooltip("Сколько глубоких омутов пробить в низинах. Вода прячет их сверху — дна не видно.")]
+    public int omutCount = 4;
+
+    [Range(0f, 1f)]
+    [Tooltip("Глубина омута как доля maxHeight. Радиус воронки фиксированный (~3 клетки).")]
+    public float omutDepth = 0.6f;
+
     [Header("Сид")]
     public bool randomSeed = true;
     public int seed;
@@ -41,6 +56,9 @@ public class HeightMapGenerator : MonoBehaviour
     // Публичные данные — доступ для всех скриптов
     public float[,] heightMap { get; private set; }
     public bool isGenerated { get; private set; }
+
+    // Радиус воронки омута в клетках (не выношу в инспектор — минимум параметров).
+    private const int OmutRadius = 3;
 
     // ============ СОБЫТИЯ ============
     public System.Action onHeightMapReady;
@@ -63,8 +81,13 @@ public class HeightMapGenerator : MonoBehaviour
         else
             GenerateSimple(ts);
 
-        SmoothHeightMap();      // общий пост-проход для Simple и Job
-        RenormalizeHeights();   // растягиваем в [0, maxHeight], чтобы сглаживание не воровало высоту
+        // --- Пост-обработка (порядок важен) ---
+        NormalizeInPlace01();   // нормируем в [0,1], чтобы шейпинг считался предсказуемо
+        ApplyShallowFlatten();  // прижимаем низины к плоскому дну (мелкая вода + острова)
+        SmoothHeightMap();      // сглаживает базу/берега; террасы и омуты идут ПОСЛЕ, поэтому остаются резкими
+        ApplyTerracing();       // режем на уровни-террасы → резкие края/обрывы
+        RenormalizeHeights();   // растягиваем в [0, maxHeight]
+        CarveOmuts();           // пробиваем глубокие омуты последними — их не трогают ни сглаживание, ни террасы
 
         isGenerated = true;
 
@@ -220,6 +243,128 @@ public class HeightMapGenerator : MonoBehaviour
             for (int x = 0; x < width; x++)
                 for (int z = 0; z < depth; z++)
                     heightMap[x, z] = tmp[x, z];
+        }
+    }
+
+    /// <summary>
+    /// Нормирует карту в [0,1] перед шейпингом, чтобы степенные/террасные преобразования
+    /// работали предсказуемо независимо от maxHeight. Линейная операция: при выключенном
+    /// шейпинге итог совпадает со старым поведением (финальный RenormalizeHeights всё растянет).
+    /// </summary>
+    private void NormalizeInPlace01()
+    {
+        if (heightMap == null) return;
+
+        float min = float.MaxValue, max = float.MinValue;
+        for (int x = 0; x < width; x++)
+            for (int z = 0; z < depth; z++)
+            {
+                float h = heightMap[x, z];
+                if (h < min) min = h;
+                if (h > max) max = h;
+            }
+
+        float range = max - min;
+        if (range < 1e-6f) return;
+
+        for (int x = 0; x < width; x++)
+            for (int z = 0; z < depth; z++)
+                heightMap[x, z] = (heightMap[x, z] - min) / range;
+    }
+
+    /// <summary>
+    /// Прижимает низины к плоскому дну степенной кривой h^p (p растёт с shallowFlatten).
+    /// Низкие значения сбиваются к 0 (мелкое плоское дно — будущая мелкая вода),
+    /// высокие расходятся (острова получают рельеф). Работает в нормированном [0,1].
+    /// </summary>
+    private void ApplyShallowFlatten()
+    {
+        if (shallowFlatten <= 0f || heightMap == null) return;
+
+        float p = Mathf.Lerp(1f, 3f, Mathf.Clamp01(shallowFlatten));
+        for (int x = 0; x < width; x++)
+            for (int z = 0; z < depth; z++)
+                heightMap[x, z] = Mathf.Pow(Mathf.Clamp01(heightMap[x, z]), p);
+    }
+
+    /// <summary>
+    /// Квантует высоты в terraceLevels уровней — плоские уступы вместо плавных склонов.
+    /// На блочном меше границы уровней превращаются в резкие вертикальные обрывы (карст).
+    /// Идёт ПОСЛЕ сглаживания, поэтому уступы остаются резкими. Работает в [0,1].
+    /// </summary>
+    private void ApplyTerracing()
+    {
+        if (terraceLevels <= 0 || heightMap == null) return;
+
+        for (int x = 0; x < width; x++)
+            for (int z = 0; z < depth; z++)
+            {
+                float h = Mathf.Clamp01(heightMap[x, z]);
+                heightMap[x, z] = Mathf.Round(h * terraceLevels) / terraceLevels;
+            }
+    }
+
+    /// <summary>
+    /// Пробивает omutCount глубоких воронок в низинах (центры — только в нижних клетках,
+    /// с отступом от краёв и разнесённые между собой). Глубина = omutDepth * maxHeight.
+    /// Вызывается последним: ни сглаживание, ни террасы, ни RenormalizeHeights их не трогают,
+    /// поэтому стенки остаются резкими, а дно — глубоко под уровнем воды.
+    /// </summary>
+    private void CarveOmuts()
+    {
+        if (omutCount <= 0 || heightMap == null) return;
+
+        int margin = OmutRadius + 1;
+        if (width <= 2 * margin || depth <= 2 * margin) return;
+
+        // Порог низин: центры омутов только там, где низко (≈ нижние 40% диапазона).
+        float min = float.MaxValue, max = float.MinValue;
+        for (int x = 0; x < width; x++)
+            for (int z = 0; z < depth; z++)
+            {
+                float h = heightMap[x, z];
+                if (h < min) min = h;
+                if (h > max) max = h;
+            }
+        float thr = min + 0.4f * (max - min);
+
+        var rng = new System.Random(seed);
+        float depthUnits = omutDepth * maxHeight;
+
+        var placed = new System.Collections.Generic.List<Vector2Int>();
+        int attempts = 0, maxAttempts = omutCount * 40;
+        int minSep = OmutRadius * 3;
+
+        while (placed.Count < omutCount && attempts < maxAttempts)
+        {
+            attempts++;
+            int cx = margin + rng.Next(width - 2 * margin);
+            int cz = margin + rng.Next(depth - 2 * margin);
+
+            if (heightMap[cx, cz] > thr) continue;   // только низины
+
+            bool tooClose = false;
+            foreach (var pcenter in placed)
+                if ((pcenter.x - cx) * (pcenter.x - cx) + (pcenter.y - cz) * (pcenter.y - cz) < minSep * minSep)
+                { tooClose = true; break; }
+            if (tooClose) continue;
+
+            placed.Add(new Vector2Int(cx, cz));
+
+            // Воронка: полная глубина во внутренней половине, плавный спад на внешнем кольце → резкие стенки.
+            for (int ox = -OmutRadius; ox <= OmutRadius; ox++)
+                for (int oz = -OmutRadius; oz <= OmutRadius; oz++)
+                {
+                    int nx = cx + ox, nz = cz + oz;
+                    if (nx < 0 || nx >= width || nz < 0 || nz >= depth) continue;
+
+                    float dist = Mathf.Sqrt(ox * ox + oz * oz);
+                    if (dist > OmutRadius) continue;
+
+                    float t = dist / OmutRadius;                       // 0 в центре … 1 на краю
+                    float fall = 1f - Mathf.SmoothStep(0f, 1f, Mathf.Clamp01((t - 0.5f) / 0.5f));
+                    heightMap[nx, nz] -= depthUnits * fall;
+                }
         }
     }
 

@@ -408,8 +408,12 @@ public class TerrainZoneSystem : MonoBehaviour
         waterPlaneGO.name = "WaterPlane";
         waterPlaneGO.transform.SetParent(transform);
 
+        // Плоскость чуть выше waterLevel: убирает z-fighting с плоским дном на уровне воды
+        // (после террасинга много клеток ровно на waterLevel) и даёт мелкой воде небольшую глубину.
+        float lift = heightSource.maxHeight * 0.02f;
+
         // Примитив Plane = 10x10 юнитов, нормаль вверх. Масштабируем под карту.
-        waterPlaneGO.transform.position = new Vector3(0f, waterLevel, 0f);
+        waterPlaneGO.transform.position = new Vector3(0f, waterLevel + lift, 0f);
         waterPlaneGO.transform.localScale = new Vector3(sizeX / 10f, 1f, sizeZ / 10f);
 
         // Коллайдер воде не нужен — мешает рейкастам и движению.
