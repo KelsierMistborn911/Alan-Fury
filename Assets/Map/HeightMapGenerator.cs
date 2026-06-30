@@ -44,6 +44,10 @@ public class HeightMapGenerator : MonoBehaviour
     [Tooltip("Глубина омута как доля maxHeight. Радиус воронки фиксированный (~3 клетки).")]
     public float omutDepth = 0.6f;
 
+    [Range(0f, 1f)]
+    [Tooltip("Доля карты под водой. Линия воды садится в зазор между террасами и якорится на y=0: земля выше 0, дно ниже. Заменяет waterPercent.")]
+    public float seaLevel = 0.4f;
+
     [Header("Сид")]
     public bool randomSeed = true;
     public int seed;
@@ -86,7 +90,7 @@ public class HeightMapGenerator : MonoBehaviour
         ApplyShallowFlatten();  // прижимаем низины к плоскому дну (мелкая вода + острова)
         SmoothHeightMap();      // сглаживает базу/берега; террасы и омуты идут ПОСЛЕ, поэтому остаются резкими
         ApplyTerracing();       // режем на уровни-террасы → резкие края/обрывы
-        RenormalizeHeights();   // растягиваем в [0, maxHeight]
+        AnchorToSeaLevel();     // линию воды — в зазор между террасами и на y=0 (земля >0, дно <0), масштаб на maxHeight
         CarveOmuts();           // пробиваем глубокие омуты последними — их не трогают ни сглаживание, ни террасы
 
         isGenerated = true;
@@ -305,6 +309,39 @@ public class HeightMapGenerator : MonoBehaviour
     }
 
     /// <summary>
+    /// Заякоривает рельеф относительно линии воды на y=0.
+    /// Берёт террасированную карту [0,1] и сдвигает её так, чтобы линия воды попала
+    /// РОВНО в зазор между уровнями террас — на 0 не стоит ни одна верхушка клетки,
+    /// поэтому плоскость воды на 0 не даёт z-fighting ни на одном сиде.
+    /// seaLevel задаёт, сколько уровней уходит под воду. После сдвига масштабирует на maxHeight:
+    /// земля > 0, мелкое дно ≈ −полступени террасы (реальная глубина «по колено»), глубже — ниже.
+    /// Заменяет RenormalizeHeights в пайплайне (тот остаётся в файле, но больше не вызывается).
+    /// </summary>
+    private void AnchorToSeaLevel()
+    {
+        if (heightMap == null) return;
+
+        float cut01;
+        if (terraceLevels > 0)
+        {
+            // Режем по половинному зазору между уровнями: линия воды посередине между
+            // соседними террасами, поэтому 0 никогда не совпадёт с верхушкой клетки.
+            int seaCut = Mathf.Clamp(Mathf.RoundToInt(Mathf.Clamp01(seaLevel) * terraceLevels), 0, terraceLevels);
+            cut01 = (seaCut - 0.5f) / terraceLevels;
+        }
+        else
+        {
+            // Без террас зазоров нет — просто сдвигаем на долю seaLevel
+            // (на непрерывных высотах совпадение с плоскостью маловероятно, z-fighting не возникает).
+            cut01 = Mathf.Clamp01(seaLevel);
+        }
+
+        for (int x = 0; x < width; x++)
+            for (int z = 0; z < depth; z++)
+                heightMap[x, z] = (heightMap[x, z] - cut01) * maxHeight;
+    }
+
+    /// <summary>
     /// Пробивает omutCount глубоких воронок в низинах (центры — только в нижних клетках,
     /// с отступом от краёв и разнесённые между собой). Глубина = omutDepth * maxHeight.
     /// Вызывается последним: ни сглаживание, ни террасы, ни RenormalizeHeights их не трогают,
@@ -487,3 +524,4 @@ public class HeightMapGenerator : MonoBehaviour
     }
 #endif
 }
+    
