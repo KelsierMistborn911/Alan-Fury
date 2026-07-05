@@ -1,5 +1,5 @@
 using UnityEngine;
-public class PlayerResources : MonoBehaviour
+public class PlayerResources : MonoBehaviour, IDamageable
 {
     [Header("Здоровье")]
     public float maxHealth = 100f;
@@ -83,6 +83,12 @@ public class PlayerResources : MonoBehaviour
             CurrentHealth = 0;
             onDeath?.Invoke();
         }
+    }
+
+    public void ApplyKnockback(Vector3 force)
+    {
+        // Заглушка: урон проходит через TakeDamage.
+        // Отброс подключим к PlayerMovement3D позже — как договаривались.
     }
 
     public void Heal(float amount)

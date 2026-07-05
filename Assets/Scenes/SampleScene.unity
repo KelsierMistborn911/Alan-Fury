@@ -219,36 +219,36 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   walk:
-    speed: 5
+    speed: 4
     acceleration: 25
     deceleration: 30
     stepDistance: 0.8
     stepDuration: 0.4
     stepFrequency: 2
   run:
-    speed: 10
+    speed: 7
     acceleration: 18
     deceleration: 14
     stepDistance: 1.5
     stepDuration: 0.2
     stepFrequency: 3
   sprint:
-    speed: 15
+    speed: 12
     acceleration: 12
     deceleration: 6
     stepDistance: 2
     stepDuration: 0.15
     stepFrequency: 4
-  dodgeSpeed: 6
-  dodgeDuration: 0.25
-  dodgeCooldown: 0.6
-  rollSpeed: 9
+  dodgeSpeed: 9
+  dodgeDuration: 0.4
+  dodgeCooldown: 0.1
+  rollSpeed: 15
   rollDuration: 0.4
-  rollCooldown: 1.2
+  rollCooldown: 1
   vaultLayers:
     serializedVersion: 2
     m_Bits: 128
-  vaultMaxHeight: 2
+  vaultMaxHeight: 3
   vaultCheckDistance: 0.8
   vaultDuration: 0.45
   vaultForwardSpeed: 7
@@ -279,7 +279,7 @@ CharacterController:
   m_Height: 2
   m_Radius: 0.5
   m_SlopeLimit: 45
-  m_StepOffset: 0.3
+  m_StepOffset: 1.5
   m_SkinWidth: 0.08
   m_MinMoveDistance: 0.001
   m_Center: {x: 0, y: 0, z: 0}
@@ -1209,7 +1209,7 @@ GameObject:
   - component: {fileID: 1224455448}
   - component: {fileID: 1224455449}
   - component: {fileID: 1224455450}
-  m_Layer: 0
+  m_Layer: 9
   m_Name: Alfa
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -1316,7 +1316,7 @@ Transform:
   m_GameObject: {fileID: 1224455443}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 15.2, y: 5, z: -212.5}
+  m_LocalPosition: {x: 42.6, y: 5, z: -286.7}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
@@ -1365,8 +1365,8 @@ MonoBehaviour:
   locomotion: {fileID: 1224455444}
   pathfinder: {fileID: 1950520783}
   spookRadius: 18
-  stalkMin: 21
-  stalkMax: 35
+  stalkMin: 25
+  stalkMax: 50
   fleeUntilDistance: 50
   rearAngle: 90
   coverTag: FogPatch
@@ -1487,6 +1487,11 @@ PrefabInstance:
         type: 3}
       propertyPath: m_Name
       value: VAUK
+      objectReference: {fileID: 0}
+    - target: {fileID: 919132149155446097, guid: 0be3360d1aa2ca04880b03e0d21c146d,
+        type: 3}
+      propertyPath: m_Layer
+      value: 9
       objectReference: {fileID: 0}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
@@ -1692,7 +1697,7 @@ MonoBehaviour:
     count: 400
     minHeight: 0
     maxHeight: 5
-    randomRotation: 0
+    randomRotation: 1
     minScale: 2
     maxScale: 2
     alignToSurface: 0
@@ -1817,23 +1822,36 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 9126e7d74644ee7479bea464b72418ca, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  width: 60
-  depth: 200
-  noiseScale: 0.5
-  maxHeight: 4
-  ridgeStrength: 0.5
+  width: 100
+  depth: 300
   chunkedBuilder: {fileID: 1950520777}
-  seamlessBuilder: {fileID: 0}
-  smoothPasses: 2
-  shallowFlatten: 0.6
-  terraceLevels: 6
-  omutCount: 4
-  omutDepth: 0.6
-  seaLevel: 0.4
-  randomSeed: 1
-  seed: 53692
-  useJobs: 1
-  jobsMinCells: 10000
+  randomSeed: 0
+  seed: 4958
+  plainRange: {x: -4, y: 3}
+  plainNoiseScale: 1
+  landFraction: 0.4
+  hillDensity: 0.5
+  hillMinSeparation: 0.4
+  edgeMargin: 0.1
+  maxHeight: 8
+  hillMinHeightFrac: 0.3
+  hillSizeRange: {x: 0.08, y: 0.2}
+  ridgeDirection: 90
+  ridgeDirectionSpread: 25
+  ridgeElongation: 2
+  pitDensity: 0.4
+  pitRange: {x: -6, y: -10}
+  pitSizeRange: {x: 0.05, y: 0.12}
+  pitClearance: 0.15
+  pitLowlandThreshold: 0
+  corridorHalfWidth: 3
+  corridorHeight: 0.5
+  warpStrength: 0
+  warpScale: 0.05
+  smoothPasses: 5
+  terraceStep: 0.2
+  maxSmoothStep: 3
+  minClusterCells: 5
 --- !u!4 &1950520772
 Transform:
   m_ObjectHideFlags: 0
@@ -1865,8 +1883,8 @@ MonoBehaviour:
   terrainBuilder: {fileID: 1950520776}
   chunkedBuilder: {fileID: 1950520777}
   zones: []
-  waterPercent: 0.15
-  waterPatchScale: 8
+  waterPercent: 0.6
+  waterPatchScale: 0.5
   showWaterInGame: 1
   waterMaterial: {fileID: 0}
   waterPlaneColor: {r: 0.24377, g: 0.6226415, b: 0.4151403, a: 0.55}
@@ -2048,6 +2066,63 @@ MonoBehaviour:
   waterCostMultiplier: 4
   nearestSearchRadius: 32
   drawGizmos: 1
+--- !u!1 &1984545281
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1984545283}
+  - component: {fileID: 1984545282}
+  m_Layer: 0
+  m_Name: Pack Manager
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &1984545282
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1984545281}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 14561d8bf4f52914ca4b7ad0315f71b4, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  player: {fileID: 0}
+  playerTag: Player
+  wolfPrefab: {fileID: 4950279192017619235, guid: 7b2931f4ea9cc004886b33bd49d434ad,
+    type: 3}
+  spawnCount: 8
+  spawnRadius: 12
+  spawnCenter: {fileID: 1224455447}
+  howlDelay: 2
+  alphaTransform: {fileID: 1224455447}
+  spawnArcHalfAngle: 40
+  maxAttackers: 3
+  roleUpdateInterval: 0.5
+  frontTokenHold: 1.25
+--- !u!4 &1984545283
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1984545281}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: -24.202028, y: -37.77281, z: 78.1753}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!4 &2057484379 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: -8679921383154817045, guid: 0be3360d1aa2ca04880b03e0d21c146d,
@@ -2082,3 +2157,4 @@ SceneRoots:
   - {fileID: 1950520772}
   - {fileID: 81622707}
   - {fileID: 1224455447}
+  - {fileID: 1984545283}
