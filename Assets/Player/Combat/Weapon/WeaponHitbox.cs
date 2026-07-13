@@ -24,6 +24,7 @@ public class WeaponHitbox : MonoBehaviour
     private Dictionary<GameObject, float> lastHitTime = new Dictionary<GameObject, float>();
 
     public SwordAttackVisual visual;
+    public System.Action onHit;
 
     void Awake()
     {
@@ -109,6 +110,9 @@ public class WeaponHitbox : MonoBehaviour
                 damageable.ApplyKnockback(knockback * stagger);
 
                 lastHitTime[col.gameObject] = Time.time;
+
+                // Вызов события onHit
+                onHit?.Invoke();
             }
         }
     }

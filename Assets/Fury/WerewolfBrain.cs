@@ -1,44 +1,44 @@
-using UnityEngine;
+п»їusing UnityEngine;
 
 /// <summary>
-/// Мозг альфа-оборотня (фаза слежки).
-/// Кружит вокруг игрока по окружности на дистанции, держа радиус,
-/// и отступает наружу, когда игрок смотрит на него или подходит близко.
-/// На игрока смотрит только в покое; в движении — по ходу.
+/// пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ-пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ (пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ).
+/// пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ, пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ,
+/// пїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ, пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅ пїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ.
+/// пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅ; пїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅ пїЅпїЅ пїЅпїЅпїЅпїЅ.
 ///
-/// Логика «что делать»: восприятие в WerewolfPerception,
-/// движение/походка в WerewolfLocomotion.
+/// пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ: пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅ WerewolfPerception,
+/// пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ/пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅ WerewolfLocomotion.
 /// </summary>
 [RequireComponent(typeof(WerewolfPerception))]
 [RequireComponent(typeof(WerewolfLocomotion))]
 public class WerewolfBrain : MonoBehaviour
 {
-    [Header("Компоненты (автоподхват, если пусто)")]
+    [Header("пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ (пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ, пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ)")]
     public WerewolfPerception perception;
     public WerewolfLocomotion locomotion;
 
-    [Header("Дистанции (м)")]
+    [Header("пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ (пїЅ)")]
     public float preferredDistance = 18f;
     public float minDistance = 10f;
     public float noticeRange = 30f;
 
-    [Header("Скорости (м/с)")]
-    [Tooltip("Спокойное кружение — держи ниже boundSpeedThreshold, чтобы шёл шагами.")]
+    [Header("пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ (пїЅ/пїЅ)")]
+    [Tooltip("пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ boundSpeedThreshold, пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ.")]
     public float circleSpeed = 4f;
-    [Tooltip("Отступление — держи выше boundSpeedThreshold, чтобы переходил на скачки.")]
+    [Tooltip("пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ boundSpeedThreshold, пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ.")]
     public float fleeSpeed = 10f;
 
-    [Header("Кружение")]
-    [Tooltip("На сколько проворачивается вокруг игрока за одну перебежку (град).")]
+    [Header("пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ")]
+    [Tooltip("пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ (пїЅпїЅпїЅпїЅ).")]
     public float orbitStepAngle = 60f;
-    [Tooltip("Шанс сменить направление обхода на остановке (0..1).")]
+    [Tooltip("пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ (0..1).")]
     [Range(0f, 1f)] public float reverseChance = 0.25f;
 
-    [Header("Отступление")]
-    [Tooltip("Во сколько раз дальше preferredDistance отбегает при угрозе.")]
+    [Header("пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ")]
+    [Tooltip("пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ preferredDistance пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ.")]
     public float retreatDistanceFactor = 1.3f;
 
-    [Header("Тайминги")]
+    [Header("пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ")]
     public float holdInterval = 2f;
     public float holdJitter = 1f;
 
@@ -65,13 +65,13 @@ public class WerewolfBrain : MonoBehaviour
         float dt = Time.deltaTime;
         float dist = perception.DistanceToPlayer;
 
-        bool threatened = dist < minDistance
-                       || (perception.PlayerLookingAtMe && dist < noticeRange);
+        // РћС‚РєСЂС‹С‚РѕРµ РѕРєСЂСѓР¶РµРЅРёРµ: РЅР° РІР·РіР»СЏРґ РёРіСЂРѕРєР° РЅРµ СЂРµР°РіРёСЂСѓРµРј, РѕС‚СЃС‚СѓРїР°РµРј С‚РѕР»СЊРєРѕ РѕС‚ СЃР±Р»РёР¶РµРЅРёСЏ.
+        bool threatened = dist < minDistance;
 
         switch (_state)
         {
             case State.Hold:
-                locomotion.FaceTowards(perception.PlayerPos, dt); // в покое смотрит на игрока
+                locomotion.FaceTowards(perception.PlayerPos, dt); // пїЅ пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ
                 if (threatened) { EnterRetreat(); break; }
 
                 _holdTimer -= dt;
@@ -81,20 +81,20 @@ public class WerewolfBrain : MonoBehaviour
             case State.Circle:
                 if (threatened) { EnterRetreat(); break; }
                 bool arrived = locomotion.MoveTo(_target, circleSpeed, dt);
-                locomotion.FaceTowards(_target, dt);              // смотрит по ходу
+                locomotion.FaceTowards(_target, dt);              // пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅ
                 if (arrived) EnterHold();
                 break;
 
             case State.Retreat:
                 bool reached = locomotion.MoveTo(_target, fleeSpeed, dt);
-                locomotion.FaceTowards(_target, dt);              // смотрит куда бежит
+                locomotion.FaceTowards(_target, dt);              // пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ
                 if (!threatened) { EnterHold(); break; }
                 if (reached) _target = ComputeRetreatPoint();
                 break;
         }
     }
 
-    // ============ Переходы ============
+    // ============ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ ============
 
     private void EnterHold()
     {
@@ -109,11 +109,11 @@ public class WerewolfBrain : MonoBehaviour
     private void ResetHoldTimer()
         => _holdTimer = holdInterval + Random.Range(-holdJitter, holdJitter);
 
-    // ============ Выбор точек ============
+    // ============ пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ ============
 
-    // Следующая точка на окружности: проворот вокруг игрока на orbitStepAngle.
-    // Всегда на радиусе preferredDistance — путь касательный, мимо игрока не идёт,
-    // и радиус сам подтягивается, если сбился.
+    // пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ: пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅ orbitStepAngle.
+    // пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ preferredDistance пїЅ пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ, пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅ,
+    // пїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ, пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ.
     private Vector3 ComputeOrbitPoint()
     {
         Vector3 p = perception.PlayerPos;
@@ -123,7 +123,7 @@ public class WerewolfBrain : MonoBehaviour
         return p + dir * preferredDistance;
     }
 
-    // Отступление строго от игрока наружу (не пересекая его), с лёгким разбросом.
+    // пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ (пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅ), пїЅ пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ.
     private Vector3 ComputeRetreatPoint()
     {
         Vector3 p = perception.PlayerPos;

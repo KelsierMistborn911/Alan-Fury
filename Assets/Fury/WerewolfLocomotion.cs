@@ -71,6 +71,10 @@ public class WerewolfLocomotion : MonoBehaviour
     public LayerMask groundLayers = ~0;
     public float groundProbeHeight = 50f;
 
+    [Header("Анимация")]
+    [Tooltip("Аниматор волка (опционально — пока нет, оставь пустым, ошибок не будет). Параметры: Run (bool), Speed (float), триггеры Leap/Jump/Vault.")]
+    public Animator animator;
+
     private CharacterController _cc;
     private Vector3 _horizVel;
     private float _vertVel;
@@ -127,6 +131,7 @@ public class WerewolfLocomotion : MonoBehaviour
         _vertVel = vUp;
         _leaping = true;
         _step.Cancel();
+        if (animator != null) animator.SetTrigger("Leap");
     }
 
     /// <summary>Вертикальный прыжок на месте.</summary>
@@ -134,6 +139,7 @@ public class WerewolfLocomotion : MonoBehaviour
     {
         if (!_cc.isGrounded || _leaping || _vaulting) return;
         _vertVel = Mathf.Sqrt(2f * -gravity * height);
+        if (animator != null) animator.SetTrigger("Jump");
     }
 
     public void FaceTowards(Vector3 worldPoint, float dt)
@@ -214,6 +220,14 @@ public class WerewolfLocomotion : MonoBehaviour
         Vector3 horiz = (_horizVel + stepVec) * dt; horiz.y = 0f;
         if (boundary != null && boundary.IsReady) horiz = boundary.Constrain(pos, horiz);
         _cc.Move(horiz + Vector3.up * (_vertVel * dt));
+
+        // --- Анимация бега ---
+        if (animator != null)
+        {
+            float animSpd = _horizVel.magnitude;
+            animator.SetBool("Run", !_leaping && animSpd > 0.1f);
+            animator.SetFloat("Speed", animSpd); // для blend-tree trot↔gallop
+        }
     }
 
     // =================== vault (перелаз рельефа) ===================
@@ -252,6 +266,7 @@ public class WerewolfLocomotion : MonoBehaviour
         _vaultDir = dir;
         _vertVel = 0f;
         _step.Cancel();
+        if (animator != null) animator.SetTrigger("Vault");
     }
 
     private void TickVault(float dt)

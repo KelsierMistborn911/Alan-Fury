@@ -55,6 +55,12 @@ public class PlayerMovement3D : MonoBehaviour
     public float rollDuration = 0.4f;
     public float rollCooldown = 1.2f;
 
+    [Header("Вичфаер-телепорт")]
+    [Tooltip("Ссылка на WitchLight. Пока он горит (E), Space телепортирует вместо переката. Пусто → ищется на игроке/детях.")]
+    public WitchLight witchLight;
+    [Tooltip("Дальность мгновенного рывка (м). Упирается в стены и границу карты.")]
+    public float teleportDistance = 5f;
+
     [Header("Паркур (перепрыгивание)")]
     [Tooltip("Слой препятствий, через которые можно переваливаться (объекты ObjectPlacer).")]
     public LayerMask vaultLayers;
@@ -113,6 +119,7 @@ public class PlayerMovement3D : MonoBehaviour
         _currentGait = walk;
 
         if (boundary == null) boundary = GetComponent<MapBoundary>();
+        if (witchLight == null) witchLight = GetComponentInChildren<WitchLight>();
     }
 
     void Update()
@@ -167,7 +174,10 @@ public class PlayerMovement3D : MonoBehaviour
             && Time.time - _lastRollTime > rollCooldown
             && _maneuverDir.magnitude > 0.1f)
         {
-            StartManeuver(rollSpeed, rollDuration, ref _isRolling, ref _lastRollTime);
+            if (witchLight != null && witchLight.IsOn)
+                Teleport();
+            else
+                StartManeuver(rollSpeed, rollDuration, ref _isRolling, ref _lastRollTime);
         }
 
         if (!_isDodging && !_isRolling) return;
@@ -191,6 +201,15 @@ public class PlayerMovement3D : MonoBehaviour
         _maneuverSpeed = speed;
         _velocity = _maneuverDir * speed;
         _step.Cancel();
+    }
+
+    // Мгновенный рывок вместо переката, пока горит вичфаер.
+    // Кулдаун общий с перекатом (_lastRollTime / rollCooldown).
+    void Teleport()
+    {
+        _lastRollTime = Time.time;
+        _step.Cancel();
+        MoveHorizontal(_maneuverDir * teleportDistance);
     }
 
     // ──────────────────────────────────────────────

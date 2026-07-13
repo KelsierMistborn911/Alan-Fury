@@ -134,54 +134,16 @@ public class TerrainZoneSystem : MonoBehaviour
     private void BuildTileMap(int w, int d)
     {
         tileMap = new TileType[w, d];
+
+        // Вода = всё, что ниже линии воды (y=0). Рельеф заякорен в HeightMapGenerator так,
+        // что земля строго выше 0, а дно — ниже. waterPercent/waterPatchScale больше не
+        // участвуют (долю под водой задаёт seaLevel в HeightMapGenerator).
         for (int x = 0; x < w; x++)
             for (int z = 0; z < d; z++)
-                tileMap[x, z] = TileType.Ground;
+                tileMap[x, z] = heightSource.GetHeight(x, z) < 0f ? TileType.Water : TileType.Ground;
 
-        int n = w * d;
-        int targetCount = Mathf.Clamp(Mathf.RoundToInt(n * waterPercent), 0, n);
-        if (targetCount <= 0)
-        {
-            waterLevel = float.MinValue;
-            return;
-        }
-
-        // 1) Пул кандидатов — самые низкие клетки, с запасом (~x3), чтобы вода садилась в низины.
-        float[] sorted = new float[n];
-        int si = 0;
-        for (int x = 0; x < w; x++)
-            for (int z = 0; z < d; z++)
-                sorted[si++] = heightSource.GetHeight(x, z);
-        System.Array.Sort(sorted);
-
-        float capFrac = Mathf.Clamp01(waterPercent * 3f);
-        int capIdx = Mathf.Clamp(Mathf.FloorToInt(n * capFrac), 0, n - 1);
-        float heightCap = sorted[capIdx];
-
-        // 2) Среди кандидатов выбираем клетки с самым высоким шумом → связные пятна.
-        const float noiseOffset = 0.37f;
-        float scale = Mathf.Max(0.0001f, waterPatchScale);
-
-        var candidates = new List<(int x, int z, float noise)>();
-        for (int x = 0; x < w; x++)
-            for (int z = 0; z < d; z++)
-                if (heightSource.GetHeight(x, z) <= heightCap)
-                    candidates.Add((x, z, Mathf.PerlinNoise(x / scale + noiseOffset, z / scale + noiseOffset)));
-
-        candidates.Sort((a, b) => b.noise.CompareTo(a.noise));
-
-        int take = Mathf.Min(targetCount, candidates.Count);
-        float maxWaterH = float.MinValue;
-        for (int i = 0; i < take; i++)
-        {
-            var c = candidates[i];
-            tileMap[c.x, c.z] = TileType.Water;
-            float h = heightSource.GetHeight(c.x, c.z);
-            if (h > maxWaterH) maxWaterH = h;
-        }
-
-        // Уровень плоскости воды — по самой высокой водной клетке, чтобы накрыть все пятна.
-        waterLevel = take > 0 ? maxWaterH : heightCap;
+        // Плоскость воды стоит на 0.
+        waterLevel = 0f;
     }
 
     private void SetupDefaultZones()
@@ -408,8 +370,10 @@ public class TerrainZoneSystem : MonoBehaviour
         waterPlaneGO.name = "WaterPlane";
         waterPlaneGO.transform.SetParent(transform);
 
-        // Примитив Plane = 10x10 юнитов, нормаль вверх. Масштабируем под карту.
-        waterPlaneGO.transform.position = new Vector3(0f, waterLevel, 0f);
+        // Вода жёстко на y=0. Рельеф заякорен (AnchorToSeaLevel) так, что линия воды
+        // попадает в зазор между уровнями террас — на 0 нет верхов клеток, совпадать не с чем,
+        // z-fighting исключён на любом сиде. Земля > 0, дно < 0.
+        waterPlaneGO.transform.position = new Vector3(0f, 0f, 0f);
         waterPlaneGO.transform.localScale = new Vector3(sizeX / 10f, 1f, sizeZ / 10f);
 
         // Коллайдер воде не нужен — мешает рейкастам и движению.
