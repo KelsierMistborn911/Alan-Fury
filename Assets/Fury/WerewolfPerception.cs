@@ -4,10 +4,7 @@
 /// Восприятие оборотнем игрока. Считает дистанцию, направление,
 /// смотрит ли игрок на оборотня и есть ли между ними прямая видимость.
 /// Только данные — решения принимают мозг/сталкер.
-///
-/// Укрытия: прячут ТОЛЬКО физические преграды (деревья, рельеф) через рейкаст
-/// HasLineOfSightToPlayer по sightBlockers. Туман больше НЕ делает невидимым —
-/// в нём оборотень просто держится (AlphaStalker.BiasToCover).
+/// Учитывает укрытия (туман): данные об укрытиях живут в AlphaStalker.
 /// </summary>
 public class WerewolfPerception : MonoBehaviour
 {
@@ -20,7 +17,7 @@ public class WerewolfPerception : MonoBehaviour
     [Range(0f, 180f)] public float viewAngleThreshold = 35f;
 
     [Header("Линия видимости")]
-    [Tooltip("Слои, перекрывающие обзор: рельеф, деревья и прочие физические преграды.")]
+    [Tooltip("Слои, перекрывающие обзор: рельеф, объекты-укрытия.")]
     public LayerMask sightBlockers = ~0;
     [Tooltip("Точка «глаз» оборотня относительно его origin.")]
     public Vector3 selfEyeOffset = new Vector3(0f, 1.0f, 0f);
@@ -32,6 +29,14 @@ public class WerewolfPerception : MonoBehaviour
     public bool HasPlayer => player != null;
     public Vector3 PlayerPos => player.position;
 
+    /// <summary>Игрок заряжает удар (замах).</summary>
+    public bool PlayerIsCharging => _playerCombat != null && _playerCombat.IsCharging;
+    /// <summary>Игрок в активной фазе удара.</summary>
+    public bool PlayerIsAttacking => _playerCombat != null && _playerCombat.IsAttacking;
+
+    private AlphaStalker _stalker; // источник данных об укрытиях (может отсутствовать)
+    private CombatController3D _playerCombat;
+
     void Awake()
     {
         if (player == null && !string.IsNullOrEmpty(playerTag))
@@ -39,6 +44,8 @@ public class WerewolfPerception : MonoBehaviour
             var go = GameObject.FindGameObjectWithTag(playerTag);
             if (go != null) player = go.transform;
         }
+        if (player != null) _playerCombat = player.GetComponent<CombatController3D>();
+        _stalker = GetComponent<AlphaStalker>();
     }
 
     /// <summary>Горизонтальная дистанция до игрока (Y игнорируется).</summary>
@@ -92,7 +99,7 @@ public class WerewolfPerception : MonoBehaviour
         }
     }
 
-    /// <summary>Чистая ли прямая видимость между оборотнем и игроком (нет физических преград).</summary>
+    /// <summary>Чистая ли прямая видимость между оборотнем и игроком (нет укрытий).</summary>
     public bool HasLineOfSightToPlayer()
     {
         if (player == null) return false;
@@ -107,14 +114,18 @@ public class WerewolfPerception : MonoBehaviour
 
     /// <summary>
     /// Видит ли игрок оборотня прямо сейчас:
-    /// в пределах дальности + в конусе обзора + не перекрыт деревом/рельефом.
-    /// Туман на видимость НЕ влияет.
+    /// в пределах дальности + в конусе обзора + не в укрытии + не перекрыт рельефом.
     /// </summary>
     public bool IsSeenByPlayer()
     {
         if (player == null) return false;
         if (DistanceToPlayer > playerSightRange) return false;
         if (!PlayerLookingAtMe) return false;
+
+        // Оборотень в тумане, а игрок снаружи → не виден.
+        if (_stalker != null && _stalker.IsConcealedAt(transform.position, player.position))
+            return false;
+
         return HasLineOfSightToPlayer();
     }
 }

@@ -1,19 +1,16 @@
-﻿// HeightMapGenerator v2.5
-// Модель: сначала поверхность (равнина + холмы над ней), потом ямы в низинах.
-// Порядок: FillPlain -> PlaceHills -> pits -> corridor -> террасы -> кластер>=5.
+﻿// HeightMapGenerator
+// Модель: равнина + холмы над ней. Ямы убраны из генерации (пока).
+// Порядок: FillPlain (Перлин 2 октавы) -> PlaceHills -> corridor -> террасы -> кластер -> сглаживание границ.
 // Всё в мировых единицах, без Normalize/Anchor. См. HeightMapGenerator_Инструкция_v2.1.md
 using UnityEngine;
 using System.Collections.Generic;
 
 /// <summary>
-/// Генерирует карту высот болота: равнина -5..+2, холмы +3..+10 над ней (сухие),
-/// глубокие ямы -6..-10 в низинах вдали от холмов, приподнятый коридор под дорогу.
+/// Генерирует карту высот болота: равнина -5..+2, холмы +3..+10 над ней (сухие).
 /// Единственный источник высот для остальных скриптов.
 /// </summary>
 public class HeightMapGenerator : MonoBehaviour
 {
-    public const string Version = "2.5";
-
     [Header("Размеры карты")]
     public int width = 60;
     public int depth = 60;
@@ -26,8 +23,9 @@ public class HeightMapGenerator : MonoBehaviour
     public int seed;
 
     [Header("Равнина (базовая поверхность = проходимое болото)")]
-    public Vector2 plainRange = new Vector2(-5f, 2f); // x = макс. глубина лужиц (низ), y = макс. высота сухих кочек (верх)
-    public float plainNoiseScale = 0.04f;
+    public float puddleDepth = 4f;            // глубина луж под водой, юниты
+    public float moundHeight = 3f;            // высота сухих кочек над водой, юниты
+    public float spotSize = 60f;              // характерный размер пятна суши/воды, мировые юниты
     [Range(0f, 1f)] public float landFraction = 0.4f;  // доля болота над водой (y=0): суша ↔ мелководье; самокалибруется под сид
 
     [Header("Холмы (над равниной, сухие)")]
@@ -37,32 +35,21 @@ public class HeightMapGenerator : MonoBehaviour
     public float maxHeight = 10f;             // верх диапазона высот холмов (главная величина)
     [Range(0f, 1f)] public float hillMinHeightFrac = 0.3f; // нижний холм = доля от maxHeight
     public Vector2 hillSizeRange = new Vector2(0.08f, 0.2f); // доля короткой стороны; размер растёт с высотой
+    public float hillSizeScale = 1f;          // множитель размера холма поверх hillSizeRange — регулирует средний размер отдельно от высоты/частоты
 
     [Header("Направление гряды (ориентация холмов)")]
     public float ridgeDirection = 0f;         // градусы, 0 = вдоль X
     public float ridgeDirectionSpread = 25f;  // разброс угла на холм, градусы
     public float ridgeElongation = 2f;        // вытянутость эллипса вдоль направления (1 = круглый)
 
-    [Header("Глубокие ямы (в низинах, вдали от холмов)")]
-    [Range(0f, 1f)] public float pitDensity = 0.4f;
-    public Vector2 pitRange = new Vector2(-6f, -10f);
-    public Vector2 pitSizeRange = new Vector2(0.05f, 0.12f); // доля короткой стороны
-    public float pitClearance = 0.15f;        // мин. дистанция ямы до холма, доля короткой стороны
-    public float pitLowlandThreshold = 0f;    // копаем только там, где поверхность ниже этого уровня
-
     [Header("Коридор под дорогу")]
     public float corridorHalfWidth = 3f;      // полуширина коридора, мировые единицы
     public float corridorHeight = 0.5f;       // мин. высота коридора (держим над водой)
 
-    [Header("Форма (domain-warp)")]
-    public float warpStrength = 0f;
-    public float warpScale = 0.05f;
-
     [Header("Террасы и очистка")]
-    public int smoothPasses = 2;              // сглаживание поверхности перед квантованием (шире площадки одной высоты)
     public float terraceStep = 0.5f;
-    public int maxSmoothStep = 1;             // перепад с соседями в СТУПЕНЯХ <= этого — прилипает (мелкая рванина); больше = обрыв, не трогаем
     public int minClusterCells = 5;           // пятно одной высоты меньше этого числа — прилипает к соседу
+    public int boundarySmoothPasses = 2;      // проходы сглаживания границ уровней: клетка с 3+ соседями одного чужого уровня прилипает к нему (0 = выкл)
 
     // Публичные данные — доступ для всех скриптов
     public float[,] heightMap { get; private set; }
@@ -72,16 +59,13 @@ public class HeightMapGenerator : MonoBehaviour
     public System.Action onHeightMapReady;
     public System.Action<float[,]> onHeightMapGenerated;
 
-    // Число холмов от площади карты (тайлы^2), а не константой в инспекторе.
-    private const float TilesPerHillMin = 400f;
-    private const float TilesPerHillMax = 2200f;
+    // Число холмов от площади карты в МИРОВЫХ единицах (метры^2), не в тайлах —
+    // так плотность не скачет при смене tileSize. Константы пересчитаны из старых
+    // "тайловых" (400/2200) под tileSize=4, чтобы поведение при текущих настройках не изменилось.
+    private const float WorldAreaPerHillMin = 6400f;
+    private const float WorldAreaPerHillMax = 35200f;
     private const int AbsoluteMinHills = 3;
     private const int AbsoluteMaxHills = 40;
-
-    // Число ям — тоже от площади, свои константы (ям меньше, чем холмов).
-    private const float TilesPerPitMin = 900f;
-    private const float TilesPerPitMax = 4000f;
-    private const int AbsoluteMaxPits = 25;
 
     private struct Hill
     {
@@ -104,12 +88,10 @@ public class HeightMapGenerator : MonoBehaviour
         FillPlain(ts);
         var hills = PlaceHills(ts);
         BuildField(hills, ts);          // холмы поднимаются над равниной
-        CarvePits(hills, ts);           // ямы в низинах вдали от холмов
         BuildCorridor(hills, ts);       // приподнятый коридор под дорогу край-в-край
-        SmoothHeightMap();              // сглаживаем поверхность → шире площадки одной высоты
         ApplyTerraces();
-        FlattenMinorSteps();           // мелкие одноступенчатые переходы прилипают, крупные обрывы сохраняются
         CleanupSmallClusters();
+        SmoothLevelBoundaries();       // зубцы, одиночные выступы и вмятины на границах уровней прилипают к преобладающему соседу
 
         isGenerated = true;
         onHeightMapReady?.Invoke();
@@ -125,15 +107,16 @@ public class HeightMapGenerator : MonoBehaviour
     }
 
     /// <summary>
-    /// Заливает карту базовым болотом. Считает шум по всем клеткам, находит порог,
-    /// выше которого лежит ровно landFraction клеток (самокалибровка под сид), и мапит
-    /// относительно воды (y=0): выше порога → сухие кочки 0..plainRange.y,
-    /// ниже → мелководье/лужи plainRange.x..0. Так доля суши задаётся точно при любом сиде.
+    /// Заливает карту базовым болотом. Гладкий Перлин в 2 октавы (крупная форма + лёгкая деталь),
+    /// размер пятен задаёт spotSize в мировых юнитах. Порог-квантиль: выше него лежит ровно
+    /// landFraction клеток (точная доля суши при любом сиде). Выше порога → кочки 0..moundHeight,
+    /// ниже → мелководье/лужи -puddleDepth..0.
     /// </summary>
     private void FillPlain(float tileSize)
     {
         Vector3 origin = new Vector3(-width * tileSize / 2f, 0, -depth * tileSize / 2f);
         float seedOffset = seed * 0.13f;
+        float freq = 1f / Mathf.Max(1f, spotSize);
 
         // 1) шум по всем клеткам (копию складываем в массив для сортировки)
         float[,] noise = new float[width, depth];
@@ -144,27 +127,29 @@ public class HeightMapGenerator : MonoBehaviour
             {
                 float wx = origin.x + x * tileSize;
                 float wz = origin.z + z * tileSize;
-                float n = 1f - Mathf.Abs(2f * Mathf.PerlinNoise(wx * plainNoiseScale + seedOffset, wz * plainNoiseScale + seedOffset) - 1f); // ridged: гребни там, где Перлин ≈ 0.5 → тонкие извилистые полосы суши
+                float n = Mathf.PerlinNoise(wx * freq + seedOffset, wz * freq + seedOffset)
+                        + 0.35f * Mathf.PerlinNoise(wx * freq * 2f + seedOffset + 50f, wz * freq * 2f + seedOffset + 50f);
                 noise[x, z] = n;
                 sorted[idx++] = n;
             }
 
-        // 2) порог: доля клеток выше него ≈ landFraction (квантиль вместо линейного мапа — Перлин кучкуется у 0.5)
+        // 2) порог: доля клеток выше него ≈ landFraction (квантиль вместо линейного мапа — Перлин кучкуется у середины)
         System.Array.Sort(sorted);
         float lf = Mathf.Clamp01(landFraction);
         int qi = Mathf.Clamp(Mathf.RoundToInt((1f - lf) * (sorted.Length - 1)), 0, sorted.Length - 1);
         float threshold = sorted[qi];
 
         // 3) ремап относительно воды (y=0)
-        float upSpan = Mathf.Max(1e-4f, 1f - threshold);   // защита от деления на ~0 при landFraction→0/1
-        float downSpan = Mathf.Max(1e-4f, threshold);
+        float top = sorted[sorted.Length - 1];
+        float upSpan = Mathf.Max(1e-4f, top - threshold);  // защита от деления на ~0 при landFraction→0/1
+        float downSpan = Mathf.Max(1e-4f, threshold - sorted[0]);
         for (int x = 0; x < width; x++)
             for (int z = 0; z < depth; z++)
             {
                 float n = noise[x, z];
                 heightMap[x, z] = (n >= threshold)
-                    ? Mathf.Lerp(0f, plainRange.y, (n - threshold) / upSpan)   // сухие кочки над водой
-                    : Mathf.Lerp(plainRange.x, 0f, n / downSpan);              // мелководье → лужи под водой
+                    ? Mathf.Lerp(0f, moundHeight, (n - threshold) / upSpan)          // сухие кочки над водой
+                    : Mathf.Lerp(-puddleDepth, 0f, (n - sorted[0]) / downSpan);      // мелководье → лужи под водой
             }
     }
 
@@ -176,9 +161,9 @@ public class HeightMapGenerator : MonoBehaviour
     {
         var list = new List<Hill>();
 
-        float areaTiles = width * depth;
-        int minN = Mathf.Clamp(Mathf.RoundToInt(areaTiles / TilesPerHillMax), AbsoluteMinHills, AbsoluteMaxHills);
-        int maxN = Mathf.Clamp(Mathf.RoundToInt(areaTiles / TilesPerHillMin), minN, AbsoluteMaxHills);
+        float areaWorld = width * depth * tileSize * tileSize;
+        int minN = Mathf.Clamp(Mathf.RoundToInt(areaWorld / WorldAreaPerHillMax), AbsoluteMinHills, AbsoluteMaxHills);
+        int maxN = Mathf.Clamp(Mathf.RoundToInt(areaWorld / WorldAreaPerHillMin), minN, AbsoluteMaxHills);
         int count = Mathf.RoundToInt(Mathf.Lerp(minN, maxN, Mathf.Clamp01(hillDensity)));
 
         var rng = new System.Random(seed);
@@ -204,7 +189,7 @@ public class HeightMapGenerator : MonoBehaviour
 
             float hFrac = (float)rng.NextDouble();
             float hgt = Mathf.Lerp(maxHeight * hillMinHeightFrac, maxHeight, hFrac);
-            float sz = Mathf.Lerp(hillSizeRange.x, hillSizeRange.y, hFrac) * shorter; // размер от высоты
+            float sz = Mathf.Lerp(hillSizeRange.x, hillSizeRange.y, hFrac) * shorter * hillSizeScale; // размер от высоты + общий множитель
             float ang = dirRad + ((float)rng.NextDouble() - 0.5f) * 2f * ridgeDirectionSpread * Mathf.Deg2Rad;
 
             list.Add(new Hill { pos = p, height = hgt, size = sz, angle = ang });
@@ -216,19 +201,16 @@ public class HeightMapGenerator : MonoBehaviour
     /// <summary>
     /// Ядро. Холмы поднимаются над равниной: для клетки берём max(равнина, вклад холмов).
     /// Вклад холма — эллиптический спад (вытянут вдоль angle через ridgeElongation).
-    /// Позиция искажается domain-warp'ом → берега не круглые.
     /// </summary>
     private void BuildField(List<Hill> hills, float tileSize)
     {
         Vector3 origin = new Vector3(-width * tileSize / 2f, 0, -depth * tileSize / 2f);
-        float seedOffset = seed * 0.1f;
 
         for (int x = 0; x < width; x++)
             for (int z = 0; z < depth; z++)
             {
                 float plain = heightMap[x, z];
-                Vector2 pos = new Vector2(origin.x + x * tileSize, origin.z + z * tileSize);
-                Vector2 sp = SampleWarp(pos, seedOffset);
+                Vector2 sp = new Vector2(origin.x + x * tileSize, origin.z + z * tileSize);
 
                 float h = plain;
                 foreach (var hill in hills)
@@ -238,69 +220,6 @@ public class HeightMapGenerator : MonoBehaviour
                     float fall = 1f - Mathf.SmoothStep(0f, 1f, t);
                     float contrib = Mathf.Lerp(plain, hill.height, fall);
                     if (contrib > h) h = contrib;
-                }
-                heightMap[x, z] = h;
-            }
-    }
-
-    /// <summary>
-    /// Копает глубокие ямы pitRange в низинах, удалённых от холмов (вариант «расстояние до вершин»).
-    /// Центры выбираются там, где поверхность ниже порога и далеко от холмов; спад через min.
-    /// </summary>
-    private void CarvePits(List<Hill> hills, float tileSize)
-    {
-        float areaTiles = width * depth;
-        int maxN = Mathf.Clamp(Mathf.RoundToInt(areaTiles / TilesPerPitMin), 0, AbsoluteMaxPits);
-        int minN = Mathf.Clamp(Mathf.RoundToInt(areaTiles / TilesPerPitMax), 0, maxN);
-        int count = Mathf.RoundToInt(Mathf.Lerp(minN, maxN, Mathf.Clamp01(pitDensity)));
-        if (count <= 0) return;
-
-        var rng = new System.Random(seed + 777);
-        Vector3 origin = new Vector3(-width * tileSize / 2f, 0, -depth * tileSize / 2f);
-        float mapX = width * tileSize, mapZ = depth * tileSize;
-        float shorter = Mathf.Min(width, depth) * tileSize;
-        float clearance = pitClearance * shorter;
-        float margin = edgeMargin * shorter;
-
-        var pits = new List<(Vector2 pos, float depth, float size)>();
-        int attempts = 0, maxAttempts = count * 80;
-        while (pits.Count < count && attempts < maxAttempts)
-        {
-            attempts++;
-            float wx = origin.x + margin + (float)rng.NextDouble() * (mapX - 2f * margin);
-            float wz = origin.z + margin + (float)rng.NextDouble() * (mapZ - 2f * margin);
-            var p = new Vector2(wx, wz);
-
-            // только низины
-            int cx = Mathf.Clamp(Mathf.RoundToInt((wx - origin.x) / tileSize), 0, width - 1);
-            int cz = Mathf.Clamp(Mathf.RoundToInt((wz - origin.z) / tileSize), 0, depth - 1);
-            if (heightMap[cx, cz] > pitLowlandThreshold) continue;
-
-            // далеко от холмов
-            bool nearHill = false;
-            foreach (var hill in hills)
-                if (Vector2.Distance(p, hill.pos) < clearance) { nearHill = true; break; }
-            if (nearHill) continue;
-
-            float depthVal = Mathf.Lerp(pitRange.x, pitRange.y, (float)rng.NextDouble());
-            float sz = Mathf.Lerp(pitSizeRange.x, pitSizeRange.y, (float)rng.NextDouble()) * shorter;
-            pits.Add((p, depthVal, sz));
-        }
-
-        float seedOffset = seed * 0.1f;
-        for (int x = 0; x < width; x++)
-            for (int z = 0; z < depth; z++)
-            {
-                Vector2 pos = new Vector2(origin.x + x * tileSize, origin.z + z * tileSize);
-                Vector2 sp = SampleWarp(pos, seedOffset);
-                float h = heightMap[x, z];
-                foreach (var pit in pits)
-                {
-                    float d = Vector2.Distance(sp, pit.pos);
-                    float t = Mathf.Clamp01(d / pit.size);
-                    float fall = 1f - Mathf.SmoothStep(0f, 1f, t);
-                    float dug = Mathf.Lerp(h, pit.depth, fall);
-                    if (dug < h) h = dug;
                 }
                 heightMap[x, z] = h;
             }
@@ -360,38 +279,6 @@ public class HeightMapGenerator : MonoBehaviour
             }
     }
 
-    /// <summary>
-    /// Box-blur 3×3 за smoothPasses проходов по готовой карте высот (до квантования).
-    /// Давит мелкую рябь равнины и смягчает склоны холмов → площадки одной высоты крупнее,
-    /// меньше тонких контурных ступеней после террас.
-    /// </summary>
-    private void SmoothHeightMap()
-    {
-        if (smoothPasses <= 0 || heightMap == null) return;
-
-        float[,] tmp = new float[width, depth];
-        for (int p = 0; p < smoothPasses; p++)
-        {
-            for (int x = 0; x < width; x++)
-                for (int z = 0; z < depth; z++)
-                {
-                    float sum = 0f; int cnt = 0;
-                    for (int ox = -1; ox <= 1; ox++)
-                        for (int oz = -1; oz <= 1; oz++)
-                        {
-                            int nx = x + ox, nz = z + oz;
-                            if (nx < 0 || nx >= width || nz < 0 || nz >= depth) continue;
-                            sum += heightMap[nx, nz]; cnt++;
-                        }
-                    tmp[x, z] = sum / cnt;
-                }
-
-            for (int x = 0; x < width; x++)
-                for (int z = 0; z < depth; z++)
-                    heightMap[x, z] = tmp[x, z];
-        }
-    }
-
     /// <summary>Квантует высоты одним шагом terraceStep → плоские уступы, обрывы рисует меш.</summary>
     private void ApplyTerraces()
     {
@@ -399,46 +286,6 @@ public class HeightMapGenerator : MonoBehaviour
         for (int x = 0; x < width; x++)
             for (int z = 0; z < depth; z++)
                 heightMap[x, z] = (Mathf.Floor(heightMap[x, z] / terraceStep) + 0.1f) * terraceStep;
-    }
-
-    /// <summary>
-    /// Прибирает мелкую рванину после квантования: клетка, отличающаяся от самого частого
-    /// соседнего уровня не больше чем на maxSmoothStep ступеней, прилипает к нему.
-    /// Крупные перепады (обрыв/берег, больше порога) сохраняются. 4-связность, один проход в копию.
-    /// </summary>
-    private void FlattenMinorSteps()
-    {
-        if (terraceStep <= 0f || maxSmoothStep <= 0 || heightMap == null) return;
-
-        float tol = maxSmoothStep * terraceStep + 1e-4f;
-        var src = (float[,])heightMap.Clone();
-        int[] dx = { 1, -1, 0, 0 };
-        int[] dz = { 0, 0, 1, -1 };
-
-        for (int x = 0; x < width; x++)
-            for (int z = 0; z < depth; z++)
-            {
-                float cur = src[x, z];
-
-                var freq = new Dictionary<float, int>();
-                for (int k = 0; k < 4; k++)
-                {
-                    int nx = x + dx[k], nz = z + dz[k];
-                    if (nx < 0 || nx >= width || nz < 0 || nz >= depth) continue;
-                    float nv = src[nx, nz];
-                    if (Mathf.Approximately(nv, cur)) continue;
-                    if (Mathf.Abs(nv - cur) > tol) continue; // крупный перепад = обрыв, пропускаем
-                    freq.TryGetValue(nv, out int f);
-                    freq[nv] = f + 1;
-                }
-                if (freq.Count == 0) continue;
-
-                float best = cur; int bestF = 0;
-                foreach (var kv in freq)
-                    if (kv.Value > bestF) { bestF = kv.Value; best = kv.Key; }
-
-                if (bestF >= 2) heightMap[x, z] = best; // прилипаем, только если сосед преобладает (не одиночный)
-            }
     }
 
     /// <summary>
@@ -505,6 +352,44 @@ public class HeightMapGenerator : MonoBehaviour
             }
     }
 
+    /// <summary>
+    /// Сглаживает границы уровней после всех чисток: клетка, у которой 3+ из 4 соседей
+    /// стоят на одном и том же чужом уровне, прилипает к нему. Убирает зубцы, одиночные
+    /// выступы и вмятины на береговых линиях и обрывах, не меняя форму самих пятен.
+    /// Каждый проход читает копию — результат не зависит от порядка обхода.
+    /// </summary>
+    private void SmoothLevelBoundaries()
+    {
+        if (boundarySmoothPasses <= 0 || heightMap == null) return;
+
+        int[] dx = { 1, -1, 0, 0 };
+        int[] dz = { 0, 0, 1, -1 };
+
+        for (int p = 0; p < boundarySmoothPasses; p++)
+        {
+            var src = (float[,])heightMap.Clone();
+            for (int x = 0; x < width; x++)
+                for (int z = 0; z < depth; z++)
+                {
+                    float cur = src[x, z];
+
+                    var freq = new Dictionary<float, int>();
+                    for (int k = 0; k < 4; k++)
+                    {
+                        int nx = x + dx[k], nz = z + dz[k];
+                        if (nx < 0 || nx >= width || nz < 0 || nz >= depth) continue;
+                        float nv = src[nx, nz];
+                        if (Mathf.Approximately(nv, cur)) continue;
+                        freq.TryGetValue(nv, out int f);
+                        freq[nv] = f + 1;
+                    }
+
+                    foreach (var kv in freq)
+                        if (kv.Value >= 3) { heightMap[x, z] = kv.Key; break; }
+                }
+        }
+    }
+
     /// <summary>Расстояние от точки до эллипса холма (вытянут вдоль hill.angle на ridgeElongation).</summary>
     private float EllipticalDistance(Vector2 p, Hill hill)
     {
@@ -529,15 +414,6 @@ public class HeightMapGenerator : MonoBehaviour
             if (d < best) best = d;
         }
         return best;
-    }
-
-    /// <summary>Сдвигает позицию клетки по шуму → линии равной высоты кривые, а не круги.</summary>
-    private Vector2 SampleWarp(Vector2 pos, float seedOffset)
-    {
-        if (warpStrength <= 0f) return pos;
-        float wx = (Mathf.PerlinNoise(pos.x * warpScale + seedOffset, pos.y * warpScale + seedOffset) - 0.5f) * 2f * warpStrength;
-        float wz = (Mathf.PerlinNoise(pos.x * warpScale + seedOffset + 100f, pos.y * warpScale + seedOffset + 100f) - 0.5f) * 2f * warpStrength;
-        return new Vector2(pos.x + wx, pos.y + wz);
     }
 
     private static float ClosestPointT(Vector2 p, Vector2 a, Vector2 b)
@@ -611,7 +487,7 @@ public class HeightMapGenerator : MonoBehaviour
             {
                 float h = heightMap[x, z];
                 Vector3 pos = mapOrigin + new Vector3(x * tileSize, h, z * tileSize);
-                float t = Mathf.InverseLerp(pitRange.x, maxHeight, h);
+                float t = Mathf.InverseLerp(-puddleDepth, maxHeight, h);
                 Gizmos.color = Color.Lerp(Color.blue, Color.red, t);
                 Gizmos.DrawWireCube(pos, Vector3.one * 0.2f);
             }

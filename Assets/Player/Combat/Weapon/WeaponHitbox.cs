@@ -6,6 +6,14 @@ public class WeaponHitbox : MonoBehaviour
     [Header("Угол конуса атаки (градусы в одну сторону)")]
     public float coneHalfAngle = 60f; // итого 120° дуга
 
+    [Header("Отладка")]
+    [Tooltip("Показывать зону удара в игре плоским красным прямоугольником на время атаки.")]
+    public bool debugShowZone = true;
+    [Tooltip("Высота зоны над точкой origin (м), чтобы не тонула в земле.")]
+    public float debugZoneY = 0.05f;
+
+    private Transform _debugZone; // создаётся лениво
+
     private bool isActive;
     private float timer;
     private float duration;
@@ -34,7 +42,7 @@ public class WeaponHitbox : MonoBehaviour
 
     public void Activate(float range, float radius, float height, Vector3 offset,
                          Vector3 direction, float damage, float stagger,
-                         LayerMask layers, float duration, float tickInterval, float chargePercent = 0f)
+                         LayerMask layers, float duration, float tickInterval, float chargePercent = 0f, int comboIndex = 0)
     {
         this.range = range;
         this.radius = radius;
@@ -53,7 +61,9 @@ public class WeaponHitbox : MonoBehaviour
         lastHitTime.Clear();
 
         if (visual != null)
-            visual.ShowArc(direction, offset, duration, chargePercent);
+            visual.ShowArc(direction, offset, duration, chargePercent, comboIndex);
+
+        if (debugShowZone) ShowDebugZone();
     }
 
     void Update()
@@ -65,6 +75,7 @@ public class WeaponHitbox : MonoBehaviour
         {
             isActive = false;
             if (visual != null) visual.HideArc();
+            if (_debugZone != null) _debugZone.gameObject.SetActive(false);
             return;
         }
 
@@ -73,6 +84,17 @@ public class WeaponHitbox : MonoBehaviour
             DetectHits();
             nextTickTime = Time.time + tickInterval;
         }
+
+        // Зона едет вместе с существом (прыжок, рывок) — как и реальный OverlapBox.
+        if (debugShowZone && _debugZone != null && _debugZone.gameObject.activeSelf)
+            PlaceDebugZone();
+    }
+
+    private void PlaceDebugZone()
+    {
+        Vector3 origin = transform.position + offset;
+        _debugZone.position = origin + Vector3.up * debugZoneY;
+        _debugZone.rotation = Quaternion.LookRotation(direction);
     }
 
     void DetectHits()
@@ -111,10 +133,67 @@ public class WeaponHitbox : MonoBehaviour
 
                 lastHitTime[col.gameObject] = Time.time;
 
-                // Вызов события onHit
                 onHit?.Invoke();
             }
         }
+    }
+
+    // ===================== Дебаг-зона в игре =====================
+
+    // Плоская красная зона удара (вид сверху): расширяется от существа вперёд.
+    // Форма = горизонтальное пересечение коробки OverlapBox и конуса coneHalfAngle.
+    private void ShowDebugZone()
+    {
+        if (_debugZone == null)
+        {
+            var go = new GameObject("DebugHitZone");
+            go.AddComponent<MeshFilter>().mesh = new Mesh();
+            var mr = go.AddComponent<MeshRenderer>();
+            var mat = new Material(Shader.Find("Universal Render Pipeline/Unlit"));
+            mat.SetFloat("_Surface", 1f); // Transparent
+            mat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+            mat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+            mat.SetInt("_ZWrite", 0);
+            mat.renderQueue = 3000;
+            mat.color = new Color(1f, 0f, 0f, 0.35f);
+            mr.material = mat;
+            _debugZone = go.transform;
+        }
+
+        BuildZoneMesh(_debugZone.GetComponent<MeshFilter>().mesh);
+        PlaceDebugZone();
+        _debugZone.localScale = Vector3.one;
+        _debugZone.gameObject.SetActive(true);
+    }
+
+    // Трапеция-веер в локальных координатах: вершина в нуле, вперёд по +Z.
+    // Полуширина на дистанции d = min(tan(coneHalfAngle)·d, radius).
+    private void BuildZoneMesh(Mesh mesh)
+    {
+        const int segments = 8;
+        float tanA = Mathf.Tan(Mathf.Clamp(coneHalfAngle, 1f, 89f) * Mathf.Deg2Rad);
+
+        var verts = new Vector3[(segments + 1) * 2];
+        var tris = new int[segments * 6];
+
+        for (int i = 0; i <= segments; i++)
+        {
+            float d = range * i / segments;
+            float hw = Mathf.Min(tanA * d, radius);
+            verts[i * 2] = new Vector3(-hw, 0f, d);
+            verts[i * 2 + 1] = new Vector3(hw, 0f, d);
+        }
+        for (int i = 0; i < segments; i++)
+        {
+            int v = i * 2, t = i * 6;
+            tris[t] = v; tris[t + 1] = v + 2; tris[t + 2] = v + 1;
+            tris[t + 3] = v + 1; tris[t + 4] = v + 2; tris[t + 5] = v + 3;
+        }
+
+        mesh.Clear();
+        mesh.vertices = verts;
+        mesh.triangles = tris;
+        mesh.RecalculateNormals();
     }
 
     // Gizmos — видны всегда в режиме выбора объекта, помогают настроить хитбокс

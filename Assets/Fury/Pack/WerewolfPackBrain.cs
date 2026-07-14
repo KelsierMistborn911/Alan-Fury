@@ -18,8 +18,8 @@ using UnityEngine;
 ///   • Retreat — сразу после удара отход + шаг в сторону мимо ближайшего соседа.
 ///   • Orbit — кружит на дистанции; aggression сокращает время до нового захода.
 ///
-/// Отложено: прыжок для рельефа, уход с воды −4, «вцепиться/тащить» у второго, уворот/опаска замаха.
-/// Здоровье волка — позже (IsAlive пока всегда true).
+/// Отложено: прыжок для рельефа, уход с воды −4, «вцепиться/тащить» у второго.
+/// Реализовано: здоровье (WerewolfStats, IDamageable), опаска замаха и отскок от удара игрока.
 /// </summary>
 [RequireComponent(typeof(WerewolfPerception))]
 [RequireComponent(typeof(WerewolfLocomotion))]
@@ -58,8 +58,8 @@ public class WerewolfPackBrain : MonoBehaviour, WerewolfPackManager.IPackAgent
     [Range(0f, 1f)] public float frontLineBias = 0.6f;
 
     [Header("Агрессия от событий")]
-    [Tooltip("Сколько агрессии (0..1) добавляется за одно своё попадание.")]
-    public float aggroPerHit = 0.05f;
+    [Tooltip("Сколько агрессии (0..100) добавляется за одно своё попадание.")]
+    public float aggroPerHit = 5f;
 
     [Header("Путь")]
     [Tooltip("Как часто перестраивать путь (сек). Реже = дешевле, но менее отзывчиво.")]
@@ -74,6 +74,36 @@ public class WerewolfPackBrain : MonoBehaviour, WerewolfPackManager.IPackAgent
     public float disengageTime = 1.5f;
     [Tooltip("Угловая скорость облёта вокруг игрока (град/сек).")]
     public float orbitAngularSpeed = 45f;
+
+    [Header("Дистанция удержания по агрессии")]
+    [Tooltip("Радиус облёта при максимальной агрессии (м) — почти дистанция удара.")]
+    public float holdDistanceAggressive = 1.5f;
+    [Tooltip("Радиус облёта при нулевой агрессии (м) — безопасный манёвр.")]
+    public float holdDistanceCautious = 4.5f;
+    [Tooltip("Случайный разброс радиуса облёта (±м), чтобы не липнуть к окружности.")]
+    public float orbitRadiusJitter = 0.8f;
+    [Tooltip("Как часто менять разброс радиуса (сек).")]
+    public float jitterInterval = 0.7f;
+
+    [Header("Осторожность: удар после атаки игрока")]
+    [Tooltip("Ниже этой агрессии (0..1) волк не бьёт, пока игрок замахивается/атакует.")]
+    [Range(0f, 1f)] public float cautionThreshold = 0.5f;
+    [Tooltip("Окно после конца атаки игрока, когда осторожный волк охотно бьёт (сек).")]
+    public float opportunityWindow = 0.8f;
+
+    [Header("Реакция на игрока (опаска замаха / уворот)")]
+    [Tooltip("Ближе этой дистанции волк реагирует на замах/удар игрока (м).")]
+    public float playerThreatRange = 4f;
+    [Tooltip("Ближе этой дистанции уворот прыжком; дальше — отшагом (м).")]
+    public float leapDodgeRange = 2.5f;
+    [Tooltip("Импульс отшага вбок/назад без прыжка (м/с).")]
+    public float sidestepImpulse = 6f;
+    [Tooltip("Длина отскока-прыжка (м).")]
+    public float dodgeDistance = 2.5f;
+    [Tooltip("Высота дуги отскока.")]
+    public float dodgeArc = 0.6f;
+    [Tooltip("Пауза между отскоками (сек), чтобы волк не скакал без конца.")]
+    public float dodgeCooldown = 1.5f;
 
     [Header("Не бежать кучей (расталкивание от других волков)")]
     [Tooltip("Слой(и) других волков стаи — на нём ищутся соседи рядом. Назначь слой волка (0 = выключено).")]
@@ -100,11 +130,18 @@ public class WerewolfPackBrain : MonoBehaviour, WerewolfPackManager.IPackAgent
     private int _orbitDir = 1;
     private Vector3 _retreatSideDir;
 
+    // ---- реакция на удар игрока ----
+    private bool _playerWasAttacking;
+    private float _nextDodgeTime;
+    private float _opportunityUntil; // окно «игрок только что отмахал» для осторожных
+    private float _radiusJitter;     // текущий разброс радиуса облёта
+    private float _nextJitterTime;
+
     private WerewolfPackManager _manager;
 
     // ===================== IPackAgent =====================
     public Transform Transform => transform;
-    public bool IsAlive => true; // здоровье волка подключим позже
+    public bool IsAlive => stats == null || stats.IsAlive;
 
     public void SetRole(WerewolfPackManager.PackRole role, bool avoidFront)
     {
@@ -141,6 +178,7 @@ public class WerewolfPackBrain : MonoBehaviour, WerewolfPackManager.IPackAgent
             Debug.LogWarning("WerewolfPackBrain: не найден WerewolfStats — агрессия считается как 0.5.");
 
         if (combat != null) combat.OnHitLanded += HandleHitLanded;
+        if (stats != null) stats.OnDeath += HandleDeath;
 
         _manager = WerewolfPackManager.Instance;
         if (_manager != null)
@@ -160,6 +198,20 @@ public class WerewolfPackBrain : MonoBehaviour, WerewolfPackManager.IPackAgent
     {
         if (_manager != null) _manager.Unregister(this);
         if (combat != null) combat.OnHitLanded -= HandleHitLanded;
+        if (stats != null) stats.OnDeath -= HandleDeath;
+    }
+
+    // Смерть: гасим мозги и бой, тело остаётся лежать (заглушка — наклон набок).
+    // Локомоция остаётся включённой — она держит гравитацию и дотормаживает тело.
+    private void HandleDeath()
+    {
+        if (_manager != null) { _manager.Unregister(this); _manager = null; }
+        if (combat != null) combat.enabled = false;
+        if (surroundBrain != null) surroundBrain.enabled = false;
+        var stalker = GetComponent<AlphaStalker>();
+        if (stalker != null) stalker.enabled = false;
+        enabled = false;
+        transform.rotation = Quaternion.Euler(0f, transform.eulerAngles.y, 90f); // тело набок
     }
 
     // Свой удар попал → злее (растёт шанс продолжить/множественные атаки — через stats.aggression).
@@ -174,8 +226,18 @@ public class WerewolfPackBrain : MonoBehaviour, WerewolfPackManager.IPackAgent
         float dt = Time.deltaTime;
         if (!perception.HasPlayer) return;
 
+        // Детект начала/конца удара игрока (фронты перехода IsAttacking).
+        bool playerAttacking = perception.PlayerIsAttacking;
+        bool attackStarted = playerAttacking && !_playerWasAttacking;
+        bool attackEnded = !playerAttacking && _playerWasAttacking;
+        _playerWasAttacking = playerAttacking;
+        if (attackEnded) _opportunityUntil = Time.time + opportunityWindow;
+
         // Идёт атака — не двигаемся, ждём. Прыжок/замах ведёт WerewolfCombat/локомоция.
         if (combat.IsBusy) return;
+
+        // Вне своей атаки волк всегда пытается уйти от замаха или удара игрока.
+        if (attackStarted || perception.PlayerIsCharging) TryDodge();
 
         switch (_phase)
         {
@@ -203,8 +265,23 @@ public class WerewolfPackBrain : MonoBehaviour, WerewolfPackManager.IPackAgent
 
         locomotion.FaceTowards(perception.PlayerPos, dt);
 
-        bool mayAttack = _avoidFront || _hasToken;
-        if (mayAttack && TryAttackByDistance(dist)) { EnterRetreat(); return; }
+        // Опаска замаха: игрок заряжает удар, мы близко — пятимся, не атакуем.
+        if (perception.PlayerIsCharging && dist < playerThreatRange)
+        {
+            Vector3 away = perception.DirFromPlayerFlat;
+            Vector3 backTarget = perception.PlayerPos + away * (playerThreatRange + 1f) + SeparationOffset();
+            locomotion.MoveTo(backTarget, runSpeed, dt);
+            return;
+        }
+
+        // Осторожный не бьёт, пока игрок машет/заряжает — ждёт окно сразу после его удара.
+        bool playerBusy = perception.PlayerIsAttacking || perception.PlayerIsCharging;
+        bool opportunity = Time.time < _opportunityUntil;
+        if (!(playerBusy && Aggression < cautionThreshold && !opportunity))
+        {
+            bool mayAttack = _avoidFront || _hasToken;
+            if (mayAttack && TryAttackByDistance(dist)) { EnterRetreat(); return; }
+        }
 
         // Удар сейчас не вышел (нет токена/стамины/кулдаун или не достаём) — не стоим:
         // подрезаем по дуге к дистанции мили, маневрируя (удар выйдет "мимоходом").
@@ -223,6 +300,24 @@ public class WerewolfPackBrain : MonoBehaviour, WerewolfPackManager.IPackAgent
         if (dist <= meleeRange) return combat.TrySwipe();
         if (dist <= specialReach) return combat.TrySpecial();
         return combat.TryJump(); // между specialReach и jumpRange
+    }
+
+    // Уворот от замаха/удара игрока: вплотную — прыжок вбок/назад, чуть дальше — быстрый отшаг.
+    private void TryDodge()
+    {
+        float dist = perception.DistanceToPlayer;
+        if (Time.time < _nextDodgeTime) return;
+        if (dist > playerThreatRange) return;
+
+        _nextDodgeTime = Time.time + dodgeCooldown;
+        Vector3 away = perception.DirFromPlayerFlat;
+        Vector3 side = Vector3.Cross(Vector3.up, away) * (Random.value > 0.5f ? 1f : -1f);
+        Vector3 dir = (away + side * 0.7f).normalized;
+
+        if (dist <= leapDodgeRange)
+            locomotion.Leap(transform.position + dir * dodgeDistance, dodgeArc); // впритык — только прыжком
+        else
+            locomotion.AddImpulse(dir * sidestepImpulse); // есть запас — отшаг без прыжка
     }
 
     // ===================== Retreat: атаковал — отошёл, обходя соседа =====================
@@ -267,7 +362,7 @@ public class WerewolfPackBrain : MonoBehaviour, WerewolfPackManager.IPackAgent
 
     // ===================== Orbit: кружит перед новым заходом =====================
 
-    private float Aggression => stats != null ? stats.aggression : 0.5f;
+    private float Aggression => stats != null ? stats.Aggression01 : 0.5f;
 
     private void EnterOrbit()
     {
@@ -282,7 +377,15 @@ public class WerewolfPackBrain : MonoBehaviour, WerewolfPackManager.IPackAgent
         _phaseTimer -= dt;
 
         Vector3 toSelf = transform.position - perception.PlayerPos; toSelf.y = 0f;
-        float radius = toSelf.magnitude > 0.5f ? toSelf.magnitude : retreatDistance;
+
+        // Радиус зависит от агрессии: борзый жмётся к дистанции удара, пуганый маневрирует поодаль.
+        // Шум радиуса, чтобы волки не липли к идеальной окружности.
+        if (Time.time >= _nextJitterTime)
+        {
+            _nextJitterTime = Time.time + jitterInterval;
+            _radiusJitter = Random.Range(-orbitRadiusJitter, orbitRadiusJitter);
+        }
+        float radius = Mathf.Lerp(holdDistanceCautious, holdDistanceAggressive, Aggression) + _radiusJitter;
         Vector3 dir = toSelf.sqrMagnitude > 1e-4f ? toSelf.normalized : transform.forward;
         Vector3 rotated = Quaternion.AngleAxis(orbitAngularSpeed * _orbitDir * dt, Vector3.up) * dir;
 

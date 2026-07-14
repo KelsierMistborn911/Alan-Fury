@@ -144,6 +144,7 @@ GameObject:
   - component: {fileID: 81622713}
   - component: {fileID: 81622714}
   - component: {fileID: 81622715}
+  - component: {fileID: 81622716}
   m_Layer: 6
   m_Name: Player
   m_TagString: Player
@@ -166,11 +167,12 @@ MonoBehaviour:
   resources: {fileID: 81622704}
   loadout: {fileID: 81622703}
   hitbox: {fileID: 81622710}
-  animator: {fileID: 1728127724}
   targetLockRange: 15
   enemyLayers:
     serializedVersion: 2
-    m_Bits: 0
+    m_Bits: 512
+  animator: {fileID: 1532388038}
+  comboWindow: 1
 --- !u!114 &81622703
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -198,9 +200,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   maxHealth: 100
-  healthRegenPerSecond: 0
-  healthRegenDelay: 3
-  maxStamina: 100
+  healthRegenPerSecond: 50
+  healthRegenDelay: 1
+  maxStamina: 1000
   staminaRegenPerSecond: 25
   staminaRegenDelay: 0.5
   maxMana: 100
@@ -245,6 +247,8 @@ MonoBehaviour:
   rollSpeed: 15
   rollDuration: 0.4
   rollCooldown: 1
+  witchLight: {fileID: 0}
+  teleportDistance: 11
   vaultLayers:
     serializedVersion: 2
     m_Bits: 128
@@ -340,6 +344,7 @@ MonoBehaviour:
   arcColor: {r: 0.38679248, g: 0.04926131, b: 0.04926131, a: 0.6}
   arcRadius: 2
   arcHeight: 1.5
+  flyDistance: 0.7
   windupColor: {r: 1, g: 1, b: 0, a: 0.4}
 --- !u!114 &81622710
 MonoBehaviour:
@@ -354,6 +359,8 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   coneHalfAngle: 60
+  debugShowZone: 1
+  debugZoneY: 0.05
   visual: {fileID: 81622709}
 --- !u!120 &81622711
 LineRenderer:
@@ -600,6 +607,20 @@ MonoBehaviour:
   playerTag: Player
   fillImage: {fileID: 0}
   smoothSpeed: 6
+--- !u!114 &81622716
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 81622701}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9498b41f6d7c47c499592dcd4514a823, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  loadout: {fileID: 81622703}
+  slotCount: 20
 --- !u!1 &330585543
 GameObject:
   m_ObjectHideFlags: 0
@@ -955,6 +976,118 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &866895051
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 866895053}
+  - component: {fileID: 866895052}
+  m_Layer: 0
+  m_Name: Grass
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &866895052
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 866895051}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f868c31d5c7349649b6cb45d25fff8af, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  heightSource: {fileID: 1950520771}
+  terrainBuilder: {fileID: 1950520777}
+  player: {fileID: 81622707}
+  types:
+  - name: Grass 1
+    sprite: {fileID: 21300000, guid: fbc3daec7fd8de04b96309851b56f548, type: 3}
+    mesh3D: {fileID: 0}
+    material: {fileID: 2100000, guid: 1d495d0544828e74f8b40bf0b0d1fc85, type: 2}
+    noiseScale: 1
+    noiseThreshold: 0.5
+    density: 0.5
+    minPerCell: 1
+    maxPerCell: 4
+    minScale: 0.1
+    maxScale: 0.3
+    heightOffset: 0.5
+    castShadows: 1
+    collectible: 0
+    itemData: {fileID: 0}
+    itemCount: 1
+    pickupRadius: 1
+    mesh: {fileID: 0}
+    noiseOffset: {x: 0, y: 0}
+  - name: Grass 1
+    sprite: {fileID: 21300000, guid: 62174b88544d81541b5ab3a2c05f488c, type: 3}
+    mesh3D: {fileID: 0}
+    material: {fileID: 2100000, guid: 1d495d0544828e74f8b40bf0b0d1fc85, type: 2}
+    noiseScale: 0.05
+    noiseThreshold: 0.6
+    density: 0.6
+    minPerCell: 1
+    maxPerCell: 2
+    minScale: 0.1
+    maxScale: 0.3
+    heightOffset: 0.5
+    castShadows: 1
+    collectible: 1
+    itemData: {fileID: 0}
+    itemCount: 1
+    pickupRadius: 1
+    mesh: {fileID: 0}
+    noiseOffset: {x: 0, y: 0}
+  - name: Grass 1
+    sprite: {fileID: 21300000, guid: defdbfb1fde6fd6428720000f7aae17e, type: 3}
+    mesh3D: {fileID: 0}
+    material: {fileID: 2100000, guid: 1d495d0544828e74f8b40bf0b0d1fc85, type: 2}
+    noiseScale: 0.05
+    noiseThreshold: 0.2
+    density: 0.6
+    minPerCell: 1
+    maxPerCell: 4
+    minScale: 0.1
+    maxScale: 0.3
+    heightOffset: 0.5
+    castShadows: 1
+    collectible: 1
+    itemData: {fileID: 0}
+    itemCount: 1
+    pickupRadius: 1
+    mesh: {fileID: 0}
+    noiseOffset: {x: 0, y: 0}
+  waterLevel: 0.5
+  spriteEuler: {x: 0, y: 45, z: 0}
+  borderCells: 2
+  sectorSize: 16
+  drawRadius: 50
+  randomSeed: 1
+  seed: 42
+--- !u!4 &866895053
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 866895051}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1001 &913220890
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -1232,6 +1365,9 @@ MonoBehaviour:
   acceleration: 20
   deceleration: 25
   slowdownDistance: 2.5
+  sideSpeedMult: 0.6
+  backSpeedMult: 0.35
+  stepPulseWeight: 0.6
   trot:
     speed: 3.5
     acceleration: 0
@@ -1262,6 +1398,7 @@ MonoBehaviour:
     serializedVersion: 2
     m_Bits: 4294967295
   groundProbeHeight: 50
+  animator: {fileID: 0}
 --- !u!114 &1224455445
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -1317,7 +1454,7 @@ Transform:
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 42.6, y: 5, z: -286.7}
-  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_LocalScale: {x: 1.4, y: 1.4, z: 1.4}
   m_ConstrainProportionsScale: 0
   m_Children:
   - {fileID: 2057484379}
@@ -1502,18 +1639,67 @@ PrefabInstance:
       insertIndex: -1
       addedObject: {fileID: 2057484382}
   m_SourcePrefab: {fileID: 100100000, guid: 0be3360d1aa2ca04880b03e0d21c146d, type: 3}
+--- !u!95 &1532388038 stripped
+Animator:
+  m_CorrespondingSourceObject: {fileID: 5866666021909216657, guid: 0efce1f956de62447adbcf912596a6f2,
+    type: 3}
+  m_PrefabInstance: {fileID: 1106172132}
+  m_PrefabAsset: {fileID: 0}
 --- !u!4 &1728127723 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: -8679921383154817045, guid: a603d90d41a846a4fabc6adf374d5c41,
     type: 3}
   m_PrefabInstance: {fileID: 913220890}
   m_PrefabAsset: {fileID: 0}
---- !u!95 &1728127724 stripped
-Animator:
-  m_CorrespondingSourceObject: {fileID: 5866666021909216657, guid: a603d90d41a846a4fabc6adf374d5c41,
-    type: 3}
-  m_PrefabInstance: {fileID: 913220890}
+--- !u!1 &1745007968
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1745007970}
+  - component: {fileID: 1745007969}
+  m_Layer: 0
+  m_Name: Inventory
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &1745007969
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1745007968}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 4fc445d72d763754fac562c76f9cb36b, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  inventory: {fileID: 0}
+  toggleKey: 105
+  columns: 5
+  cellSize: 64
+  cellSpacing: 6
+--- !u!4 &1745007970
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1745007968}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 37.037426, y: 148.1, z: -479.81616}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1854385148
 GameObject:
   m_ObjectHideFlags: 0
@@ -1729,11 +1915,12 @@ MonoBehaviour:
   chunkedTerrainBuilder: {fileID: 1950520777}
   objectPlacer: {fileID: 1950520765}
   instancedObjectPlacer: {fileID: 0}
+  vegetationPlacer: {fileID: 866895052}
   zoneSystem: {fileID: 1950520773}
   roadGenerator: {fileID: 1950520782}
   fogCurtain: {fileID: 1950520781}
   fogPlacer: {fileID: 1950520780}
-  pathfinder: {fileID: 0}
+  pathfinder: {fileID: 1950520783}
   mapBoundary: {fileID: 0}
   generateOnStart: 1
   clearBeforeGenerate: 1
@@ -1827,8 +2014,9 @@ MonoBehaviour:
   chunkedBuilder: {fileID: 1950520777}
   randomSeed: 0
   seed: 4958
-  plainRange: {x: -4, y: 3}
-  plainNoiseScale: 1
+  puddleDepth: 4
+  moundHeight: 3
+  spotSize: 60
   landFraction: 0.4
   hillDensity: 0.5
   hillMinSeparation: 0.4
@@ -1836,22 +2024,15 @@ MonoBehaviour:
   maxHeight: 8
   hillMinHeightFrac: 0.3
   hillSizeRange: {x: 0.08, y: 0.2}
+  hillSizeScale: 1
   ridgeDirection: 90
   ridgeDirectionSpread: 25
   ridgeElongation: 2
-  pitDensity: 0.4
-  pitRange: {x: -6, y: -10}
-  pitSizeRange: {x: 0.05, y: 0.12}
-  pitClearance: 0.15
-  pitLowlandThreshold: 0
   corridorHalfWidth: 3
   corridorHeight: 0.5
-  warpStrength: 0
-  warpScale: 0.05
-  smoothPasses: 5
-  terraceStep: 0.2
-  maxSmoothStep: 3
+  terraceStep: 0.5
   minClusterCells: 5
+  boundarySmoothPasses: 2
 --- !u!4 &1950520772
 Transform:
   m_ObjectHideFlags: 0
@@ -1929,12 +2110,10 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   heightSource: {fileID: 1950520771}
   tileSize: 4
+  slopeThreshold: 0.5
   chunkSize: 10
-  addFoundation: 1
-  foundationDepth: 10
   lowColor: {r: 0.3, g: 0.3, b: 0.3, a: 1}
   highColor: {r: 0.9, g: 0.9, b: 0.9, a: 1}
-  foundationColor: {r: 0.2, g: 0.15, b: 0.1, a: 1}
   terrainMaterial: {fileID: 2100000, guid: b0fffd1b66a6e1945ab30e915af3cf53, type: 2}
 --- !u!114 &1950520779
 MonoBehaviour:
@@ -2107,7 +2286,7 @@ MonoBehaviour:
   spawnArcHalfAngle: 40
   maxAttackers: 3
   roleUpdateInterval: 0.5
-  frontTokenHold: 1.25
+  frontTokenHold: 3
 --- !u!4 &1984545283
 Transform:
   m_ObjectHideFlags: 0
@@ -2158,3 +2337,5 @@ SceneRoots:
   - {fileID: 81622707}
   - {fileID: 1224455447}
   - {fileID: 1984545283}
+  - {fileID: 1745007970}
+  - {fileID: 866895053}

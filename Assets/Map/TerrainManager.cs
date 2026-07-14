@@ -18,6 +18,7 @@ public class TerrainManager : MonoBehaviour
     [Header("Объекты — выберите один из двух")]
     public ObjectPlacer objectPlacer;                   // GameObject'ы, нужны коллайдеры
     public InstancedObjectPlacer instancedObjectPlacer; // GPU instancing, без коллайдеров, быстро
+    public SpriteVegetationPlacer vegetationPlacer;    // спрайтовая трава/кусты/грибы (может висеть на другом объекте — назначить вручную)
 
     [Header("Опциональные системы")]
     public TerrainZoneSystem zoneSystem;
@@ -124,6 +125,13 @@ public class TerrainManager : MonoBehaviour
             LogStep("Объекты", ref sw);
         }
 
+        // 4.2 Спрайтовая растительность
+        if (vegetationPlacer != null)
+        {
+            vegetationPlacer.PlaceAll();
+            LogStep("Растительность", ref sw);
+        }
+
         // 4.5 Сетка проходимости для AI (после деревьев — они стены) + пересчёт границы карты.
         if (pathfinder != null)
         {
@@ -160,6 +168,7 @@ public class TerrainManager : MonoBehaviour
         if (terrainBuilder != null) terrainBuilder.ClearTerrain();
         if (objectPlacer != null) objectPlacer.ClearOldObjects();
         if (instancedObjectPlacer != null) instancedObjectPlacer.ClearObjects();
+        if (vegetationPlacer != null) vegetationPlacer.ClearAll();
         if (heightGenerator != null) heightGenerator.Clear();
         if (zoneSystem != null) zoneSystem.ClearZones();
         if (roadGenerator != null) roadGenerator.ClearRoad();

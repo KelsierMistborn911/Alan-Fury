@@ -1,21 +1,22 @@
-using UnityEngine;
+п»їusing UnityEngine;
 public class PlayerResources : MonoBehaviour, IDamageable
 {
-    [Header("Здоровье")]
+    [Header("Р—РґРѕСЂРѕРІСЊРµ")]
+    public bool invincible = false;
     public float maxHealth = 100f;
     public float healthRegenPerSecond = 0f;
     public float healthRegenDelay = 3f;
-    [Header("Стамина")]
+    [Header("Р’С‹РЅРѕСЃР»РёРІРѕСЃС‚СЊ")]
     public float maxStamina = 100f;
     public float staminaRegenPerSecond = 25f;
     public float staminaRegenDelay = 0.5f;
 
-    [Header("Мана")]
+    [Header("РњР°РЅР°")]
     public float maxMana = 100f;
     public float manaRegenPerSecond = 15f;
     public float manaRegenDelay = 0.3f;
 
-    // Публичные свойства
+    // РўРµРєСѓС‰РёРµ Р·РЅР°С‡РµРЅРёСЏ
     public float CurrentHealth { get; private set; }
     public float CurrentStamina { get; private set; }
     public float CurrentMana { get; private set; }
@@ -28,12 +29,12 @@ public class PlayerResources : MonoBehaviour, IDamageable
     public bool HasMana(float amount) => CurrentMana >= amount;
     public bool IsAlive => CurrentHealth > 0;
 
-    // Таймеры регенерации
+    // РўР°Р№РјРµСЂС‹ РІРѕСЃСЃС‚Р°РЅРѕРІР»РµРЅРёСЏ
     private float healthRegenTimer;
     private float staminaRegenTimer;
     private float manaRegenTimer;
 
-    // События
+    // РЎРѕР±С‹С‚РёСЏ
     public System.Action<float> onHealthChanged;
     public System.Action<float> onStaminaChanged;
     public System.Action<float> onManaChanged;
@@ -53,7 +54,7 @@ public class PlayerResources : MonoBehaviour, IDamageable
         RegenMana();
     }
 
-    // ==================== ЗДОРОВЬЕ ====================
+    // ==================== Р—РґРѕСЂРѕРІСЊРµ ====================
 
     void RegenHealth()
     {
@@ -72,9 +73,10 @@ public class PlayerResources : MonoBehaviour, IDamageable
 
     public void TakeDamage(float amount)
     {
-        if (!IsAlive) return;
+        if (!IsAlive || invincible) return;
 
         CurrentHealth -= amount;
+        DamagePopup.Spawn(transform.position + Vector3.up * 2f, amount, Color.red);
         healthRegenTimer = healthRegenDelay;
         onHealthChanged?.Invoke(CurrentHealth);
 
@@ -85,11 +87,8 @@ public class PlayerResources : MonoBehaviour, IDamageable
         }
     }
 
-    public void ApplyKnockback(Vector3 force)
-    {
-        // Заглушка: урон проходит через TakeDamage.
-        // Отброс подключим к PlayerMovement3D позже — как договаривались.
-    }
+    // РўСЂРµР±СѓРµС‚СЃСЏ РёРЅС‚РµСЂС„РµР№СЃРѕРј IDamageable. РћС‚С‚Р°Р»РєРёРІР°РЅРёСЏ РёРіСЂРѕРєР° РЅРµС‚ вЂ” РјРµС‚РѕРґ РїСѓСЃС‚.
+    public void ApplyKnockback(Vector3 force) { }
 
     public void Heal(float amount)
     {
@@ -97,7 +96,7 @@ public class PlayerResources : MonoBehaviour, IDamageable
         onHealthChanged?.Invoke(CurrentHealth);
     }
 
-    // ==================== СТАМИНА ====================
+    // ==================== Р’С‹РЅРѕСЃР»РёРІРѕСЃС‚СЊ ====================
 
     void RegenStamina()
     {
@@ -126,7 +125,7 @@ public class PlayerResources : MonoBehaviour, IDamageable
         return false;
     }
 
-    // ==================== МАНА ====================
+    // ==================== РњР°РЅР° ====================
 
     void RegenMana()
     {

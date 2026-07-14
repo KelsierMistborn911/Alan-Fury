@@ -14,17 +14,18 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   type: 0
   weaponName: "\u041E\u0440\u0443\u0436\u0438\u0435"
-  icon: {fileID: 0}
+  icon: {fileID: 21300000, guid: 2d97c30e46a227d4a90e022f50a20a54, type: 3}
   damage: 15
   staggerForce: 5
-  attackRange: 2
-  attackRadius: 1
+  attackRange: 4
+  attackRadius: 3
   attackHeight: 1.5
   hitboxOffset: {x: 0, y: 0, z: 1}
   isRanged: 0
   useCharge: 0
   chargeDuration: 1
   minChargePercent: 0.3
+  maxHoldTime: 3
   projectilePrefab: {fileID: 0}
   projectileSpeed: 20
   projectileLifetime: 3
@@ -33,7 +34,8 @@ MonoBehaviour:
   windupDuration: 0.15
   attackDuration: 0.2
   cooldownDuration: 0.3
+  tickInterval: 0.1
   staminaCost: 15
   targetLayers:
     serializedVersion: 2
-    m_Bits: 0
+    m_Bits: 512

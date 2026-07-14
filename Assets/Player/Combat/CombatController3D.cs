@@ -7,12 +7,15 @@ public class CombatController3D : MonoBehaviour
     public PlayerLoadout loadout;
     public WeaponHitbox hitbox;
 
-    [Header("Анимация")]
-    public Animator animator;
-
     [Header("Захват цели")]
     public float targetLockRange = 15f;
     public LayerMask enemyLayers;
+
+    [Header("Комбо")]
+    [Tooltip("Аниматор игрока. Пусто — найдётся на объекте.")]
+    public Animator animator;
+    [Tooltip("Пауза между ударами, после которой серия сбрасывается (сек).")]
+    public float comboWindow = 1f;
 
     public bool IsWindingUp { get; private set; }
     public bool IsAttacking { get; private set; }
@@ -26,12 +29,15 @@ public class CombatController3D : MonoBehaviour
     private WeaponData currentWeapon;
     private float chargeStartTime;
     private bool isHoldingAttack;
+    private int _combo;
+    private float _comboExpire;
 
     void Awake()
     {
         if (resources == null) resources = GetComponent<PlayerResources>();
         if (loadout == null) loadout = GetComponent<PlayerLoadout>();
         if (hitbox == null) hitbox = GetComponentInChildren<WeaponHitbox>();
+        if (animator == null) animator = GetComponent<Animator>();
     }
 
     void Update()
@@ -100,8 +106,6 @@ public class CombatController3D : MonoBehaviour
         chargeStartTime = Time.time;
         ChargePercent = 0f;
 
-        if (animator != null) animator.SetBool("IsCharging", true);
-
         if (hitbox != null && hitbox.visual != null)
             hitbox.visual.ShowWindup();
     }
@@ -111,13 +115,6 @@ public class CombatController3D : MonoBehaviour
         if (!isHoldingAttack) return;
 
         IsCharging = false;
-
-        if (animator != null)
-        {
-            animator.SetBool("IsCharging", false);
-            animator.SetTrigger("Attack");
-        }
-
         isHoldingAttack = false;
 
         // Быстрый клик — атака с минимальным зарядом
@@ -135,6 +132,13 @@ public class CombatController3D : MonoBehaviour
     {
         IsAttacking = true;
         stateTimer = currentWeapon.attackDuration;
+
+        // Серия: удар в окне comboWindow продолжает комбо, иначе — сброс.
+        _combo = Time.time <= _comboExpire ? _combo + 1 : 0;
+        _comboExpire = Time.time + currentWeapon.attackDuration + comboWindow;
+
+        if (animator != null)
+            animator.SetTrigger(_combo % 2 != 0 ? "AttackLeft" : "AttackRight");
 
         if (currentWeapon.isRanged)
         {
@@ -158,7 +162,8 @@ public class CombatController3D : MonoBehaviour
                     currentWeapon.targetLayers,
                     currentWeapon.attackDuration,
                     currentWeapon.tickInterval,
-                    ChargePercent
+                    ChargePercent,
+                    _combo
                 );
             }
         }

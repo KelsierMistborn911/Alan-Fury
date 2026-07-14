@@ -15,10 +15,10 @@ GameObject:
   - component: {fileID: 4735664836140568205}
   - component: {fileID: 6704065101643070483}
   - component: {fileID: -931081450633581629}
-  - component: {fileID: -7297289329248248310}
   - component: {fileID: -5318893361700369184}
   - component: {fileID: -4529822592582529304}
   - component: {fileID: -6138623223271072045}
+  - component: {fileID: 5920791607548002130}
   m_Layer: 9
   m_Name: VAUK
   m_TagString: Untagged
@@ -36,7 +36,7 @@ Transform:
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 52.69791, y: 5, z: -230.32217}
-  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_LocalScale: {x: 1.4, y: 1.4, z: 1.4}
   m_ConstrainProportionsScale: 0
   m_Children:
   - {fileID: 8407293843618379681}
@@ -105,6 +105,9 @@ MonoBehaviour:
   acceleration: 18
   deceleration: 22
   slowdownDistance: 2.5
+  sideSpeedMult: 0.6
+  backSpeedMult: 0.35
+  stepPulseWeight: 0.6
   trot:
     speed: 3.5
     acceleration: 0
@@ -135,6 +138,7 @@ MonoBehaviour:
     serializedVersion: 2
     m_Bits: 4294967295
   groundProbeHeight: 50
+  animator: {fileID: 0}
 --- !u!114 &4735664836140568205
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -194,36 +198,37 @@ MonoBehaviour:
   perception: {fileID: 7569614571355709067}
   locomotion: {fileID: 5952714522296563151}
   hitbox: {fileID: -4529822592582529304}
+  stats: {fileID: -6138623223271072045}
+  animator: {fileID: 0}
   targetLayers:
     serializedVersion: 2
     m_Bits: 64
-  hitTickInterval: 0.2
-  maxStamina: 100
-  staminaRegenPerSecond: 15
-  staminaRegenDelay: 1
+  hitTickInterval: 0.3
   jumpArc: 2.2
+  jumpHitDuration: 1.5
   jump:
     windup: 1
     active: 0.7
     recover: 1
     cooldown: 2.5
     staminaCost: 35
-    range: 2
+    range: 5
     radius: 1.2
     height: 2
     offset: {x: 0, y: 1, z: 0}
     damage: 20
     stagger: 6
+  swipeLungeImpulse: 6
   maxCombo: 3
-  comboWindow: 0.6
+  comboWindow: 0.3
   swipe:
     windup: 0.3
     active: 0.3
-    recover: 0.35
+    recover: 0.1
     cooldown: 0.2
     staminaCost: 12
-    range: 2
-    radius: 1
+    range: 7
+    radius: 2
     height: 2
     offset: {x: 0, y: 1, z: 0}
     damage: 10
@@ -235,7 +240,7 @@ MonoBehaviour:
     cooldown: 4
     staminaCost: 45
     range: 3.5
-    radius: 1
+    radius: 3
     height: 2
     offset: {x: 0, y: 1, z: 0}
     damage: 30
@@ -257,43 +262,36 @@ MonoBehaviour:
   combat: {fileID: 6704065101643070483}
   surroundBrain: {fileID: -5318893361700369184}
   pathfinder: {fileID: 0}
+  stats: {fileID: 0}
   runSpeed: 8
   meleeRange: 7
   specialReach: 3.5
   jumpRange: 10
   behindDistance: 7
+  frontLineBias: 0.6
+  aggroPerHit: 0.05
   repathInterval: 0.4
   waypointArrive: 1.2
-  aggression: 0.5
-  retreatDistance: 5
+  retreatDistance: 7
   disengageTime: 1.5
   orbitAngularSpeed: 45
+  holdDistanceAggressive: 1.5
+  holdDistanceCautious: 4.5
+  orbitRadiusJitter: 0.8
+  jitterInterval: 0.7
+  cautionThreshold: 0.5
+  opportunityWindow: 0.8
+  playerThreatRange: 3
+  leapDodgeRange: 2.5
+  sidestepImpulse: 6
+  dodgeDistance: 2.5
+  dodgeArc: 0.6
+  dodgeCooldown: 1.5
   packAgentLayers:
     serializedVersion: 2
     m_Bits: 512
   separationRadius: 2.2
   separationStrength: 2
---- !u!114 &-7297289329248248310
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 4950279192017619235}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1da8840d29e677847a08c7a4fba78423, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  player: {fileID: 0}
-  playerTag: Player
-  viewAngleThreshold: 35
-  sightBlockers:
-    serializedVersion: 2
-    m_Bits: 4294967295
-  selfEyeOffset: {x: 0, y: 1, z: 0}
-  playerEyeOffset: {x: 0, y: 1.2, z: 0}
-  playerSightRange: 35
 --- !u!114 &-5318893361700369184
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -308,8 +306,8 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   perception: {fileID: 7569614571355709067}
   locomotion: {fileID: 5952714522296563151}
-  preferredDistance: 18
-  minDistance: 10
+  preferredDistance: 20
+  minDistance: 15
   noticeRange: 30
   circleSpeed: 4
   fleeSpeed: 10
@@ -331,6 +329,8 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   coneHalfAngle: 60
+  debugShowZone: 1
+  debugZoneY: 0.05
   visual: {fileID: 0}
 --- !u!114 &-6138623223271072045
 MonoBehaviour:
@@ -344,10 +344,31 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: e7f9977242760834194f0befd248bdad, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  maxStamina: 100
-  staminaRegenPerSecond: 15
+  maxHealth: 30
+  maxStamina: 150
+  staminaRegenPerSecond: 25
   staminaRegenDelay: 1
   aggression: 0.5
+  woundFear: 40
+  fearDecayTime: 7
+--- !u!114 &5920791607548002130
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 4950279192017619235}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 556e3078081543a4b90706e40d1d06ad, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  arcSprite: {fileID: 21300000, guid: 543f31f07ccdd134d960097a615531d8, type: 3}
+  arcColor: {r: 1, g: 0.2, b: 0.2, a: 0.7}
+  arcRadius: 2
+  arcHeight: 1.5
+  flyDistance: 0.7
+  windupColor: {r: 1, g: 1, b: 0, a: 0.4}
 --- !u!1001 &8297332873322483786
 PrefabInstance:
   m_ObjectHideFlags: 0

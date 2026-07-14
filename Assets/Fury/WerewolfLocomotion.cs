@@ -19,10 +19,20 @@ public class WerewolfLocomotion : MonoBehaviour
     public MapBoundary boundary;
 
     [Header("Разгон/торможение")]
-    public float acceleration = 18f;
+    public float acceleration = 7f;
     public float deceleration = 22f;
     [Tooltip("На какой дистанции до цели начинать тормозить (м).")]
     public float slowdownDistance = 2.5f;
+
+    [Header("Направленная скорость (относительно взгляда)")]
+    [Tooltip("Множитель скорости при движении боком.")]
+    [Range(0f, 1f)] public float sideSpeedMult = 0.6f;
+    [Tooltip("Множитель скорости при движении спиной (спиной не спринтуем).")]
+    [Range(0f, 1f)] public float backSpeedMult = 0.35f;
+
+    [Header("Походка толчками")]
+    [Tooltip("0 = ровное скольжение (как раньше), 1 = движение почти только толчками шагов. Торможения не касается.")]
+    [Range(0f, 1f)] public float stepPulseWeight = 0.6f;
 
     [Header("Наземная походка (шаги)")]
     [Tooltip("У этих гейтов важны только speed/stepDistance/stepDuration/stepFrequency. " +
@@ -142,6 +152,13 @@ public class WerewolfLocomotion : MonoBehaviour
         if (animator != null) animator.SetTrigger("Jump");
     }
 
+    /// <summary>Мгновенный горизонтальный импульс (отброс от удара). Затухает обычным торможением.</summary>
+    public void AddImpulse(Vector3 force)
+    {
+        force.y = 0f;
+        _horizVel += force;
+    }
+
     public void FaceTowards(Vector3 worldPoint, float dt)
     {
         Vector3 look = worldPoint - transform.position; look.y = 0f;
@@ -181,6 +198,14 @@ public class WerewolfLocomotion : MonoBehaviour
                 float targetSpeed = dist < slowdownDistance
                     ? Mathf.Lerp(0f, _moveSpeed, dist / slowdownDistance)
                     : _moveSpeed;
+
+                // Вперёд — полная скорость, вбок/назад — медленнее (спиной не спринтуем).
+                float facingDot = Vector3.Dot(transform.forward, dir);
+                float dirMult = facingDot >= 0f
+                    ? Mathf.Lerp(sideSpeedMult, 1f, facingDot)
+                    : Mathf.Lerp(sideSpeedMult, backSpeedMult, -facingDot);
+                targetSpeed *= dirMult;
+
                 Vector3 targetVel = dir * targetSpeed;
                 float rate = targetVel.magnitude > _horizVel.magnitude ? acceleration : deceleration;
                 _horizVel = Vector3.MoveTowards(_horizVel, targetVel, rate * dt);
@@ -217,7 +242,13 @@ public class WerewolfLocomotion : MonoBehaviour
             ? _horizVel.normalized * _stepImpulse
             : Vector3.zero;
 
-        Vector3 horiz = (_horizVel + stepVec) * dt; horiz.y = 0f;
+        // Пульс шага: скорость проседает между толчками лап. Только в активном движении по земле —
+        // торможение и полёт идут без пульса, чтобы волк мог нормально останавливаться.
+        float pulse = 1f;
+        if (!_leaping && active && _step.Curve > 0f)
+            pulse = Mathf.Lerp(1f, Mathf.Max(_step.Curve, 0.15f), stepPulseWeight);
+
+        Vector3 horiz = (_horizVel * pulse + stepVec) * dt; horiz.y = 0f;
         if (boundary != null && boundary.IsReady) horiz = boundary.Constrain(pos, horiz);
         _cc.Move(horiz + Vector3.up * (_vertVel * dt));
 

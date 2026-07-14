@@ -77,6 +77,8 @@ public class WerewolfCombat : MonoBehaviour
     [Header("Прыжковая атака")]
     [Tooltip("Высота дуги прыжка (передаётся в locomotion.Leap).")]
     public float jumpArc = 2.2f;
+    [Tooltip("Сколько секунд хитбокс прыжка активен с момента отрыва (должно покрывать весь полёт).")]
+    public float jumpHitDuration = 1.5f;
     public AttackDef jump = new AttackDef
     {
         windup = 0.45f,
@@ -93,6 +95,8 @@ public class WerewolfCombat : MonoBehaviour
     };
 
     [Header("Обычный удар / серия")]
+    [Tooltip("Импульс рывка в игрока в момент свипа (м/с). 0 = выключено. Волк «проваливается» в сторону удара.")]
+    public float swipeLungeImpulse = 5f;
     [Tooltip("Макс. длина серии (сколько свипов подряд).")]
     public int maxCombo = 3;
     [Tooltip("Окно после свипа, в котором повторный TrySwipe продолжает серию (сек).")]
@@ -274,10 +278,12 @@ public class WerewolfCombat : MonoBehaviour
 
         if (_kind == AttackKind.Jump)
         {
-            // Прыгаем в игрока; урон нанесём на приземлении (TickJumpActive).
+            // Прыгаем в игрока; хитбокс активен весь полёт и летит с волком.
             if (perception.HasPlayer && locomotion.IsGrounded)
             {
                 locomotion.Leap(perception.PlayerPos, jumpArc);
+                FireHitbox(_def, jumpHitDuration);
+                _hitFired = true;
             }
             else
             {
@@ -288,29 +294,34 @@ public class WerewolfCombat : MonoBehaviour
         }
         else
         {
+            // Свип: небольшой рывок в игрока — удар «на ходу» (каждый свип серии — новый рывок).
+            if (_kind == AttackKind.Swipe && swipeLungeImpulse > 0f)
+            {
+                Vector3 lungeDir = perception.HasPlayer
+                    ? Flat(perception.PlayerPos - transform.position)
+                    : transform.forward;
+                locomotion.AddImpulse(lungeDir * swipeLungeImpulse);
+            }
+
             // Свип / особый — урон в начале окна active.
             FireHitbox(_def);
             _hitFired = true;
         }
     }
 
-    // Прыжок: ждём приземления, наносим урон один раз, затем короткое окно active → recover.
+    // Прыжок: урон включён с отрыва (EnterActive). Здесь ждём приземления,
+    // после него — короткое окно active и recover.
     private void TickJumpActive(float dt)
     {
-        if (_hitFired)
+        if (locomotion.IsLeaping) { _jumpAirborne = true; return; } // в полёте — ждём
+        if (_jumpAirborne)
         {
-            _phaseTimer -= dt;
-            if (_phaseTimer <= 0f) EnterRecover();
-            return;
+            _jumpAirborne = false;
+            _phaseTimer = _def.active; // приземлился — короткое окно перед recover
         }
 
-        if (locomotion.IsLeaping) { _jumpAirborne = true; return; } // в полёте — ждём
-        if (!_jumpAirborne) return;                                 // кадр до взлёта
-
-        // Приземлился.
-        FireHitbox(_def);
-        _hitFired = true;
-        _phaseTimer = _def.active; // короткое окно урона после удара о землю
+        _phaseTimer -= dt;
+        if (_phaseTimer <= 0f) EnterRecover();
     }
 
     private void EnterRecover()
@@ -321,7 +332,7 @@ public class WerewolfCombat : MonoBehaviour
 
     // ===================== Урон =====================
 
-    private void FireHitbox(AttackDef def)
+    private void FireHitbox(AttackDef def, float durationOverride = 0f)
     {
         if (hitbox == null) return;
 
@@ -330,7 +341,8 @@ public class WerewolfCombat : MonoBehaviour
             : transform.forward;
 
         hitbox.Activate(def.range, def.radius, def.height, def.offset, dir,
-                        def.damage, def.stagger, targetLayers, def.active, hitTickInterval);
+                        def.damage, def.stagger, targetLayers,
+                        durationOverride > 0f ? durationOverride : def.active, hitTickInterval);
     }
 
     // ===================== Утилиты =====================
