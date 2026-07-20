@@ -4,6 +4,7 @@ using UnityEngine;
 /// Всплывающая цифра урона: рождается в мире, летит вверх, гаснет и удаляется.
 /// Ничего вешать на сцену не нужно — вызывается статикой из кода:
 ///     DamagePopup.Spawn(позиция, урон, цвет);
+///     DamagePopup.Spawn(позиция, урон, цвет, " заблокировано");
 /// Урон округляется до целых. Текст всегда повёрнут к камере.
 /// </summary>
 public class DamagePopup : MonoBehaviour
@@ -15,13 +16,13 @@ public class DamagePopup : MonoBehaviour
     private Color _baseColor;
     private float _timer;
 
-    public static void Spawn(Vector3 worldPos, float amount, Color color)
+    public static void Spawn(Vector3 worldPos, float amount, Color color, string suffix = "")
     {
         var go = new GameObject("DamagePopup");
         go.transform.position = worldPos;
 
         var tm = go.AddComponent<TextMesh>();
-        tm.text = Mathf.RoundToInt(amount).ToString();
+        tm.text = Mathf.RoundToInt(amount).ToString() + suffix;
         tm.color = color;
         tm.anchor = TextAnchor.MiddleCenter;
         tm.alignment = TextAlignment.Center;

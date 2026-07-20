@@ -19,6 +19,8 @@ GameObject:
   - component: {fileID: -4529822592582529304}
   - component: {fileID: -6138623223271072045}
   - component: {fileID: 5920791607548002130}
+  - component: {fileID: -2928654849451857684}
+  - component: {fileID: -5851875003696013117}
   m_Layer: 9
   m_Name: VAUK
   m_TagString: Untagged
@@ -208,8 +210,8 @@ MonoBehaviour:
   jumpHitDuration: 1.5
   jump:
     windup: 1
-    active: 0.7
-    recover: 1
+    active: 0.2
+    recover: 0.1
     cooldown: 2.5
     staminaCost: 35
     range: 5
@@ -222,10 +224,10 @@ MonoBehaviour:
   maxCombo: 3
   comboWindow: 0.3
   swipe:
-    windup: 0.3
-    active: 0.3
+    windup: 0.2
+    active: 0.1
     recover: 0.1
-    cooldown: 0.2
+    cooldown: 0.1
     staminaCost: 12
     range: 7
     radius: 2
@@ -262,31 +264,37 @@ MonoBehaviour:
   combat: {fileID: 6704065101643070483}
   surroundBrain: {fileID: -5318893361700369184}
   pathfinder: {fileID: 0}
-  stats: {fileID: 0}
+  stats: {fileID: -6138623223271072045}
   runSpeed: 8
   meleeRange: 7
   specialReach: 3.5
   jumpRange: 10
   behindDistance: 7
   frontLineBias: 0.6
-  aggroPerHit: 0.05
+  aggroPerHit: 1
+  cautiousTierMax: 0.33
+  midTierMax: 0.66
+  sectorHoldTime: 2
+  behindAngle: 120
+  weaponSectorMargin: 20
   repathInterval: 0.4
   waypointArrive: 1.2
-  retreatDistance: 7
+  retreatDistance: 8
   disengageTime: 1.5
   orbitAngularSpeed: 45
   holdDistanceAggressive: 1.5
   holdDistanceCautious: 4.5
   orbitRadiusJitter: 0.8
   jitterInterval: 0.7
-  cautionThreshold: 0.5
+  cautionThreshold: 0.8
   opportunityWindow: 0.8
-  playerThreatRange: 3
-  leapDodgeRange: 2.5
-  sidestepImpulse: 6
-  dodgeDistance: 2.5
+  threatRangeMargin: 1.5
+  dodgeThreatAngle: 60
+  leapDodgeRange: 3.5
+  sidestepImpulse: 7
+  dodgeDistance: 4
   dodgeArc: 0.6
-  dodgeCooldown: 1.5
+  dodgeCooldown: 0.6
   packAgentLayers:
     serializedVersion: 2
     m_Bits: 512
@@ -348,9 +356,7 @@ MonoBehaviour:
   maxStamina: 150
   staminaRegenPerSecond: 25
   staminaRegenDelay: 1
-  aggression: 0.5
-  woundFear: 40
-  fearDecayTime: 7
+  aggressionPerSecond: 5
 --- !u!114 &5920791607548002130
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -369,6 +375,45 @@ MonoBehaviour:
   arcHeight: 1.5
   flyDistance: 0.7
   windupColor: {r: 1, g: 1, b: 0, a: 0.4}
+--- !u!114 &-2928654849451857684
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 4950279192017619235}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 41c5a001c5db695468ec9562ca5199a2, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  combat: {fileID: 6704065101643070483}
+  sprite: {fileID: 21300000, guid: 543f31f07ccdd134d960097a615531d8, type: 3}
+  color: {r: 0.7735849, g: 0.61899525, b: 0.37584552, a: 0.9}
+  size: 0.5
+  height: 2.4
+--- !u!114 &-5851875003696013117
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 4950279192017619235}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5d122f75be09a43478a9c26c9209036e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  stats: {fileID: -6138623223271072045}
+  offset: {x: 0, y: 2.4, z: 0}
+  barWidth: 0.9
+  barHeight: 0.07
+  barSpacing: 0.03
+  textSize: 0.04
+  healthColor: {r: 0.85, g: 0.15, b: 0.15, a: 1}
+  aggressionColor: {r: 1, g: 0.55, b: 0.1, a: 1}
+  fearColor: {r: 0.65, g: 0.7, b: 0.9, a: 1}
+  backColor: {r: 0.08, g: 0.08, b: 0.08, a: 0.7}
 --- !u!1001 &8297332873322483786
 PrefabInstance:
   m_ObjectHideFlags: 0

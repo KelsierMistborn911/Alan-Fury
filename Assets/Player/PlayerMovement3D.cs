@@ -100,6 +100,28 @@ public class PlayerMovement3D : MonoBehaviour
     private Vector3 _maneuverDir;
     private float _lastDodgeTime;
     private float _lastRollTime;
+    private int _arcSign; // уворот дугой: -1 влево, +1 вправо, 0 — прямая
+    private Vector3 _arcCenter; // центр дуги, фиксируется в момент нажатия
+    private float _lastDodgeEndTime = -99f;
+
+    // ==== Для комбо "удар после уворота" в CombatController3D ====
+    public bool IsDodging => _isDodging;
+    public float DodgeTimeRemaining => _isDodging ? _maneuverTimer : 0f;
+    public float DodgeProgress01 => _isDodging ? 1f - Mathf.Clamp01(_maneuverTimer / dodgeDuration) : 1f;
+    public float TimeSinceDodgeEnd => Time.time - _lastDodgeEndTime;
+    public float DodgeSpeedValue => dodgeSpeed;
+    public float CurrentSpeed => _velocity.magnitude;
+
+    public void StopHorizontalVelocity() => _velocity = Vector3.zero;
+
+    // Мгновенный (без сглаживания) разворот на цель — для рывкового удара назад.
+    public void SnapRotationToTarget(Vector3 targetPosition)
+    {
+        Vector3 look = targetPosition - transform.position;
+        look.y = 0f;
+        if (look.sqrMagnitude > 0.01f)
+            transform.rotation = Quaternion.LookRotation(look);
+    }
 
     // Паркур
     private bool _isVaulting;
@@ -110,6 +132,12 @@ public class PlayerMovement3D : MonoBehaviour
     // Шаги
     private readonly StepController _step = new StepController();
 
+    // Боевой контроллер — для доворота на цель во время замаха
+    private CombatController3D _combat;
+
+    // Tab-таргет из боевого контроллера (null — лок-мода нет)
+    private Transform LockTarget => _combat != null ? _combat.currentTarget : null;
+
     // ──────────────────────────────────────────────
 
     void Start()
@@ -117,6 +145,7 @@ public class PlayerMovement3D : MonoBehaviour
         _controller = GetComponent<CharacterController>();
         _mainCamera = Camera.main;
         _currentGait = walk;
+        _combat = GetComponent<CombatController3D>();
 
         if (boundary == null) boundary = GetComponent<MapBoundary>();
         if (witchLight == null) witchLight = GetComponentInChildren<WitchLight>();
@@ -166,18 +195,33 @@ public class PlayerMovement3D : MonoBehaviour
     {
         if (Input.GetKeyDown(KeyCode.LeftAlt)
             && Time.time - _lastDodgeTime > dodgeCooldown
-            && _maneuverDir.magnitude > 0.1f)
+            && !(_combat != null && _combat.IsCharging))
         {
-            StartManeuver(dodgeSpeed, dodgeDuration, ref _isDodging, ref _lastDodgeTime);
+            Vector3 dir = ComputeInputDirection();
+            if (dir.magnitude > 0.1f)
+            {
+                _maneuverDir = dir;
+                SetupLockManeuver(true); // уворот вбок при таргете — дугой вокруг цели
+                StartManeuver(dodgeSpeed, dodgeDuration, ref _isDodging, ref _lastDodgeTime);
+            }
         }
         else if (Input.GetKeyDown(KeyCode.Space)
             && Time.time - _lastRollTime > rollCooldown
-            && _maneuverDir.magnitude > 0.1f)
+            && !(_combat != null && _combat.IsCharging))
         {
-            if (witchLight != null && witchLight.IsOn)
-                Teleport();
-            else
-                StartManeuver(rollSpeed, rollDuration, ref _isRolling, ref _lastRollTime);
+            Vector3 dir = ComputeInputDirection();
+            if (dir.magnitude > 0.1f)
+            {
+                _maneuverDir = dir;
+                SetupLockManeuver(false); // перекат/телепорт — прямые, но в базисе врага
+                if (witchLight != null && witchLight.IsOn)
+                    Teleport();
+                else
+                {
+                    StartManeuver(rollSpeed, rollDuration, ref _isRolling, ref _lastRollTime);
+                    if (_combat != null) _combat.ClearTarget(); // перекат сбрасывает привязку
+                }
+            }
         }
 
         if (!_isDodging && !_isRolling) return;
@@ -185,12 +229,66 @@ public class PlayerMovement3D : MonoBehaviour
         _maneuverTimer -= Time.deltaTime;
         if (_maneuverTimer <= 0f)
         {
+            if (_isDodging) _lastDodgeEndTime = Time.time;
             _isDodging = false;
             _isRolling = false;
+            _arcSign = 0;
             return;
         }
 
+        // Дуга: траектория зафиксирована при нажатии — окружность вокруг _arcCenter.
+        if (_arcSign != 0)
+        {
+            Vector3 toCenter = _arcCenter - transform.position;
+            toCenter.y = 0f;
+            if (toCenter.sqrMagnitude > 0.01f)
+                _maneuverDir = Vector3.Cross(Vector3.up, toCenter.normalized) * _arcSign;
+        }
+
         MoveHorizontal(_maneuverDir * _maneuverSpeed * Time.deltaTime);
+    }
+
+    // Направление ввода прямо сейчас (не устаревшее): всегда от камеры.
+    // Общий расчёт для ходьбы (HandleMovement) и манёвров (HandleManeuvers).
+    Vector3 ComputeInputDirection()
+    {
+        float h = Input.GetAxisRaw("Horizontal");
+        float v = Input.GetAxisRaw("Vertical");
+        Vector3 input = new Vector3(h, 0f, v).normalized;
+        if (input.magnitude < 0.1f) return Vector3.zero;
+
+        if (_mainCamera == null) return input;
+        Vector3 forward = _mainCamera.transform.forward;
+        Vector3 right = _mainCamera.transform.right;
+        forward.y = 0f; right.y = 0f;
+        forward.Normalize(); right.Normalize();
+        return (forward * input.z + right * input.x).normalized;
+    }
+
+    // При лок-цели раскладывает направление манёвра по осям «к врагу / вокруг врага».
+    // allowArc: боковая составляющая доминирует → манёвр дугой (_arcSign), иначе прямая к/от цели.
+    void SetupLockManeuver(bool allowArc)
+    {
+        _arcSign = 0;
+        Transform lockT = LockTarget;
+        if (lockT == null) return;
+
+        Vector3 toEnemy = lockT.position - transform.position;
+        toEnemy.y = 0f;
+        if (toEnemy.sqrMagnitude < 0.01f) return;
+        toEnemy.Normalize();
+        Vector3 tangent = Vector3.Cross(Vector3.up, toEnemy); // вправо относительно взгляда на врага
+
+        float side = Vector3.Dot(_maneuverDir, tangent);
+        float axial = Vector3.Dot(_maneuverDir, toEnemy);
+
+        if (allowArc && Mathf.Abs(side) > Mathf.Abs(axial))
+        {
+            _arcSign = side >= 0f ? 1 : -1;
+            _arcCenter = lockT.position; // траектория фиксируется здесь
+        }
+        else
+            _maneuverDir = (axial >= 0f ? toEnemy : -toEnemy);
     }
 
     void StartManeuver(float speed, float duration, ref bool flag, ref float lastTime)
@@ -209,6 +307,7 @@ public class PlayerMovement3D : MonoBehaviour
     {
         _lastRollTime = Time.time;
         _step.Cancel();
+        if (_combat != null) _combat.ClearTarget();
         MoveHorizontal(_maneuverDir * teleportDistance);
     }
 
@@ -294,13 +393,7 @@ public class PlayerMovement3D : MonoBehaviour
 
         if (input.magnitude > 0.1f && _mainCamera != null)
         {
-            // Направление относительно камеры
-            Vector3 forward = _mainCamera.transform.forward;
-            Vector3 right = _mainCamera.transform.right;
-            forward.y = 0f; right.y = 0f;
-            forward.Normalize(); right.Normalize();
-
-            Vector3 targetDir = (forward * input.z + right * input.x).normalized;
+            Vector3 targetDir = ComputeInputDirection();
             _maneuverDir = targetDir;
 
             // Целевая скорость = базовая + импульс шага
@@ -348,6 +441,34 @@ public class PlayerMovement3D : MonoBehaviour
 
     void HandleRotation()
     {
+        // Во время замаха/удара с целью — плавный доворот на неё вместо мыши.
+        Transform aim = _combat != null ? _combat.ActiveAimTarget : null;
+        if (aim != null)
+        {
+            Vector3 aimLook = aim.position - transform.position;
+            aimLook.y = 0f;
+            if (aimLook.sqrMagnitude > 0.01f)
+                transform.rotation = Quaternion.Slerp(
+                    transform.rotation,
+                    Quaternion.LookRotation(aimLook),
+                    rotationSpeed * Time.deltaTime);
+            return;
+        }
+
+        // Лок-таргет: всегда лицом к врагу вместо мыши.
+        Transform lockT = LockTarget;
+        if (lockT != null)
+        {
+            Vector3 lockLook = lockT.position - transform.position;
+            lockLook.y = 0f;
+            if (lockLook.sqrMagnitude > 0.01f)
+                transform.rotation = Quaternion.Slerp(
+                    transform.rotation,
+                    Quaternion.LookRotation(lockLook),
+                    rotationSpeed * Time.deltaTime);
+            return;
+        }
+
         if (_mainCamera == null) return;
 
         Ray ray = _mainCamera.ScreenPointToRay(Input.mousePosition);

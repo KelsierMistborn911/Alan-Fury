@@ -19,7 +19,9 @@ using UnityEngine;
 ///   • Orbit — кружит на дистанции; aggression сокращает время до нового захода.
 ///
 /// Отложено: прыжок для рельефа, уход с воды −4, «вцепиться/тащить» у второго.
-/// Реализовано: здоровье (WerewolfStats, IDamageable), опаска замаха и отскок от удара игрока.
+/// Реализовано: здоровье (WerewolfStats, IDamageable), опаска замаха и отскок от удара игрока,
+/// ступени агрессии (низкая — атака только из-за спины, средняя — вне сектора оружия,
+/// высокая — прежнее поведение) и страх стаи (OnPackFear срезает агрессию).
 /// </summary>
 [RequireComponent(typeof(WerewolfPerception))]
 [RequireComponent(typeof(WerewolfLocomotion))]
@@ -41,13 +43,11 @@ public class WerewolfPackBrain : MonoBehaviour, WerewolfPackManager.IPackAgent
     [Tooltip("Скорость бега к игроку (м/с). ~галоп локомоции.")]
     public float runSpeed = 8f;
 
-    [Header("Дистанции атак (м)")]
-    [Tooltip("Ближе этого — обычный удар/серия.")]
-    public float meleeRange = 2f;
-    [Tooltip("До этого достаёт особая атака.")]
-    public float specialReach = 3.5f;
-    [Tooltip("С этой дистанции можно прыгать в игрока.")]
-    public float jumpRange = 6f;
+    // Дистанции атак наследуются из WerewolfCombat конкретного волка (не дублируются здесь):
+    //   MeleeRange — range свипа, SpecialReach — range особой, JumpRange — дальность наскока.
+    private float MeleeRange => combat != null ? combat.swipe.range : 2f;
+    private float SpecialReach => combat != null ? combat.special.range : 3.5f;
+    private float JumpRange => combat != null ? combat.jumpLeapDistance : 6f;
 
     [Header("Заход не спереди (для второго)")]
     [Tooltip("На сколько метров позади игрока целиться второму волку.")]
@@ -60,6 +60,18 @@ public class WerewolfPackBrain : MonoBehaviour, WerewolfPackManager.IPackAgent
     [Header("Агрессия от событий")]
     [Tooltip("Сколько агрессии (0..100) добавляется за одно своё попадание.")]
     public float aggroPerHit = 5f;
+
+    [Header("Ступени агрессии")]
+    [Tooltip("Ниже этой агрессии (0..1) — осторожная ступень: атака только из-за спины игрока.")]
+    [Range(0f, 1f)] public float cautiousTierMax = 0.33f;
+    [Tooltip("Ниже этой (и выше осторожной) — средняя ступень: атака вне сектора оружия. Выше — прежнее поведение.")]
+    [Range(0f, 1f)] public float midTierMax = 0.66f;
+    [Tooltip("Сколько секунд продержаться в разрешённом секторе, чтобы атаковать (ступени 1–2).")]
+    public float sectorHoldTime = 2f;
+    [Tooltip("«За спиной» для осторожной ступени: угол от взгляда игрока больше этого (град).")]
+    public float behindAngle = 120f;
+    [Tooltip("Запас к полуконусу оружия игрока (WeaponHitbox.coneHalfAngle) для средней ступени (град).")]
+    public float weaponSectorMargin = 20f;
 
     [Header("Путь")]
     [Tooltip("Как часто перестраивать путь (сек). Реже = дешевле, но менее отзывчиво.")]
@@ -92,8 +104,10 @@ public class WerewolfPackBrain : MonoBehaviour, WerewolfPackManager.IPackAgent
     public float opportunityWindow = 0.8f;
 
     [Header("Реакция на игрока (опаска замаха / уворот)")]
-    [Tooltip("Ближе этой дистанции волк реагирует на замах/удар игрока (м).")]
-    public float playerThreatRange = 4f;
+    [Tooltip("Запас к длине оружия игрока: реагируем на замах/удар ближе (длина оружия + запас) м.")]
+    public float threatRangeMargin = 1.5f;
+    [Tooltip("Уворачивается только волк в секторе перед взглядом игрока: угол от взгляда меньше этого (град).")]
+    public float dodgeThreatAngle = 60f;
     [Tooltip("Ближе этой дистанции уворот прыжком; дальше — отшагом (м).")]
     public float leapDodgeRange = 2.5f;
     [Tooltip("Импульс отшага вбок/назад без прыжка (м/с).")]
@@ -136,6 +150,7 @@ public class WerewolfPackBrain : MonoBehaviour, WerewolfPackManager.IPackAgent
     private float _opportunityUntil; // окно «игрок только что отмахал» для осторожных
     private float _radiusJitter;     // текущий разброс радиуса облёта
     private float _nextJitterTime;
+    private float _sectorTimer;      // сколько волк держится в разрешённом секторе (ступени 1–2)
 
     private WerewolfPackManager _manager;
 
@@ -152,6 +167,7 @@ public class WerewolfPackBrain : MonoBehaviour, WerewolfPackManager.IPackAgent
         {
             if (surroundBrain != null) surroundBrain.enabled = false;
             _phase = AttackPhase.Approach;   // начинаем заход заново
+            _sectorTimer = 0f;
             enabled = true;                 // этот мозг работает
         }
         else // Surround
@@ -163,6 +179,12 @@ public class WerewolfPackBrain : MonoBehaviour, WerewolfPackManager.IPackAgent
     }
 
     public void SetAttackToken(bool hasToken) => _hasToken = hasToken;
+
+    // Страх стаи вырос (рана у сородича) — срезаем свою агрессию на ту же величину.
+    public void OnPackFear(float amount)
+    {
+        if (stats != null) stats.AddAggression(-amount);
+    }
 
     // ===================== Жизненный цикл =====================
 
@@ -226,6 +248,21 @@ public class WerewolfPackBrain : MonoBehaviour, WerewolfPackManager.IPackAgent
         float dt = Time.deltaTime;
         if (!perception.HasPlayer) return;
 
+        // Агрессия копится только в роли Attack (вне её значение замирает).
+        if (stats != null) stats.AddAggression(stats.aggressionPerSecond * dt);
+
+        // Таймер сектора (ступени 1–2): держится ли волк в разрешённой для атаки зоне.
+        // Осторожный — за спиной (behindAngle), средний — вне сектора оружия (+запас).
+        float ag = Aggression;
+        if (ag < midTierMax)
+        {
+            float need = ag < cautiousTierMax
+                ? behindAngle
+                : perception.PlayerWeaponConeHalfAngle + weaponSectorMargin;
+            if (perception.AngleFromPlayerGaze > need) _sectorTimer += dt;
+            else _sectorTimer = 0f;
+        }
+
         // Детект начала/конца удара игрока (фронты перехода IsAttacking).
         bool playerAttacking = perception.PlayerIsAttacking;
         bool attackStarted = playerAttacking && !_playerWasAttacking;
@@ -252,7 +289,7 @@ public class WerewolfPackBrain : MonoBehaviour, WerewolfPackManager.IPackAgent
 
     private void TickApproach(float dt)
     {
-        if (perception.DistanceToPlayer <= jumpRange) { _phase = AttackPhase.Engage; return; }
+        if (perception.DistanceToPlayer <= JumpRange) { _phase = AttackPhase.Engage; return; }
         Approach(dt);
     }
 
@@ -261,18 +298,24 @@ public class WerewolfPackBrain : MonoBehaviour, WerewolfPackManager.IPackAgent
     private void TickEngage(float dt)
     {
         float dist = perception.DistanceToPlayer;
-        if (dist > jumpRange) { _phase = AttackPhase.Approach; return; } // игрок ушёл — снова подходим
+        if (dist > JumpRange) { _phase = AttackPhase.Approach; return; } // игрок ушёл — снова подходим
 
         locomotion.FaceTowards(perception.PlayerPos, dt);
 
         // Опаска замаха: игрок заряжает удар, мы близко — пятимся, не атакуем.
-        if (perception.PlayerIsCharging && dist < playerThreatRange)
+        float threatRange = perception.PlayerWeaponRange + threatRangeMargin;
+        if (perception.PlayerIsCharging && dist < threatRange)
         {
             Vector3 away = perception.DirFromPlayerFlat;
-            Vector3 backTarget = perception.PlayerPos + away * (playerThreatRange + 1f) + SeparationOffset();
+            Vector3 backTarget = perception.PlayerPos + away * (threatRange + 1f) + SeparationOffset();
             locomotion.MoveTo(backTarget, runSpeed, dt);
             return;
         }
+
+        // Ступени агрессии: низкая — только из-за спины; средняя — вне сектора оружия; высокая — прежнее поведение.
+        float ag = Aggression;
+        if (ag < cautiousTierMax) { TickEngageCautious(dt, dist); return; }
+        if (ag < midTierMax) { TickEngageMid(dt, dist); return; }
 
         // Осторожный не бьёт, пока игрок машет/заряжает — ждёт окно сразу после его удара.
         bool playerBusy = perception.PlayerIsAttacking || perception.PlayerIsCharging;
@@ -289,25 +332,77 @@ public class WerewolfPackBrain : MonoBehaviour, WerewolfPackManager.IPackAgent
         Vector3 dir = transform.position - p; dir.y = 0f;
         dir = dir.sqrMagnitude > 1e-4f ? dir.normalized : transform.forward;
 
-        float targetRadius = Mathf.Max(meleeRange * 0.9f, dist - 1.5f); // радиус стягивается к миле
+        float targetRadius = Mathf.Max(MeleeRange * 0.9f, dist - 1.5f); // радиус стягивается к миле
         Vector3 rotated = Quaternion.AngleAxis(30f * _orbitDir, Vector3.up) * dir;
         Vector3 target = p + rotated * targetRadius + SeparationOffset();
         locomotion.MoveTo(target, runSpeed, dt);
     }
 
+    // Осторожная ступень: держит дистанцию, атакует только продержавшись sectorHoldTime за спиной.
+    // Токен не нужен — удар идёт со спины, фронтовикам не мешает.
+    private void TickEngageCautious(float dt, float dist)
+    {
+        if (_sectorTimer >= sectorHoldTime && TryAttackByDistance(dist))
+        {
+            _sectorTimer = 0f;
+            EnterRetreat();
+            return;
+        }
+        MoveAroundToBack(dt, holdDistanceCautious); // держим дистанцию, закручиваемся к спине
+    }
+
+    // Средняя ступень: заходит и бьёт, продержавшись sectorHoldTime вне сектора оружия.
+    private void TickEngageMid(float dt, float dist)
+    {
+        if (_sectorTimer >= sectorHoldTime)
+        {
+            bool mayAttack = _avoidFront || _hasToken;
+            if (mayAttack && TryAttackByDistance(dist))
+            {
+                _sectorTimer = 0f;
+                EnterRetreat();
+                return;
+            }
+            // Сектор чист, но удар не вышел (токен/стамина/кулдаун) — стягиваемся, оставаясь сбоку.
+            MoveAroundToBack(dt, Mathf.Max(MeleeRange, dist - 1.5f));
+            return;
+        }
+        // Ещё в секторе оружия — выходим из него на средней дистанции.
+        MoveAroundToBack(dt, SpecialReach);
+    }
+
+    // Кружит вокруг игрока на заданном радиусе в сторону увеличения угла от его взгляда (к спине).
+    private void MoveAroundToBack(float dt, float radius)
+    {
+        Vector3 p = perception.PlayerPos;
+        Vector3 dir = transform.position - p; dir.y = 0f;
+        dir = dir.sqrMagnitude > 1e-4f ? dir.normalized : transform.forward;
+
+        float signed = Vector3.SignedAngle(perception.PlayerForwardFlat, dir, Vector3.up);
+        float side = Mathf.Abs(signed) < 5f ? (Random.value > 0.5f ? 1f : -1f) : Mathf.Sign(signed);
+
+        Vector3 rotated = Quaternion.AngleAxis(orbitAngularSpeed * side * dt, Vector3.up) * dir;
+        Vector3 target = p + rotated * radius + SeparationOffset();
+        locomotion.MoveTo(target, runSpeed, dt);
+    }
+
     private bool TryAttackByDistance(float dist)
     {
-        if (dist <= meleeRange) return combat.TrySwipe();
-        if (dist <= specialReach) return combat.TrySpecial();
-        return combat.TryJump(); // между specialReach и jumpRange
+        if (dist <= MeleeRange) return combat.TrySwipe();
+        if (dist <= SpecialReach) return combat.TrySpecial();
+        // Между SpecialReach и JumpRange. Прыжок — с разрешения стаи (интервал + лучшая позиция).
+        if (_manager != null && !_manager.RequestJump(perception)) return false;
+        return combat.TryJump();
     }
 
     // Уворот от замаха/удара игрока: вплотную — прыжок вбок/назад, чуть дальше — быстрый отшаг.
     private void TryDodge()
     {
         float dist = perception.DistanceToPlayer;
+        float threatRange = perception.PlayerWeaponRange + threatRangeMargin;
         if (Time.time < _nextDodgeTime) return;
-        if (dist > playerThreatRange) return;
+        if (dist > threatRange) return;
+        if (perception.AngleFromPlayerGaze > dodgeThreatAngle) return; // мы не под ударом — не дёргаемся
 
         _nextDodgeTime = Time.time + dodgeCooldown;
         Vector3 away = perception.DirFromPlayerFlat;
@@ -445,7 +540,7 @@ public class WerewolfPackBrain : MonoBehaviour, WerewolfPackManager.IPackAgent
             Vector3 toAlpha = alpha.position - p; toAlpha.y = 0f;
             if (toAlpha.sqrMagnitude > 1e-4f)
             {
-                Vector3 frontPoint = p + toAlpha.normalized * meleeRange; // точка на стороне альфы
+                Vector3 frontPoint = p + toAlpha.normalized * MeleeRange; // точка на стороне альфы
                 return Vector3.Lerp(p, frontPoint, frontLineBias);
             }
         }

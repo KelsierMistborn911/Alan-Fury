@@ -125,7 +125,7 @@ public class WeaponHitbox : MonoBehaviour
 
             if (col.TryGetComponent<IDamageable>(out var damageable))
             {
-                damageable.TakeDamage(damage);
+                damageable.TakeDamage(damage, transform.position);
 
                 Vector3 knockback = (col.transform.position - transform.position).normalized;
                 knockback.y = 0f;

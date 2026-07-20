@@ -34,8 +34,36 @@ public class WerewolfPerception : MonoBehaviour
     /// <summary>Игрок в активной фазе удара.</summary>
     public bool PlayerIsAttacking => _playerCombat != null && _playerCombat.IsAttacking;
 
+    /// <summary>Дальность удара текущего оружия игрока (м); 2, если оружие не найдено.</summary>
+    public float PlayerWeaponRange
+    {
+        get
+        {
+            var w = _playerLoadout != null ? _playerLoadout.GetMainWeapon() : null;
+            return w != null ? w.attackRange : 2f;
+        }
+    }
+
+    /// <summary>Полуконус удара оружия игрока (град, из его WeaponHitbox); 60, если хитбокс не найден.</summary>
+    public float PlayerWeaponConeHalfAngle => _playerHitbox != null ? _playerHitbox.coneHalfAngle : 60f;
+
+    /// <summary>Угол (град) между взглядом игрока и направлением на этого волка. 0 = игрок смотрит прямо на волка.</summary>
+    public float AngleFromPlayerGaze
+    {
+        get
+        {
+            if (!HasPlayer) return 180f;
+            Vector3 toSelf = transform.position - player.position; toSelf.y = 0f;
+            Vector3 fwd = player.forward; fwd.y = 0f;
+            if (toSelf.sqrMagnitude < 0.0001f || fwd.sqrMagnitude < 0.0001f) return 180f;
+            return Vector3.Angle(fwd, toSelf);
+        }
+    }
+
     private AlphaStalker _stalker; // источник данных об укрытиях (может отсутствовать)
     private CombatController3D _playerCombat;
+    private PlayerLoadout _playerLoadout;
+    private WeaponHitbox _playerHitbox;
 
     void Awake()
     {
@@ -45,6 +73,8 @@ public class WerewolfPerception : MonoBehaviour
             if (go != null) player = go.transform;
         }
         if (player != null) _playerCombat = player.GetComponent<CombatController3D>();
+        if (player != null) _playerLoadout = player.GetComponent<PlayerLoadout>();
+        if (player != null) _playerHitbox = player.GetComponentInChildren<WeaponHitbox>();
         _stalker = GetComponent<AlphaStalker>();
     }
 

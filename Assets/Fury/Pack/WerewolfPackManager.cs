@@ -31,6 +31,8 @@ public class WerewolfPackManager : MonoBehaviour
         void SetRole(PackRole role, bool avoidFront);
         /// <summary>Разрешение бить в этот момент (токен фронта). Второй (сзади) всегда true.</summary>
         void SetAttackToken(bool hasToken);
+        /// <summary>Страх стаи вырос на amount (рана у сородича) — волк срезает свою агрессию.</summary>
+        void OnPackFear(float amount);
     }
 
     [Header("Игрок")]
@@ -65,6 +67,31 @@ public class WerewolfPackManager : MonoBehaviour
     [Header("Токен фронт-атаки")]
     [Tooltip("Как долго один фронтовик держит право удара, прежде чем токен уйдёт другому (сек).")]
     public float frontTokenHold = 1.25f;
+
+    [Header("Прыжки стаи")]
+    [Tooltip("Минимальный интервал между атакующими прыжками всей стаи (сек).")]
+    public float packJumpInterval = 1.2f;
+
+    [Header("Страх стаи")]
+    [Tooltip("Потолок страха стаи. Урон по любому волку добавляет столько же страха; пока не затухает.")]
+    public float maxPackFear = 500f;
+
+    private float _nextJumpAllowed;
+    private float _packFear;
+
+    /// <summary>Текущий страх стаи (0..maxPackFear). Общий для всех волков, только растёт.</summary>
+    public float PackFear => _packFear;
+    public float PackFearPercent => maxPackFear > 0f ? _packFear / maxPackFear : 0f;
+
+    /// <summary>Рана у волка (зовёт WerewolfStats.TakeDamage): страх стаи += урон,
+    /// и все живые волки срезают агрессию на ту же величину.</summary>
+    public void ReportWound(float damage)
+    {
+        _packFear = Mathf.Min(maxPackFear, _packFear + damage);
+        for (int i = 0; i < _wolves.Count; i++)
+            if (_wolves[i] != null && _wolves[i].IsAlive)
+                _wolves[i].OnPackFear(damage);
+    }
 
     // ---- состояние ----
     private readonly List<IPackAgent> _wolves = new List<IPackAgent>();
@@ -276,6 +303,26 @@ public class WerewolfPackManager : MonoBehaviour
                 if (_frontTokenHolder == _wolves[i]) _frontTokenHolder = null;
                 _wolves.RemoveAt(i);
             }
+    }
+
+    /// <summary>Разрешить атакующий прыжок: не чаще packJumpInterval на стаю,
+    /// и только волку с максимальным углом от взгляда игрока (лучшая позиция).</summary>
+    public bool RequestJump(WerewolfPerception asker)
+    {
+        if (Time.time < _nextJumpAllowed) return false;
+        if (asker == null) { _nextJumpAllowed = Time.time + packJumpInterval; return true; }
+
+        float myAngle = asker.AngleFromPlayerGaze;
+        for (int i = 0; i < _wolves.Count; i++)
+        {
+            var w = _wolves[i];
+            if (w == null || !w.IsAlive || w.Transform == asker.transform) continue;
+            var p = w.Transform.GetComponent<WerewolfPerception>();
+            if (p != null && p.AngleFromPlayerGaze > myAngle + 1f) return false; // есть волк в позиции лучше
+        }
+
+        _nextJumpAllowed = Time.time + packJumpInterval;
+        return true;
     }
 
 #if UNITY_EDITOR

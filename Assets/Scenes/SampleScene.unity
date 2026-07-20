@@ -145,6 +145,8 @@ GameObject:
   - component: {fileID: 81622714}
   - component: {fileID: 81622715}
   - component: {fileID: 81622716}
+  - component: {fileID: 81622717}
+  - component: {fileID: 81622718}
   m_Layer: 6
   m_Name: Player
   m_TagString: Player
@@ -173,6 +175,7 @@ MonoBehaviour:
     m_Bits: 512
   animator: {fileID: 1532388038}
   comboWindow: 1
+  blockKey: 324
 --- !u!114 &81622703
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -186,7 +189,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   rightHandWeapon: {fileID: 11400000, guid: 2e82528f9ee9acc4bb8fda5d7ab08d37, type: 2}
-  leftHandWeapon: {fileID: 0}
+  leftHandWeapon: {fileID: 11400000, guid: d45f00262525fd646b2a96325da47a89, type: 2}
 --- !u!114 &81622704
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -199,6 +202,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 0b4b884cad942a245ada8314f0057d71, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  invincible: 0
   maxHealth: 100
   healthRegenPerSecond: 50
   healthRegenDelay: 1
@@ -208,6 +212,10 @@ MonoBehaviour:
   maxMana: 100
   manaRegenPerSecond: 15
   manaRegenDelay: 0.3
+  maxGuard: 50
+  guardRegenPerSecond: 10
+  guardRegenDelay: 1.5
+  blockDamageMultiplier: 0.5
 --- !u!114 &81622705
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -603,10 +611,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 42e28bfc49b07ec4bb6864eeaddb1b32, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  resources: {fileID: 81622704}
-  playerTag: Player
-  fillImage: {fileID: 0}
-  smoothSpeed: 6
 --- !u!114 &81622716
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -621,6 +625,55 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   loadout: {fileID: 81622703}
   slotCount: 20
+--- !u!114 &81622717
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 81622701}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e2e87218f3dae3b49bbd4d6e8aa0e0dc, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  resources: {fileID: 81622704}
+  combat: {fileID: 0}
+  offset: {x: 0, y: 3, z: 0}
+  barWidth: 0.9
+  barHeight: 0.07
+  barSpacing: 0.03
+  textSize: 0.04
+  healthColor: {r: 0.85, g: 0.15, b: 0.15, a: 1}
+  staminaColor: {r: 0.9, g: 0.8, b: 0.2, a: 1}
+  guardColor: {r: 0.4, g: 0.65, b: 1, a: 1}
+  manaColor: {r: 0.6, g: 0.3, b: 0.9, a: 1}
+  backColor: {r: 0.08, g: 0.08, b: 0.08, a: 0.7}
+  blockReadyColor: {r: 0.25, g: 0.85, b: 0.3, a: 1}
+  blockActiveColor: {r: 0.95, g: 0.85, b: 0.2, a: 1}
+  blockCircleGap: 0.05
+--- !u!114 &81622718
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 81622701}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: af514c87d2d038944aaf364b62d52b56, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  combat: {fileID: 81622702}
+  sprite: {fileID: 10915, guid: 0000000000000000f000000000000000, type: 0}
+  color:
+    r: 0.4
+    g: 0.65
+    b: 1
+    a: 0.5
+  size: {x: 1.2, y: 1.4}
+  offset: {x: 6, y: 6, z: 6}
+  _quad: {fileID: 0}
 --- !u!1 &330585543
 GameObject:
   m_ObjectHideFlags: 0
@@ -1041,7 +1094,7 @@ MonoBehaviour:
     maxScale: 0.3
     heightOffset: 0.5
     castShadows: 1
-    collectible: 1
+    collectible: 0
     itemData: {fileID: 0}
     itemCount: 1
     pickupRadius: 1
@@ -1060,7 +1113,7 @@ MonoBehaviour:
     maxScale: 0.3
     heightOffset: 0.5
     castShadows: 1
-    collectible: 1
+    collectible: 0
     itemData: {fileID: 0}
     itemCount: 1
     pickupRadius: 1
@@ -2287,6 +2340,8 @@ MonoBehaviour:
   maxAttackers: 3
   roleUpdateInterval: 0.5
   frontTokenHold: 3
+  packJumpInterval: 1.2
+  maxPackFear: 500
 --- !u!4 &1984545283
 Transform:
   m_ObjectHideFlags: 0

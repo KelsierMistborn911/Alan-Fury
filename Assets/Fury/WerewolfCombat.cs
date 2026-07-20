@@ -79,6 +79,8 @@ public class WerewolfCombat : MonoBehaviour
     public float jumpArc = 2.2f;
     [Tooltip("Сколько секунд хитбокс прыжка активен с момента отрыва (должно покрывать весь полёт).")]
     public float jumpHitDuration = 1.5f;
+    [Tooltip("Максимальная дистанция наскока (м): с этого расстояния мозг решается прыгнуть. Не путать с range хитбокса ниже.")]
+    public float jumpLeapDistance = 8f;
     public AttackDef jump = new AttackDef
     {
         windup = 0.45f,

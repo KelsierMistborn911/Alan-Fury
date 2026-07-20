@@ -1,8 +1,11 @@
 using UnityEngine;
 
 /// <summary>
-/// Параметры оборотня. Пока только стамина — вынесена сюда из WerewolfCombat,
-/// чтобы бой не держал ресурсы сам. Здоровье/смерть (IDamageable) добавим сюда же позже.
+/// Параметры оборотня: здоровье, стамина, агрессия.
+/// Агрессия — накопительная (0..100): старт 0, растёт со скоростью aggressionPerSecond,
+/// пока волк в роли Attack (начисляет WerewolfPackBrain). Личного страха больше нет:
+/// урон по волку уходит в страх СТАИ (WerewolfPackManager.ReportWound), который
+/// разово срезает агрессию всем волкам.
 /// </summary>
 public class WerewolfStats : MonoBehaviour, IDamageable
 {
@@ -16,34 +19,33 @@ public class WerewolfStats : MonoBehaviour, IDamageable
     public float staminaRegenDelay = 1f;
 
     [Header("Агрессия")]
-    [Tooltip("Норма агрессии (0..100). Рана временно снижает текущую (страх), затем возвращается к норме.")]
-    [Range(0f, 100f)] public float aggression = 50f;
-    [Tooltip("Насколько одна рана снижает агрессию.")]
-    public float woundFear = 40f;
-    [Tooltip("За сколько секунд страх от одной раны полностью уходит.")]
-    public float fearDecayTime = 5f;
+    [Tooltip("Скорость накопления агрессии в роли Attack (ед/сек). Начисляет WerewolfPackBrain; вне атаки значение замирает.")]
+    public float aggressionPerSecond = 5f;
 
     private float _stamina;
     private float _regenTimer;
     private float _health;
-    private float _fear; // накопленный страх от ран, 0..100
+    private float _aggression; // накопленная агрессия 0..100, старт 0
     private WerewolfLocomotion _locomotion;
 
     public float Stamina => _stamina;
     public float StaminaPercent => maxStamina > 0f ? _stamina / maxStamina : 0f;
     public float Health => _health;
+    public float HealthPercent => maxHealth > 0f ? _health / maxHealth : 0f;
     public bool IsAlive => _health > 0f;
 
-    /// <summary>Текущая агрессия с учётом страха, нормированная 0..1 (для мозга).</summary>
-    public float Aggression01 => Mathf.Clamp01((aggression - _fear) / 100f);
+    /// <summary>Текущая агрессия 0..100 (для HUD).</summary>
+    public float Aggression => _aggression;
+    /// <summary>Текущая агрессия, нормированная 0..1 (для мозга).</summary>
+    public float Aggression01 => _aggression / 100f;
 
     /// <summary>Срабатывает один раз при смерти (мозг гасит компоненты, тело остаётся).</summary>
     public System.Action OnDeath;
 
-    /// <summary>Изменить норму агрессии (событиями боя: попал и т.п.). Зажимается 0..100.</summary>
+    /// <summary>Изменить агрессию (накопление, свои попадания, страх стаи). Зажимается 0..100.</summary>
     public void AddAggression(float delta)
     {
-        aggression = Mathf.Clamp(aggression + delta, 0f, 100f);
+        _aggression = Mathf.Clamp(_aggression + delta, 0f, 100f);
     }
 
     void Awake()
@@ -59,7 +61,11 @@ public class WerewolfStats : MonoBehaviour, IDamageable
     {
         if (!IsAlive) return;
         _health = Mathf.Max(0f, _health - amount);
-        _fear = Mathf.Min(100f, _fear + woundFear); // рана пугает → осторожное поведение
+
+        // Рана пугает всю стаю: страх стаи += урон, агрессия ВСЕХ волков −= урон.
+        if (WerewolfPackManager.Instance != null)
+            WerewolfPackManager.Instance.ReportWound(amount);
+
         DamagePopup.Spawn(transform.position + Vector3.up * 2f, amount, Color.white);
         if (_health <= 0f) OnDeath?.Invoke();
     }
@@ -71,10 +77,6 @@ public class WerewolfStats : MonoBehaviour, IDamageable
 
     void Update()
     {
-        // Страх от ран уходит со временем — агрессия возвращается к норме.
-        if (_fear > 0f && fearDecayTime > 0f)
-            _fear = Mathf.MoveTowards(_fear, 0f, (woundFear / fearDecayTime) * Time.deltaTime);
-
         if (_regenTimer > 0f) { _regenTimer -= Time.deltaTime; return; }
         if (_stamina < maxStamina)
             _stamina = Mathf.Min(maxStamina, _stamina + staminaRegenPerSecond * Time.deltaTime);
