@@ -169,13 +169,23 @@ MonoBehaviour:
   resources: {fileID: 81622704}
   loadout: {fileID: 81622703}
   hitbox: {fileID: 81622710}
-  targetLockRange: 15
+  targetLockRange: 25
+  targetHoldRange: 20
   enemyLayers:
     serializedVersion: 2
     m_Bits: 512
+  aimConeAngle: 200
   animator: {fileID: 1532388038}
   comboWindow: 1
+  targetMarkerHeight: 2.2
+  targetMarkerSize: 0.35
   blockKey: 324
+  thrustRangeMultiplier: 1.3
+  thrustDamageMultiplier: 1
+  movementDamageCoefficient: 0.02
+  dodgeAttackMinWindup: 0.08
+  dodgeAttackBufferAfter: 0.2
+  dodgeAttackPerfectTolerance: 0.08
 --- !u!114 &81622703
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -216,6 +226,8 @@ MonoBehaviour:
   guardRegenPerSecond: 10
   guardRegenDelay: 1.5
   blockDamageMultiplier: 0.5
+  blockArcAngle: 200
+  mass: 80
 --- !u!114 &81622705
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -664,16 +676,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: af514c87d2d038944aaf364b62d52b56, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  combat: {fileID: 81622702}
-  sprite: {fileID: 10915, guid: 0000000000000000f000000000000000, type: 0}
-  color:
-    r: 0.4
-    g: 0.65
-    b: 1
-    a: 0.5
-  size: {x: 1.2, y: 1.4}
-  offset: {x: 6, y: 6, z: 6}
-  _quad: {fileID: 0}
 --- !u!1 &330585543
 GameObject:
   m_ObjectHideFlags: 0
