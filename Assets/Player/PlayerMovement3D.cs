@@ -1,4 +1,4 @@
-﻿using UnityEngine;
+using UnityEngine;
 
 [System.Serializable]
 public struct GaitConfig
@@ -81,6 +81,7 @@ public class PlayerMovement3D : MonoBehaviour
     [Header("Граница карты (опционально)")]
     [Tooltip("Если не задана — берётся MapBoundary с этого же объекта.")]
     public MapBoundary boundary;
+    public Animator animator;
 
     // Компоненты
     private CharacterController _controller;
