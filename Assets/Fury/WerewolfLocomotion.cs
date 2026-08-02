@@ -15,6 +15,10 @@
 [RequireComponent(typeof(CharacterController))]
 public class WerewolfLocomotion : MonoBehaviour
 {
+    /// <summary>Стойка. На четвереньках быстрее, но нет стрейфа — волк всегда смотрит куда бежит.
+    /// На двух ногах медленнее, зато ходит боком и спиной, не теряя цель из виду.</summary>
+    public enum Stance { Quad, Biped }
+
     [Header("Граница карты (опционально)")]
     public MapBoundary boundary;
 
@@ -34,22 +38,44 @@ public class WerewolfLocomotion : MonoBehaviour
     [Tooltip("0 = ровное скольжение (как раньше), 1 = движение почти только толчками шагов. Торможения не касается.")]
     [Range(0f, 1f)] public float stepPulseWeight = 0.6f;
 
-    [Header("Наземная походка (шаги)")]
-    [Tooltip("У этих гейтов важны только speed/stepDistance/stepDuration/stepFrequency. " +
-             "acceleration/deceleration НЕ используются — разгон берётся из полей выше.")]
+    [Header("Стойка")]
+    [Tooltip("Умеет ли этот волк вставать на две ноги. Выключено — всегда на четвереньках (волчий тип).")]
+    public bool canBiped = true;
+    [Tooltip("Сколько длится подъём/опускание (сек). Всё это время волк не двигается и не бьёт.")]
+    public float stanceChangeDuration = 0.4f;
+
+    [Header("Наземная походка: важны speed/stepDistance/stepDuration/stepFrequency, acceleration/deceleration не используются")]
+    [Tooltip("На четвереньках, шаг. Gait=1.")]
+    public GaitConfig walk = new GaitConfig
+    {
+        speed = 2f,
+        stepDistance = 0.25f,
+        stepDuration = 0.36f,
+        stepFrequency = 1.9f
+    };
+    [Tooltip("На четвереньках, бег. Gait=2.")]
     public GaitConfig trot = new GaitConfig
     {
-        speed = 3.5f,
+        speed = 5f,
         stepDistance = 0.4f,
         stepDuration = 0.28f,
         stepFrequency = 2.6f
     };
+    [Tooltip("На четвереньках, спринт. Gait=3.")]
     public GaitConfig gallop = new GaitConfig
     {
         speed = 9f,
         stepDistance = 0.9f,
         stepDuration = 0.18f,
         stepFrequency = 3.6f
+    };
+    [Tooltip("На двух ногах — единственный темп. Стрейф разрешён, поэтому медленнее бега на четырёх.")]
+    public GaitConfig bipedGait = new GaitConfig
+    {
+        speed = 3.5f,
+        stepDistance = 0.3f,
+        stepDuration = 0.3f,
+        stepFrequency = 2.2f
     };
 
     [Header("Преодоление рельефа (vault — как у игрока, но лазает выше)")]
@@ -72,7 +98,13 @@ public class WerewolfLocomotion : MonoBehaviour
     public float gravity = -20f;
 
     [Header("Поворот")]
+    [Tooltip("Скорость поворота на четвереньках. Низкая — бег выглядит плавно, разворот широкой дугой.")]
     public float rotationSpeed = 6f;
+    [Tooltip("Скорость поворота на двух ногах. Выше, чтобы волк успевал доворачиваться к цели в ближнем бою.")]
+    public float bipedRotationSpeed = 13f;
+
+    /// <summary>Скорость поворота для текущей стойки.</summary>
+    private float TurnSpeed => _stance == Stance.Biped ? bipedRotationSpeed : rotationSpeed;
 
     [Header("Прибытие")]
     public float arriveThreshold = 1.5f;
@@ -82,7 +114,9 @@ public class WerewolfLocomotion : MonoBehaviour
     public float groundProbeHeight = 50f;
 
     [Header("Анимация")]
-    [Tooltip("Аниматор волка (опционально — пока нет, оставь пустым, ошибок не будет). Параметры: Run (bool), Speed (float), триггеры Leap/Jump/Vault.")]
+    [Tooltip("Аниматор волка (опционально — пока нет, оставь пустым, ошибок не будет). " +
+             "Параметры: Stance (bool: вкл = на двух ногах), Gait (int: 0 стоит, 1 шаг, 2 бег, 3 спринт), " +
+             "триггеры StandUp/DropDown/Leap/Vault/Death. Старые Run (bool) и Speed (float) пока пишутся тоже.")]
     public Animator animator;
 
     private CharacterController _cc;
@@ -100,21 +134,73 @@ public class WerewolfLocomotion : MonoBehaviour
 
     private readonly StepController _step = new StepController();
 
+    // Какие параметры реально есть в контроллере. Аниматор ругается в консоль на каждую
+    // запись несуществующего параметра, поэтому проверяем — клипы можно добавлять постепенно.
+    private System.Collections.Generic.HashSet<string> _animParams;
+
+    private void CacheAnimParams()
+    {
+        _animParams = new System.Collections.Generic.HashSet<string>();
+        if (animator == null || animator.runtimeAnimatorController == null) return;
+        foreach (var p in animator.parameters) _animParams.Add(p.name);
+    }
+
+    private bool HasParam(string name) =>
+        animator != null && _animParams != null && _animParams.Contains(name);
+
+    private void SetTrig(string name) { if (HasParam(name)) animator.SetTrigger(name); }
+    private void SetBoolIf(string name, bool v) { if (HasParam(name)) animator.SetBool(name, v); }
+    private void SetIntIf(string name, int v) { if (HasParam(name)) animator.SetInteger(name, v); }
+    private void SetFloatIf(string name, float v) { if (HasParam(name)) animator.SetFloat(name, v); }
+
+    /// <summary>Проиграть смерть (клип VDEATH). Нет параметра Death в контроллере — тихо пропускаем.</summary>
+    public void PlayDeath() => SetTrig("Death");
+
+    /// <summary>Послать триггер атаки. Зовёт WerewolfCombat, чтобы не дублировать проверку параметров.</summary>
+    public void PlayAttack(string trigger) => SetTrig(trigger);
+
     private int _moveFrame = -1;
     private Vector3 _moveTarget;
     private float _moveSpeed;
 
+    // стойка
+    private Stance _stance = Stance.Quad;
+    private float _stanceTimer;          // >0 — идёт переход, движение и атаки запрещены
+    private Stance _stanceTarget = Stance.Quad;
+
     public bool IsGrounded => _cc != null && _cc.isGrounded;
     public bool IsLeaping => _leaping;
-    public bool IsVaulting => _vaulting;
-    public float CurrentSpeed => _horizVel.magnitude;
-    public float StepCurve => _step.Curve;   // для боба/анимации/звука
 
-    void Awake() => _cc = GetComponent<CharacterController>();
+    /// <summary>Текущая стойка. Меняется через SetStance, во время перехода остаётся прежней.</summary>
+    public Stance CurrentStance => _stance;
+    /// <summary>Идёт подъём/опускание — волк стоит на месте и не может бить.</summary>
+    public bool IsChangingStance => _stanceTimer > 0f;
+    /// <summary>Стоит на двух ногах (можно двигаться боком и назад).</summary>
+    public bool IsBiped => _stance == Stance.Biped;
+    /// <summary>Текущий аллюр для аниматора: 0 стоит, 1 шаг, 2 бег, 3 спринт.</summary>
+    public int CurrentGait { get; private set; }
+
+    /// <summary>Сменить стойку. Пока идёт переход, волк не двигается и не атакует.
+    /// Волку с canBiped=false подъём недоступен — вызов игнорируется.</summary>
+    public void SetStance(Stance s)
+    {
+        if (s == Stance.Biped && !canBiped) return;
+        if (_stanceTarget == s) return;              // уже там или уже идём туда
+        if (_leaping || _vaulting) return;           // в воздухе не встаём
+
+        _stanceTarget = s;
+        _stanceTimer = stanceChangeDuration;
+        _step.Cancel();
+        if (animator != null)
+            SetTrig(s == Stance.Biped ? "StandUp" : "DropDown");
+    }
+
+    void Awake()
+    {
+        _cc = GetComponent<CharacterController>();
+        CacheAnimParams();
+    }
     void Start() { if (boundary == null) boundary = GetComponent<MapBoundary>(); }
-
-    /// <summary>Заново посадить на землю (например, после перегенерации карты).</summary>
-    public void RequestGroundSnap() => _placed = false;
 
     // =================== Намерение от мозга ===================
 
@@ -141,15 +227,7 @@ public class WerewolfLocomotion : MonoBehaviour
         _vertVel = vUp;
         _leaping = true;
         _step.Cancel();
-        if (animator != null) animator.SetTrigger("Leap");
-    }
-
-    /// <summary>Вертикальный прыжок на месте.</summary>
-    public void Jump(float height)
-    {
-        if (!_cc.isGrounded || _leaping || _vaulting) return;
-        _vertVel = Mathf.Sqrt(2f * -gravity * height);
-        if (animator != null) animator.SetTrigger("Jump");
+        SetTrig("Leap");
     }
 
     /// <summary>Мгновенный горизонтальный импульс (отброс от удара). Затухает обычным торможением.</summary>
@@ -159,12 +237,19 @@ public class WerewolfLocomotion : MonoBehaviour
         _horizVel += force;
     }
 
+    /// <summary>Повернуться к точке. На четвереньках работает только СТОЯ: в движении
+    /// волк смотрит туда, куда бежит, иначе он полз бы боком (старая беда).
+    /// На двух ногах — всегда, это и есть смысл стойки.</summary>
     public void FaceTowards(Vector3 worldPoint, float dt)
     {
+        // В Quad в момент активного движения ориентацию задаёт направление бега.
+        if (_stance == Stance.Quad && _moveFrame == Time.frameCount && _horizVel.sqrMagnitude > 0.04f)
+            return;
+
         Vector3 look = worldPoint - transform.position; look.y = 0f;
         if (look.sqrMagnitude < 0.0001f) return;
         transform.rotation = Quaternion.Slerp(transform.rotation,
-            Quaternion.LookRotation(look.normalized, Vector3.up), rotationSpeed * dt);
+            Quaternion.LookRotation(look.normalized, Vector3.up), TurnSpeed * dt);
     }
 
     // =================== Физика (после мозга) ===================
@@ -178,7 +263,14 @@ public class WerewolfLocomotion : MonoBehaviour
         // Перелаз сам двигает оборотня — остальную физику в этом кадре пропускаем.
         if (_vaulting) { TickVault(dt); return; }
 
-        bool active = _moveFrame == Time.frameCount;
+        // Смена стойки: волк встаёт/опускается на месте, приказ на движение игнорируется.
+        if (_stanceTimer > 0f)
+        {
+            _stanceTimer -= dt;
+            if (_stanceTimer <= 0f) _stance = _stanceTarget;
+        }
+
+        bool active = _moveFrame == Time.frameCount && _stanceTimer <= 0f;
         Vector3 pos = transform.position;
 
         _stepImpulse = 0f;
@@ -199,12 +291,25 @@ public class WerewolfLocomotion : MonoBehaviour
                     ? Mathf.Lerp(0f, _moveSpeed, dist / slowdownDistance)
                     : _moveSpeed;
 
-                // Вперёд — полная скорость, вбок/назад — медленнее (спиной не спринтуем).
-                float facingDot = Vector3.Dot(transform.forward, dir);
-                float dirMult = facingDot >= 0f
-                    ? Mathf.Lerp(sideSpeedMult, 1f, facingDot)
-                    : Mathf.Lerp(sideSpeedMult, backSpeedMult, -facingDot);
-                targetSpeed *= dirMult;
+                if (_stance == Stance.Quad)
+                {
+                    // На четвереньках стрейфа нет: волк доворачивается по ходу движения и
+                    // всегда бежит вперёд. Множители side/back не применяются — иначе он
+                    // полз бы боком, не разворачиваясь (старое поведение).
+                    if (dir.sqrMagnitude > 0.0001f)
+                        transform.rotation = Quaternion.Slerp(transform.rotation,
+                            Quaternion.LookRotation(dir, Vector3.up), TurnSpeed * dt);
+                }
+                else
+                {
+                    // На двух ногах — стрейф: идём куда надо, смотрим куда смотрели.
+                    // Вперёд полная скорость, вбок/назад медленнее.
+                    float facingDot = Vector3.Dot(transform.forward, dir);
+                    float dirMult = facingDot >= 0f
+                        ? Mathf.Lerp(sideSpeedMult, 1f, facingDot)
+                        : Mathf.Lerp(sideSpeedMult, backSpeedMult, -facingDot);
+                    targetSpeed *= dirMult;
+                }
 
                 Vector3 targetVel = dir * targetSpeed;
                 float rate = targetVel.magnitude > _horizVel.magnitude ? acceleration : deceleration;
@@ -220,7 +325,11 @@ public class WerewolfLocomotion : MonoBehaviour
             // --- Наземная походка с импульсом шага (как у игрока) ---
             if (active && spd > 0.1f)
             {
-                _step.TryStart(spd, trot, gallop);
+                // StepController берёт два гейта и интерполирует между ними, поэтому
+                // выбираем соседнюю пару по текущей скорости.
+                if (_stance == Stance.Biped) _step.TryStart(spd, bipedGait, bipedGait);
+                else if (spd <= trot.speed) _step.TryStart(spd, walk, trot);
+                else _step.TryStart(spd, trot, gallop);
                 _stepImpulse = _step.Tick(dt);
             }
             else
@@ -253,11 +362,18 @@ public class WerewolfLocomotion : MonoBehaviour
         _cc.Move(horiz + Vector3.up * (_vertVel * dt));
 
         // --- Анимация бега ---
+        float speedNow = _horizVel.magnitude;
+        CurrentGait = GaitFromSpeed(speedNow);
+
         if (animator != null)
         {
-            float animSpd = _horizVel.magnitude;
-            animator.SetBool("Run", !_leaping && animSpd > 0.1f);
-            animator.SetFloat("Speed", animSpd); // для blend-tree trot↔gallop
+            SetBoolIf("Stance", _stance == Stance.Biped);
+            SetIntIf("Gait", CurrentGait);
+
+            // Старые параметры пишем как раньше — контроллер продолжит работать на них,
+            // пока переходы не перевешены на Stance/Gait.
+            SetBoolIf("Run", !_leaping && speedNow > 0.1f);
+            SetFloatIf("Speed", speedNow);
         }
     }
 
@@ -297,7 +413,7 @@ public class WerewolfLocomotion : MonoBehaviour
         _vaultDir = dir;
         _vertVel = 0f;
         _step.Cancel();
-        if (animator != null) animator.SetTrigger("Vault");
+        SetTrig("Vault");
     }
 
     private void TickVault(float dt)
@@ -323,6 +439,17 @@ public class WerewolfLocomotion : MonoBehaviour
     }
 
     // =================== helpers ===================
+
+    /// <summary>0 стоит, 1 шаг, 2 бег, 3 спринт. На двух ногах темп один — всегда 1.
+    /// Границы по середине между гейтами, чтобы аллюр не дёргался у самого порога.</summary>
+    private int GaitFromSpeed(float spd)
+    {
+        if (_leaping || _stanceTimer > 0f || spd <= 0.1f) return 0;
+        if (_stance == Stance.Biped) return 1;
+        if (spd < (walk.speed + trot.speed) * 0.5f) return 1;
+        if (spd < (trot.speed + gallop.speed) * 0.5f) return 2;
+        return 3;
+    }
 
     private bool TryPlaceOnGround()
     {

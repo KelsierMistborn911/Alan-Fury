@@ -60,7 +60,7 @@ public class WerewolfPerception : MonoBehaviour
         }
     }
 
-    private AlphaStalker _stalker; // источник данных об укрытиях (может отсутствовать)
+    private WerewolfAlphaStalker _stalker; // источник данных об укрытиях (может отсутствовать)
     private CombatController3D _playerCombat;
     private PlayerLoadout _playerLoadout;
     private WeaponHitbox _playerHitbox;
@@ -75,7 +75,7 @@ public class WerewolfPerception : MonoBehaviour
         if (player != null) _playerCombat = player.GetComponent<CombatController3D>();
         if (player != null) _playerLoadout = player.GetComponent<PlayerLoadout>();
         if (player != null) _playerHitbox = player.GetComponentInChildren<WeaponHitbox>();
-        _stalker = GetComponent<AlphaStalker>();
+        _stalker = GetComponent<WerewolfAlphaStalker>();
     }
 
     /// <summary>Горизонтальная дистанция до игрока (Y игнорируется).</summary>

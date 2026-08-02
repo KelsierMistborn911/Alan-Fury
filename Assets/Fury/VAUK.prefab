@@ -36,14 +36,14 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 4950279192017619235}
   serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalRotation: {x: 0, y: 0.7071068, z: 0, w: 0.7071068}
   m_LocalPosition: {x: 52.69791, y: 5, z: -230.32217}
   m_LocalScale: {x: 2, y: 2, z: 2}
   m_ConstrainProportionsScale: 0
   m_Children:
   - {fileID: 2068647681654099110}
   m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 90, z: 0}
 --- !u!114 &7569614571355709067
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -110,6 +110,15 @@ MonoBehaviour:
   sideSpeedMult: 0.6
   backSpeedMult: 0.35
   stepPulseWeight: 0.6
+  canBiped: 1
+  stanceChangeDuration: 0.4
+  walk:
+    speed: 2
+    acceleration: 0
+    deceleration: 0
+    stepDistance: 0.25
+    stepDuration: 0.36
+    stepFrequency: 1.9
   trot:
     speed: 3.5
     acceleration: 0
@@ -124,6 +133,13 @@ MonoBehaviour:
     stepDistance: 0.9
     stepDuration: 0.18
     stepFrequency: 3.6
+  bipedGait:
+    speed: 3.5
+    acceleration: 0
+    deceleration: 0
+    stepDistance: 0.3
+    stepDuration: 0.3
+    stepFrequency: 2.2
   vaultLayers:
     serializedVersion: 2
     m_Bits: 128
@@ -135,6 +151,7 @@ MonoBehaviour:
   vaultCooldown: 0.6
   gravity: -20
   rotationSpeed: 6
+  bipedRotationSpeed: 13
   arriveThreshold: 1.5
   groundLayers:
     serializedVersion: 2
@@ -225,12 +242,12 @@ MonoBehaviour:
   maxCombo: 3
   comboWindow: 0.3
   swipe:
-    windup: 0.2
+    windup: 0.5
     active: 0.1
     recover: 0.1
     cooldown: 0.1
     staminaCost: 12
-    range: 7
+    range: 5
     radius: 2
     height: 2
     offset: {x: 0, y: 1, z: 0}
@@ -270,6 +287,10 @@ MonoBehaviour:
   behindDistance: 7
   frontLineBias: 0.6
   aggroPerHit: 1
+  layDownOnDeath: 0
+  bipedDistance: 6
+  noAttackTier: 2
+  afraidHoldMult: 1.6
   cautiousTierMax: 0.33
   midTierMax: 0.66
   sectorHoldTime: 2
@@ -293,9 +314,6 @@ MonoBehaviour:
   dodgeDistance: 4
   dodgeArc: 0.6
   dodgeCooldown: 0.6
-  packAgentLayers:
-    serializedVersion: 2
-    m_Bits: 512
   separationRadius: 2.2
   separationStrength: 2
 --- !u!114 &-5318893361700369184
@@ -312,16 +330,24 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   perception: {fileID: 7569614571355709067}
   locomotion: {fileID: 5952714522296563151}
-  preferredDistance: 20
-  minDistance: 15
-  noticeRange: 30
+  preferredDistance: 30
+  minDistance: 25
+  noticeRange: 35
   circleSpeed: 4
   fleeSpeed: 10
-  orbitStepAngle: 60
-  reverseChance: 0.25
   retreatDistanceFactor: 1.3
   holdInterval: 2
   holdJitter: 1
+  candidateCount: 6
+  switchMargin: 1.5
+  crowdRadius: 4
+  crowdWeight: 1
+  bandWeight: 0
+  sectorCenterWeight: 0.5
+  travelWeight: 0.3
+  separationRadius: 5
+  separationStrength: 1
+  separationDeadzone: 0.3
 --- !u!114 &-4529822592582529304
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -355,6 +381,12 @@ MonoBehaviour:
   staminaRegenPerSecond: 25
   staminaRegenDelay: 1
   aggressionPerSecond: 5
+  baseFearIdle: 0
+  baseFearCombat: 25
+  fearRegenPerSecond: 3
+  slowTickInterval: 1
+  target: {fileID: 0}
+  tokens: 0
 --- !u!114 &5920791607548002130
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -453,7 +485,7 @@ PrefabInstance:
     - target: {fileID: -8679921383154817045, guid: debf24ac08dd7684cb9262a481f599d0,
         type: 3}
       propertyPath: m_LocalRotation.w
-      value: 1
+      value: 0.7071068
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: debf24ac08dd7684cb9262a481f599d0,
         type: 3}
@@ -463,7 +495,7 @@ PrefabInstance:
     - target: {fileID: -8679921383154817045, guid: debf24ac08dd7684cb9262a481f599d0,
         type: 3}
       propertyPath: m_LocalRotation.y
-      value: 0
+      value: -0.7071068
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: debf24ac08dd7684cb9262a481f599d0,
         type: 3}
@@ -478,7 +510,7 @@ PrefabInstance:
     - target: {fileID: -8679921383154817045, guid: debf24ac08dd7684cb9262a481f599d0,
         type: 3}
       propertyPath: m_LocalEulerAnglesHint.y
-      value: 0
+      value: -90
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: debf24ac08dd7684cb9262a481f599d0,
         type: 3}

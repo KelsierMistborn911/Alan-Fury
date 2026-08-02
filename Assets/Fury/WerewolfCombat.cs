@@ -4,7 +4,7 @@ using UnityEngine;
 /// Боевой исполнитель оборотня: три атаки от замаха + собственная стамина.
 ///
 /// Разделение обязанностей:
-///   • МОЗГ (WerewolfPackBrain) решает, ЧТО ударить по дистанции, и зовёт
+///   • МОЗГ (WerewolfAttackBrain) решает, ЧТО ударить по дистанции, и зовёт
 ///     TryJump()/TrySwipe()/TrySpecial(). Пока IsBusy — мозг не двигает волка (MoveTo).
 ///   • ЭТОТ скрипт сам не выбирает атаку — только гоняет фазы и наносит урон.
 ///
@@ -87,7 +87,7 @@ public class WerewolfCombat : MonoBehaviour
         active = 0.20f,
         recover = 0.50f,
         cooldown = 2.5f,
-        staminaCost = 35f,
+        staminaCost = 28f,
         range = 2.0f,
         radius = 1.2f,
         height = 2f,
@@ -105,12 +105,12 @@ public class WerewolfCombat : MonoBehaviour
     public float comboWindow = 0.6f;
     public AttackDef swipe = new AttackDef
     {
-        windup = 0.25f,
+        windup = 0.5f,
         active = 0.15f,
         recover = 0.35f,
         cooldown = 0.10f,
-        staminaCost = 12f,
-        range = 2.0f,
+        staminaCost = 16f,
+        range = 3.0f,
         radius = 1.0f,
         height = 2f,
         offset = new Vector3(0f, 1f, 0f),
@@ -125,7 +125,7 @@ public class WerewolfCombat : MonoBehaviour
         active = 0.25f,
         recover = 0.70f,
         cooldown = 4f,
-        staminaCost = 45f,
+        staminaCost = 36f,
         range = 3.5f,
         radius = 1.0f,
         height = 2f,
@@ -151,10 +151,8 @@ public class WerewolfCombat : MonoBehaviour
 
     // ===================== Публичное для мозга =====================
     public bool IsBusy => _phase != Phase.Idle;
+    /// <summary>Идёт замах. Под индикатор замаха волка (микроспрайт у головы).</summary>
     public bool IsWindingUp => _phase == Phase.Windup;
-    public int ComboCount => _combo;
-    public float Stamina => stats != null ? stats.Stamina : 0f;
-    public float StaminaPercent => stats != null ? stats.StaminaPercent : 0f;
 
     /// <summary>Срабатывает, когда удар этого волка нанёс урон (мозг цепляет для агрессии и т.п.).</summary>
     public System.Action OnHitLanded;
@@ -163,6 +161,8 @@ public class WerewolfCombat : MonoBehaviour
     public bool CanStart(AttackKind kind)
     {
         if (_phase != Phase.Idle) return false;
+        // Волк встаёт на две ноги / опускается на четыре — руки заняты, ударить нечем.
+        if (locomotion != null && locomotion.IsChangingStance) return false;
         if (Time.time < _cooldownUntil[(int)kind]) return false;
         return stats != null && stats.HasEnough(DefOf(kind).staminaCost);
     }
@@ -262,13 +262,16 @@ public class WerewolfCombat : MonoBehaviour
         _phase = Phase.Windup;
         _phaseTimer = _def.windup;
 
-        if (animator != null)
+        // Триггеры шлём через локомоцию — она проверяет, есть ли параметр в контроллере,
+        // чтобы Unity не сыпал ошибками, пока анимации ещё не добавлены.
+        // Jump сюда не попадает намеренно: анимацию наскока шлёт locomotion.Leap
+        // в EnterActive. Иначе на один прыжок летели бы два триггера подряд.
+        if (locomotion != null)
         {
             switch (_kind)
             {
-                case AttackKind.Jump: animator.SetTrigger("Jump"); break;
-                case AttackKind.Swipe: animator.SetTrigger("Swipe"); break;
-                case AttackKind.Special: animator.SetTrigger("Special"); break;
+                case AttackKind.Swipe: locomotion.PlayAttack("Swipe"); break;
+                case AttackKind.Special: locomotion.PlayAttack("Special"); break;
             }
         }
     }
@@ -338,7 +341,10 @@ public class WerewolfCombat : MonoBehaviour
     {
         if (hitbox == null) return;
 
-        Vector3 dir = perception.HasPlayer
+        // Бьём туда, куда СМОТРИМ. Раньше удар летел в игрока независимо от разворота —
+        // волк попадал спиной, и обойти его было нельзя. Теперь обход = промах.
+        // Наскок — исключение: там направление задаёт сам прыжок.
+        Vector3 dir = _kind == AttackKind.Jump && perception.HasPlayer
             ? Flat(perception.PlayerPos - transform.position)
             : transform.forward;
 

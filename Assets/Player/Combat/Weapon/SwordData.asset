@@ -36,6 +36,13 @@ MonoBehaviour:
   cooldownDuration: 0.3
   tickInterval: 0.1
   staminaCost: 15
+  hasSecondary: 1
+  secondaryTrigger: Thrust
+  secondaryDamageMult: 1
+  secondaryRangeMult: 1.3
+  secondaryRadiusMult: 0.35
+  secondaryConeHalfAngle: 15
+  secondaryStaminaMult: 1
   targetLayers:
     serializedVersion: 2
     m_Bits: 512

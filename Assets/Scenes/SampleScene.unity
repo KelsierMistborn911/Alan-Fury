@@ -143,10 +143,8 @@ GameObject:
   - component: {fileID: 81622712}
   - component: {fileID: 81622713}
   - component: {fileID: 81622714}
-  - component: {fileID: 81622715}
   - component: {fileID: 81622716}
   - component: {fileID: 81622717}
-  - component: {fileID: 81622718}
   m_Layer: 6
   m_Name: Player
   m_TagString: Player
@@ -171,6 +169,10 @@ MonoBehaviour:
   hitbox: {fileID: 81622710}
   targetLockRange: 25
   targetHoldRange: 20
+  combatFaceRange: 10
+  closeSwitchRange: 6
+  closeSwitchAngleMargin: 20
+  aimAnglePenalty: 0.1
   enemyLayers:
     serializedVersion: 2
     m_Bits: 512
@@ -180,8 +182,13 @@ MonoBehaviour:
   targetMarkerHeight: 2.2
   targetMarkerSize: 0.35
   blockKey: 324
-  thrustRangeMultiplier: 1.3
-  thrustDamageMultiplier: 1
+  secondaryKey: 113
+  parryKey: 102
+  parryWindow: 0.25
+  parryCooldown: 0.25
+  blockAttackWindup: 0.15
+  lungeSpeedMultiplier: 1.6
+  lungeInputDot: 0.5
   movementDamageCoefficient: 0.02
   dodgeAttackMinWindup: 0.08
   dodgeAttackBufferAfter: 0.2
@@ -261,6 +268,31 @@ MonoBehaviour:
     stepDistance: 2
     stepDuration: 0.15
     stepFrequency: 4
+  combatWalk:
+    speed: 4
+    acceleration: 25
+    deceleration: 30
+    stepDistance: 0.5
+    stepDuration: 0.35
+    stepFrequency: 2.2
+  combatRun:
+    speed: 8
+    acceleration: 18
+    deceleration: 14
+    stepDistance: 1
+    stepDuration: 0.22
+    stepFrequency: 3.2
+  combatSprint:
+    speed: 13
+    acceleration: 12
+    deceleration: 6
+    stepDistance: 1.6
+    stepDuration: 0.16
+    stepFrequency: 4.5
+  strafeAngle: 45
+  backAngle: 135
+  strafeSpeedMultiplier: 0.8
+  backSpeedMultiplier: 0.6
   dodgeSpeed: 9
   dodgeDuration: 0.4
   dodgeCooldown: 0.1
@@ -279,9 +311,11 @@ MonoBehaviour:
   vaultRise: 1.5
   vaultCooldown: 0.8
   rotationSpeed: 15
+  sprintTurnSpeed: 4
   gravity: -20
-  boundary: {fileID: 0}
   animator: {fileID: 1535813807}
+  moveThreshold: 0.15
+  boundary: {fileID: 0}
 --- !u!143 &81622706
 CharacterController:
   m_ObjectHideFlags: 0
@@ -553,7 +587,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: f836c69d1be210643943f298453e0f2d, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  heightSource: {fileID: 1950520771}
+  heightSource: {fileID: 0}
   chunkedBuilder: {fileID: 1950520777}
   seamlessBuilder: {fileID: 1950520776}
   bandWidth: 9
@@ -614,18 +648,6 @@ MonoBehaviour:
   flicker: 1
   flickerAmount: 0.12
   flickerSpeed: 9
---- !u!114 &81622715
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 81622701}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 42e28bfc49b07ec4bb6864eeaddb1b32, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
 --- !u!114 &81622716
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -667,18 +689,6 @@ MonoBehaviour:
   blockReadyColor: {r: 0.25, g: 0.85, b: 0.3, a: 1}
   blockActiveColor: {r: 0.95, g: 0.85, b: 0.2, a: 1}
   blockCircleGap: 0.05
---- !u!114 &81622718
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 81622701}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: af514c87d2d038944aaf364b62d52b56, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
 --- !u!4 &280965120 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: -8679921383154817045, guid: c8d7deedecdbfe64f86dae0f576a4e09,
@@ -1335,7 +1345,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: f868c31d5c7349649b6cb45d25fff8af, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  heightSource: {fileID: 1950520771}
+  heightSource: {fileID: 1950520784}
   terrainBuilder: {fileID: 1950520777}
   player: {fileID: 81622707}
   types:
@@ -1708,6 +1718,15 @@ MonoBehaviour:
   sideSpeedMult: 0.6
   backSpeedMult: 0.35
   stepPulseWeight: 0.6
+  canBiped: 1
+  stanceChangeDuration: 0.4
+  walk:
+    speed: 2
+    acceleration: 0
+    deceleration: 0
+    stepDistance: 0.25
+    stepDuration: 0.36
+    stepFrequency: 1.9
   trot:
     speed: 3.5
     acceleration: 0
@@ -1722,6 +1741,13 @@ MonoBehaviour:
     stepDistance: 0.9
     stepDuration: 0.18
     stepFrequency: 3.6
+  bipedGait:
+    speed: 3.5
+    acceleration: 0
+    deceleration: 0
+    stepDistance: 0.3
+    stepDuration: 0.3
+    stepFrequency: 2.2
   vaultLayers:
     serializedVersion: 2
     m_Bits: 128
@@ -1733,6 +1759,7 @@ MonoBehaviour:
   vaultCooldown: 0.6
   gravity: -20
   rotationSpeed: 6
+  bipedRotationSpeed: 13
   arriveThreshold: 1.5
   groundLayers:
     serializedVersion: 2
@@ -1779,11 +1806,19 @@ MonoBehaviour:
   noticeRange: 30
   circleSpeed: 4
   fleeSpeed: 9
-  orbitStepAngle: 60
-  reverseChance: 0.25
   retreatDistanceFactor: 1.3
   holdInterval: 2
   holdJitter: 1
+  candidateCount: 6
+  switchMargin: 1.5
+  crowdRadius: 4
+  crowdWeight: 1
+  bandWeight: 0
+  sectorCenterWeight: 0.5
+  travelWeight: 0.3
+  separationRadius: 5
+  separationStrength: 1
+  separationDeadzone: 0.3
 --- !u!4 &1224455447
 Transform:
   m_ObjectHideFlags: 0
@@ -1842,7 +1877,7 @@ MonoBehaviour:
   locomotion: {fileID: 1224455444}
   pathfinder: {fileID: 1950520783}
   spookRadius: 18
-  stalkMin: 25
+  stalkMin: 30
   stalkMax: 50
   fleeUntilDistance: 50
   rearAngle: 90
@@ -1851,7 +1886,7 @@ MonoBehaviour:
   coverSnapRadius: 8
   reactDelay: 0.5
   coverCrossPlayerRadius: 4
-  stalkSpeed: 4
+  stalkSpeed: 5
   retreatSpeed: 8
   pursueSpeed: 7
   fleeSpeed: 12
@@ -1870,7 +1905,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: f836c69d1be210643943f298453e0f2d, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  heightSource: {fileID: 1950520771}
+  heightSource: {fileID: 0}
   chunkedBuilder: {fileID: 1950520777}
   seamlessBuilder: {fileID: 0}
   bandWidth: 9
@@ -2508,7 +2543,6 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 1950520772}
-  - component: {fileID: 1950520771}
   - component: {fileID: 1950520770}
   - component: {fileID: 1950520769}
   - component: {fileID: 1950520768}
@@ -2522,6 +2556,7 @@ GameObject:
   - component: {fileID: 1950520781}
   - component: {fileID: 1950520782}
   - component: {fileID: 1950520783}
+  - component: {fileID: 1950520784}
   m_Layer: 7
   m_Name: Terrain
   m_TagString: Untagged
@@ -2541,7 +2576,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 01443988fe19e23488332ce3c693b1e0, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  heightSource: {fileID: 1950520771}
+  heightSource: {fileID: 1950520784}
   terrainBuilder: {fileID: 1950520776}
   chunkedBuilder: {fileID: 1950520777}
   zoneSystem: {fileID: 1950520773}
@@ -2595,7 +2630,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 254570a1bc5b64842b21ddfb30dc0845, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  heightGenerator: {fileID: 1950520771}
+  heightGenerator: {fileID: 1950520784}
   terrainBuilder: {fileID: 0}
   chunkedTerrainBuilder: {fileID: 1950520777}
   objectPlacer: {fileID: 1950520765}
@@ -2682,42 +2717,6 @@ MeshFilter:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1950520764}
   m_Mesh: {fileID: 0}
---- !u!114 &1950520771
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1950520764}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 9126e7d74644ee7479bea464b72418ca, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  width: 100
-  depth: 300
-  chunkedBuilder: {fileID: 1950520777}
-  randomSeed: 0
-  seed: 4958
-  puddleDepth: 4
-  moundHeight: 3
-  spotSize: 60
-  landFraction: 0.4
-  hillDensity: 0.5
-  hillMinSeparation: 0.4
-  edgeMargin: 0.1
-  maxHeight: 8
-  hillMinHeightFrac: 0.3
-  hillSizeRange: {x: 0.08, y: 0.2}
-  hillSizeScale: 1
-  ridgeDirection: 90
-  ridgeDirectionSpread: 25
-  ridgeElongation: 2
-  corridorHalfWidth: 3
-  corridorHeight: 0.5
-  terraceStep: 0.5
-  minClusterCells: 5
-  boundarySmoothPasses: 2
 --- !u!4 &1950520772
 Transform:
   m_ObjectHideFlags: 0
@@ -2745,18 +2744,18 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 8ffea9e1418ccda478f6d670832549d9, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  heightSource: {fileID: 1950520771}
+  heightSource: {fileID: 1950520784}
   terrainBuilder: {fileID: 1950520776}
   chunkedBuilder: {fileID: 1950520777}
   zones: []
-  waterPercent: 0.6
+  waterPercent: 0
   waterPatchScale: 0.5
-  showWaterInGame: 1
+  showWaterInGame: 0
   waterMaterial: {fileID: 0}
   waterPlaneColor: {r: 0.24377, g: 0.6226415, b: 0.4151403, a: 0.55}
-  showGizmos: 1
-  showZoneLabels: 1
-  showWater: 1
+  showGizmos: 0
+  showZoneLabels: 0
+  showWater: 0
   waterGizmoColor: {r: 0.15, g: 0.35, b: 0.8, a: 0.6}
   gizmoHeight: 0.05
   gizmoAlpha: 0.5
@@ -2773,7 +2772,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 360b1a357afbbbf4193397bfad0fa7d0, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  heightSource: {fileID: 1950520771}
+  heightSource: {fileID: 1950520784}
   tileSize: 4
   tileThickness: 0.2
   addFoundation: 1
@@ -2793,7 +2792,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 761eb3056a6bf0443b58ee3e152b43a3, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  heightSource: {fileID: 1950520771}
+  heightSource: {fileID: 1950520784}
   tileSize: 4
   slopeThreshold: 0.5
   chunkSize: 10
@@ -2828,7 +2827,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 227ae643b9b797a409ed9bb0a9c2e6c4, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  heightSource: {fileID: 1950520771}
+  heightSource: {fileID: 1950520784}
   terrainBuilder: {fileID: 1950520777}
   roadGenerator: {fileID: 1950520782}
   zoneSystem: {fileID: 1950520773}
@@ -2862,7 +2861,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 4811dfa6797b34e4a963dc134015ff0e, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  heightSource: {fileID: 1950520771}
+  heightSource: {fileID: 1950520784}
   chunkedBuilder: {fileID: 1950520777}
   seamlessBuilder: {fileID: 1950520776}
   fogPrefab: {fileID: 418428478413586072, guid: 04ff3010d7b80b9448f16a1a4e74ed5c,
@@ -2884,7 +2883,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: cb51839a0009e9941a40f3a642e60ca5, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  heightSource: {fileID: 1950520771}
+  heightSource: {fileID: 1950520784}
   zoneSystem: {fileID: 1950520773}
   terrainBuilder: {fileID: 1950520776}
   chunkedBuilder: {fileID: 1950520777}
@@ -2919,7 +2918,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 7a4740808acc880408a278acfcbdd9c0, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  heightSource: {fileID: 1950520771}
+  heightSource: {fileID: 1950520784}
   zoneSystem: {fileID: 1950520773}
   chunkedBuilder: {fileID: 1950520777}
   seamlessBuilder: {fileID: 1950520776}
@@ -2930,6 +2929,31 @@ MonoBehaviour:
   waterCostMultiplier: 4
   nearestSearchRadius: 32
   drawGizmos: 1
+--- !u!114 &1950520784
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1950520764}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a3a885492575ea0468bb523b06283050, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  width: 80
+  depth: 200
+  chunkedBuilder: {fileID: 1950520777}
+  randomSeed: 1
+  seed: 0
+  maxHeight: 10
+  terraceStep: 0.5
+  maxSmoothStep: 1
+  minClusterCells: 5
+  maxSteps: 4
+  plateauScale: 0.008
+  firstLevelFraction: 0.35
+  levelFalloff: 0.4
 --- !u!1 &1984545281
 GameObject:
   m_ObjectHideFlags: 0
@@ -2963,17 +2987,30 @@ MonoBehaviour:
   playerTag: Player
   wolfPrefab: {fileID: 4950279192017619235, guid: 7b2931f4ea9cc004886b33bd49d434ad,
     type: 3}
-  spawnCount: 8
-  spawnRadius: 12
+  spawnCount: 12
+  spawnRadius: 25
   spawnCenter: {fileID: 1224455447}
   howlDelay: 2
   alphaTransform: {fileID: 1224455447}
   spawnArcHalfAngle: 40
   maxAttackers: 3
-  roleUpdateInterval: 0.5
+  slotCheckInterval: 1
+  attackMinHealth: 0.4
+  attackMaxFear: 0.5
+  slotStealMargin: 2
+  slotLockTime: 3
+  frontShare: 0.6
+  frontArcHalfAngle: 60
+  regroupInterval: 6
+  regroupJitter: 3
+  logSlots: 1
   frontTokenHold: 3
   packJumpInterval: 1.2
   maxPackFear: 500
+  panicFearTiers: 2
+  packFearAfterPanic: 0.5
+  woundAggroRadius: 8
+  woundAggroPerDamage: 1
 --- !u!4 &1984545283
 Transform:
   m_ObjectHideFlags: 0

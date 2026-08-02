@@ -45,6 +45,48 @@ public class PlayerMovement3D : MonoBehaviour
         stepFrequency = 4.5f
     };
 
+    [Header("Боевые режимы движения")]
+    [Tooltip("Включаются, когда цель в боевой зоне или идёт замах/удар/блок. Пока копии обычных — под отдельные анимации.")]
+    public GaitConfig combatWalk = new GaitConfig
+    {
+        speed = 4f,
+        acceleration = 25f,
+        deceleration = 30f,
+        stepDistance = 0.5f,
+        stepDuration = 0.35f,
+        stepFrequency = 2.2f
+    };
+
+    public GaitConfig combatRun = new GaitConfig
+    {
+        speed = 8f,
+        acceleration = 18f,
+        deceleration = 14f,
+        stepDistance = 1.0f,
+        stepDuration = 0.22f,
+        stepFrequency = 3.2f
+    };
+
+    public GaitConfig combatSprint = new GaitConfig
+    {
+        speed = 13f,
+        acceleration = 12f,
+        deceleration = 6f,
+        stepDistance = 1.6f,
+        stepDuration = 0.16f,
+        stepFrequency = 4.5f
+    };
+
+    [Header("Штраф за движение боком и спиной")]
+    [Tooltip("До этого угла между корпусом и движением скорость полная.")]
+    public float strafeAngle = 45f;
+    [Tooltip("Дальше этого угла движение считается спиной вперёд.")]
+    public float backAngle = 135f;
+    [Tooltip("Множитель скорости при движении боком.")]
+    public float strafeSpeedMultiplier = 0.8f;
+    [Tooltip("Множитель скорости при движении спиной вперёд.")]
+    public float backSpeedMultiplier = 0.6f;
+
     [Header("Уворот")]
     public float dodgeSpeed = 14f;
     public float dodgeDuration = 0.25f;
@@ -76,12 +118,19 @@ public class PlayerMovement3D : MonoBehaviour
 
     [Header("Прочее")]
     public float rotationSpeed = 15f;
+    [Tooltip("Доворот корпуса на спринте: корпус рулится клавишами, мышь его не крутит. Ниже rotationSpeed — руление, а не разворот на месте.")]
+    public float sprintTurnSpeed = 4f;
     public float gravity = -20f;
+
+    [Header("Анимация")]
+    [Tooltip("Аниматор игрока. Пусто — найдётся на объекте или в детях. Параметры: Gait (int 1/2/3), Moving (bool), Combat (bool), CombatEnter (trigger).")]
+    public Animator animator;
+    [Tooltip("Порог скорости, ниже которого игрок считается стоящим (м/с).")]
+    public float moveThreshold = 0.15f;
 
     [Header("Граница карты (опционально)")]
     [Tooltip("Если не задана — берётся MapBoundary с этого же объекта.")]
     public MapBoundary boundary;
-    public Animator animator;
 
     // Компоненты
     private CharacterController _controller;
@@ -92,6 +141,9 @@ public class PlayerMovement3D : MonoBehaviour
     private float _verticalVelocity;
     private GaitConfig _currentGait;
     private bool _isRunning;
+    private bool _inCombat;             // цель в боевой зоне или идёт действие
+    private GaitConfig _stepSlowRef;    // нижняя опора для StepController (шаг)
+    private GaitConfig _stepFastRef;    // верхняя опора (бег/спринт того же набора)
 
     // Манёвры
     private bool _isDodging;
@@ -115,6 +167,18 @@ public class PlayerMovement3D : MonoBehaviour
 
     public void StopHorizontalVelocity() => _velocity = Vector3.zero;
 
+    // Выпад: разовая добавка скорости в момент удара. Отдельного состояния нет —
+    // дальше HandleMovement сам гасит её ускорением текущей походки.
+    public void AddLungeSpeed(Vector3 dir, float speed)
+    {
+        dir.y = 0f;
+        if (dir.sqrMagnitude < 0.01f || speed <= 0f) return;
+        _velocity = dir.normalized * speed;
+    }
+
+    // Направление ввода WASD в мировых осях — боевому контроллеру для выпада.
+    public Vector3 InputDirection => ComputeInputDirection();
+
     // Мгновенный (без сглаживания) разворот на цель — для рывкового удара назад.
     public void SnapRotationToTarget(Vector3 targetPosition)
     {
@@ -137,7 +201,7 @@ public class PlayerMovement3D : MonoBehaviour
     private CombatController3D _combat;
 
     // Tab-таргет из боевого контроллера (null — лок-мода нет)
-    private Transform LockTarget => _combat != null ? _combat.currentTarget : null;
+    private Transform LockTarget => _combat != null ? _combat.NearTarget : null;
 
     // ──────────────────────────────────────────────
 
@@ -150,7 +214,24 @@ public class PlayerMovement3D : MonoBehaviour
 
         if (boundary == null) boundary = GetComponent<MapBoundary>();
         if (witchLight == null) witchLight = GetComponentInChildren<WitchLight>();
+        if (animator == null) animator = GetComponentInChildren<Animator>();
+
+        CacheAnimParams();
     }
+
+    // Какие параметры реально есть в контроллере. Аниматор ругается в консоль на каждую
+    // запись несуществующего параметра, поэтому проверяем — клипы добавляются постепенно.
+    private System.Collections.Generic.HashSet<string> _animParams;
+
+    private void CacheAnimParams()
+    {
+        _animParams = new System.Collections.Generic.HashSet<string>();
+        if (animator == null || animator.runtimeAnimatorController == null) return;
+        foreach (var p in animator.parameters) _animParams.Add(p.name);
+    }
+
+    private bool HasParam(string name) =>
+        animator != null && _animParams != null && _animParams.Contains(name);
 
     void Update()
     {
@@ -374,12 +455,33 @@ public class PlayerMovement3D : MonoBehaviour
         if (Input.GetKeyDown(KeyCode.CapsLock))
             _isRunning = !_isRunning;
 
-        if (Input.GetKey(KeyCode.LeftShift))
-            _currentGait = sprint;
-        else if (_isRunning)
-            _currentGait = run;
-        else
-            _currentGait = walk;
+        bool blocking = _combat != null && _combat.IsBlocking;
+        bool combatMode = _combat != null &&
+                          (_combat.NearTarget != null || _combat.IsCharging || _combat.IsAttacking || blocking);
+
+        int gait = Input.GetKey(KeyCode.LeftShift) ? 3 : (_isRunning ? 2 : 1);
+
+        // С блоком спринта нет: скорость падает до бега.
+        if (blocking && gait == 3) gait = 2;
+
+        _stepSlowRef = combatMode ? combatWalk : walk;
+        _stepFastRef = gait == 3
+            ? (combatMode ? combatSprint : sprint)
+            : (combatMode ? combatRun : run);
+
+        if (gait == 1) _currentGait = _stepSlowRef;
+        else _currentGait = _stepFastRef;
+
+        // Параметры для аниматора: режим движения, факт перемещения и боевая стойка.
+        if (animator != null)
+        {
+            if (HasParam("Gait")) animator.SetInteger("Gait", gait);
+            if (HasParam("Moving")) animator.SetBool("Moving", _velocity.magnitude > moveThreshold);
+            if (HasParam("Combat")) animator.SetBool("Combat", combatMode);
+            if (combatMode && !_inCombat && HasParam("CombatEnter")) animator.SetTrigger("CombatEnter");
+        }
+
+        _inCombat = combatMode;
     }
 
     // ──────────────────────────────────────────────
@@ -397,12 +499,12 @@ public class PlayerMovement3D : MonoBehaviour
             Vector3 targetDir = ComputeInputDirection();
             _maneuverDir = targetDir;
 
-            // Целевая скорость = базовая + импульс шага
-            _step.TryStart(_currentGait.speed, walk,
-                Input.GetKey(KeyCode.LeftShift) ? sprint : run);
+            // Целевая скорость = базовая + импульс шага, с поправкой на движение боком/спиной
+            _step.TryStart(_currentGait.speed, _stepSlowRef, _stepFastRef);
             float stepImpulse = _step.Tick(Time.deltaTime);
 
-            Vector3 targetVelocity = targetDir * (_currentGait.speed + stepImpulse);
+            Vector3 targetVelocity = targetDir *
+                ((_currentGait.speed + stepImpulse) * DirectionSpeedMultiplier(targetDir));
 
             // Плавный разгон через SmoothDamp
             _velocity = Vector3.MoveTowards(
@@ -411,7 +513,7 @@ public class PlayerMovement3D : MonoBehaviour
                 _currentGait.acceleration * Time.deltaTime);
 
             MoveHorizontal(_velocity * Time.deltaTime);
-            HandleRotation();
+            HandleRotation(targetDir);
         }
         else
         {
@@ -436,13 +538,23 @@ public class PlayerMovement3D : MonoBehaviour
         }
     }
 
+    // Боком и спиной вперёд игрок движется медленнее: множитель по углу
+    // между корпусом и направлением движения.
+    float DirectionSpeedMultiplier(Vector3 moveDir)
+    {
+        float angle = Vector3.Angle(transform.forward, moveDir);
+        if (angle <= strafeAngle) return 1f;
+        return angle <= backAngle ? strafeSpeedMultiplier : backSpeedMultiplier;
+    }
+
     // ──────────────────────────────────────────────
     // Поворот на мышь
     // ──────────────────────────────────────────────
 
-    void HandleRotation()
+    // moveDir — направление ввода в этом кадре (нулевой, если стоим).
+    void HandleRotation(Vector3 moveDir = default)
     {
-        // Во время замаха/удара с целью — плавный доворот на неё вместо мыши.
+        // Во время замаха/удара/блока с целью в боевой зоне — плавный доворот на неё вместо мыши.
         Transform aim = _combat != null ? _combat.ActiveAimTarget : null;
         if (aim != null)
         {
@@ -456,17 +568,15 @@ public class PlayerMovement3D : MonoBehaviour
             return;
         }
 
-        // Лок-таргет: всегда лицом к врагу вместо мыши.
-        Transform lockT = LockTarget;
-        if (lockT != null)
+        // Спринт: корпус доворачивается к направлению движения, мышь его не крутит —
+        // спиной вперёд не побежать. Блок сюда не попадает: там мышь или ближайший враг.
+        bool blocking = _combat != null && _combat.IsBlocking;
+        if (!blocking && Input.GetKey(KeyCode.LeftShift) && moveDir.sqrMagnitude > 0.01f)
         {
-            Vector3 lockLook = lockT.position - transform.position;
-            lockLook.y = 0f;
-            if (lockLook.sqrMagnitude > 0.01f)
-                transform.rotation = Quaternion.Slerp(
-                    transform.rotation,
-                    Quaternion.LookRotation(lockLook),
-                    rotationSpeed * Time.deltaTime);
+            transform.rotation = Quaternion.Slerp(
+                transform.rotation,
+                Quaternion.LookRotation(moveDir),
+                sprintTurnSpeed * Time.deltaTime);
             return;
         }
 

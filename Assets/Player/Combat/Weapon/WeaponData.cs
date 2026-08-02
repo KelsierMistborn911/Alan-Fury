@@ -5,44 +5,61 @@ public class WeaponData : ScriptableObject
 {
     public enum WeaponType { Sword, Shield, Spear, Axe, Dagger, Bow, Staff }
 
-    [Header("нјџ≈≈")]
+    [Header("“ип")]
     public WeaponType type;
-    public string weaponName = "нѕ—‘’≈";
+    public string weaponName = "ќружие";
     public Sprite icon;
 
-    [Header("сѕЌћ")]
+    [Header("”рон")]
     public float damage = 10f;
     public float staggerForce = 5f;
 
-    [Header("а ’‘ћ’» јЌ»")]
+    [Header("Ѕлижний бой")]
     public float attackRange = 2f;
     public float attackRadius = 1f;
     public float attackHeight = 1.5f;
     public Vector3 hitboxOffset = Vector3.forward;
 
-    [Header("дё Ёћ’» јЌ»")]
+    [Header("ƒальний бой")]
     public bool isRanged;
     public bool useCharge;
     public float chargeDuration = 1f;
     public float minChargePercent = 0.3f;
-    public float maxHoldTime = 3f;        // Ќовое: максимальное врем€ удержани€
+    public float maxHoldTime = 3f;        // ћаксимальное врем€ удержани€ замаха
     public GameObject projectilePrefab;
     public float projectileSpeed = 20f;
     public float projectileLifetime = 3f;
     public int projectilesPerShot = 1;
     public float spreadAngle = 0f;
 
-    [Header("рё»Ћ’ћ÷’")]
+    [Header("“айминги")]
     public float windupDuration = 0.15f;
     public float attackDuration = 0.2f;
     public float cooldownDuration = 0.3f;
 
-    [Header("сёя р’…’ бѕ≈ƒ’ ≈ћЏ")]
-    public float tickInterval = 0.1f;      // Ќовое: интервал между тиками урона
+    [Header("“ик урона")]
+    public float tickInterval = 0.1f;      // »нтервал между тиками урона
 
-    [Header("€–ёЋ’ћё")]
+    [Header("–есурсы")]
     public float staminaCost = 15f;
 
-    [Header("€ Ќ’")]
+
+    [Header("¬торична€ атака")]
+    [Tooltip("≈сть ли у оружи€ вторична€ функци€. ” меча Ч колющий удар.  лавиша назначаетс€ в CombatController3D.")]
+    public bool hasSecondary = false;
+    [Tooltip("»м€ триггера аниматора дл€ вторичной атаки. ѕусто Ч сыграет обычный AttackLeft/AttackRight.")]
+    public string secondaryTrigger = "Thrust";
+    [Tooltip("ћножитель урона относительно damage.")]
+    public float secondaryDamageMult = 1f;
+    [Tooltip("ћножитель дальности относительно attackRange. –аботает только без блока: под щитом длина обычна€.")]
+    public float secondaryRangeMult = 1.3f;
+    [Tooltip("ћножитель полуширины зоны относительно attackRadius. ћеньше Ч уже укол.")]
+    public float secondaryRadiusMult = 0.35f;
+    [Tooltip("ѕолуугол конуса зоны вторичной атаки (град). ћеньше Ч уже веер.")]
+    public float secondaryConeHalfAngle = 15f;
+    [Tooltip("ћножитель стоимости стамины относительно staminaCost.")]
+    public float secondaryStaminaMult = 1f;
+
+    [Header("—лои")]
     public LayerMask targetLayers;
 }

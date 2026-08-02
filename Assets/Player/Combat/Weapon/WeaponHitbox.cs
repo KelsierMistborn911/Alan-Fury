@@ -13,6 +13,7 @@ public class WeaponHitbox : MonoBehaviour
     public float debugZoneY = 0.05f;
 
     private Transform _debugZone; // создаётся лениво
+    private float _activeCone;    // полуугол текущей атаки: обычная берёт coneHalfAngle, вторичная передаёт свой
 
     private bool isActive;
     private float timer;
@@ -42,8 +43,10 @@ public class WeaponHitbox : MonoBehaviour
 
     public void Activate(float range, float radius, float height, Vector3 offset,
                          Vector3 direction, float damage, float stagger,
-                         LayerMask layers, float duration, float tickInterval, float chargePercent = 0f, int comboIndex = 0)
+                         LayerMask layers, float duration, float tickInterval, float chargePercent = 0f,
+                         int comboIndex = 0, float coneHalfAngleOverride = -1f)
     {
+        _activeCone = coneHalfAngleOverride > 0f ? coneHalfAngleOverride : coneHalfAngle;
         this.range = range;
         this.radius = radius;
         this.height = height;
@@ -108,7 +111,7 @@ public class WeaponHitbox : MonoBehaviour
             layers
         );
 
-        float requiredDot = Mathf.Cos(coneHalfAngle * Mathf.Deg2Rad);
+        float requiredDot = Mathf.Cos(_activeCone * Mathf.Deg2Rad);
 
         foreach (Collider col in colliders)
         {
@@ -171,7 +174,7 @@ public class WeaponHitbox : MonoBehaviour
     private void BuildZoneMesh(Mesh mesh)
     {
         const int segments = 8;
-        float tanA = Mathf.Tan(Mathf.Clamp(coneHalfAngle, 1f, 89f) * Mathf.Deg2Rad);
+        float tanA = Mathf.Tan(Mathf.Clamp(_activeCone, 1f, 89f) * Mathf.Deg2Rad);
 
         var verts = new Vector3[(segments + 1) * 2];
         var tris = new int[segments * 6];
