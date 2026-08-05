@@ -10,13 +10,11 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 188b5154c9b4d8642b03d2a24e17bda1, type: 3}
-  m_Name: steppedAnimation
+  m_Name: roll
   m_EditorClassIdentifier: 
   SourceClips:
-  - {fileID: -4469183485442372851, guid: 801a72701bdbca446b26c826de8a9335, type: 3}
-  - {fileID: -2061910772549006292, guid: 801a72701bdbca446b26c826de8a9335, type: 3}
-  - {fileID: -203655887218126122, guid: 801a72701bdbca446b26c826de8a9335, type: 3}
+  - {fileID: -203655887218126122, guid: 7bd4ae68b3308ee45b6575b85ceec257, type: 3}
   KeyframeMode: 0
-  KeyframeRate: 3
+  KeyframeRate: 4
   ManualKeyframeTimes: []
   FixedTimeDelay: 0.1
