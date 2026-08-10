@@ -54,7 +54,7 @@ public class WerewolfStats : MonoBehaviour, IDamageable
 
     [Header("Агрессия")]
     [Tooltip("Скорость накопления агрессии в роли Attack (ед/сек). Начисляет WerewolfPackBrain; вне атаки значение замирает.")]
-    public float aggressionPerSecond = 5f;
+    public float aggressionPerSecond = 1.5f;
 
     [Header("Страх")]
     [Tooltip("К какому уровню страх тянется вне драки (цели нет).")]

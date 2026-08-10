@@ -277,45 +277,48 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: b8ffbc4405cf50c4cacfad1b96f6612d, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  perception: {fileID: 7569614571355709067}
-  locomotion: {fileID: 5952714522296563151}
-  combat: {fileID: 6704065101643070483}
-  surroundBrain: {fileID: -5318893361700369184}
+  perception: {fileID: 0}
+  locomotion: {fileID: 0}
+  combat: {fileID: 0}
+  surroundBrain: {fileID: 0}
   pathfinder: {fileID: 0}
-  stats: {fileID: -6138623223271072045}
-  runSpeed: 8
-  behindDistance: 7
+  stats: {fileID: 0}
+  runSpeed: 10
+  walkSpeed: 5
+  behindDistance: 2
   frontLineBias: 0.6
-  aggroPerHit: 1
+  aggroPerHit: 5
   layDownOnDeath: 0
-  bipedDistance: 6
-  noAttackTier: 2
-  afraidHoldMult: 1.6
-  cautiousTierMax: 0.33
-  midTierMax: 0.66
-  sectorHoldTime: 2
+  bipedDistance: 8
+  noAttackTier: 3
+  sectorHoldTime: 0.75
   behindAngle: 120
   weaponSectorMargin: 20
   repathInterval: 0.4
   waypointArrive: 1.2
-  retreatDistance: 8
   disengageTime: 1.5
   orbitAngularSpeed: 45
-  holdDistanceAggressive: 1.5
-  holdDistanceCautious: 4.5
+  minHoldDistance: 7
+  safetyMargin: 5
+  outerDistanceMult: 1.33
+  commitLeapArc: 0.85
   orbitRadiusJitter: 0.8
   jitterInterval: 0.7
-  cautionThreshold: 0.8
   opportunityWindow: 0.8
-  threatRangeMargin: 1.5
+  hitsCautious: 1
+  hitsMid: 2
+  hitsFierce: 3
+  dodgeStaminaCost: 12
+  threatRangeMargin: 2
   dodgeThreatAngle: 60
-  leapDodgeRange: 3.5
+  leapDodgeRange: 7
   sidestepImpulse: 7
   dodgeDistance: 4
-  dodgeArc: 0.6
-  dodgeCooldown: 0.6
-  separationRadius: 2.2
-  separationStrength: 2
+  dodgeArc: 0.75
+  dodgeCooldown: 0.5
+  postAttackDodgeLock: 0.25
+  separationRadius: 3.5
+  separationStrength: 3.5
 --- !u!114 &-5318893361700369184
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -377,10 +380,10 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   maxHealth: 30
-  maxStamina: 150
-  staminaRegenPerSecond: 25
+  maxStamina: 60
+  staminaRegenPerSecond: 12
   staminaRegenDelay: 1
-  aggressionPerSecond: 5
+  aggressionPerSecond: 1.5
   baseFearIdle: 0
   baseFearCombat: 25
   fearRegenPerSecond: 3

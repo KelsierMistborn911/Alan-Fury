@@ -211,6 +211,7 @@ public class CombatController3D : MonoBehaviour
         // Отложенный удар ждёт истечения замаха: комбо с уворотом или удар под блоком
         if (_pendingAttack)
         {
+            IsWindingUp = true;
             if (Time.time >= _pendingFireTime) FirePendingAttack();
             return;
         }
@@ -218,6 +219,7 @@ public class CombatController3D : MonoBehaviour
         // Идёт заряд
         if (IsCharging)
         {
+            IsWindingUp = true; // телеграф для ИИ: замах/удержание = угроза
             // Без цели в боевой зоне — поворот (мышь/WASD) может подобрать её прямо во время замаха.
             if (NearTarget == null)
             {
@@ -368,6 +370,7 @@ public class CombatController3D : MonoBehaviour
     void CancelCharge()
     {
         IsCharging = false;
+        IsWindingUp = false;
         isHoldingAttack = false;
         ChargePercent = 0f;
         _autoTarget = null;
@@ -485,6 +488,7 @@ public class CombatController3D : MonoBehaviour
 
     void ExecuteAttack()
     {
+        IsWindingUp = false;
         IsAttacking = true;
         stateTimer = currentWeapon.attackDuration;
 

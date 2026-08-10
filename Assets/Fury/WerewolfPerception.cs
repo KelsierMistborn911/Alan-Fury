@@ -29,10 +29,15 @@ public class WerewolfPerception : MonoBehaviour
     public bool HasPlayer => player != null;
     public Vector3 PlayerPos => player.position;
 
-    /// <summary>Игрок заряжает удар (замах).</summary>
+    /// <summary>Игрок заряжает удар (замах удержанием).</summary>
     public bool PlayerIsCharging => _playerCombat != null && _playerCombat.IsCharging;
     /// <summary>Игрок в активной фазе удара.</summary>
     public bool PlayerIsAttacking => _playerCombat != null && _playerCombat.IsAttacking;
+    /// <summary>Игрок в windup обычного/любого удара (телеграф до active-фазы).</summary>
+    public bool PlayerIsWindingUp => _playerCombat != null && _playerCombat.IsWindingUp;
+    /// <summary>Игрок замахивается или уже бьёт — угроза для уворота.</summary>
+    public bool PlayerThreatActive =>
+        PlayerIsWindingUp || PlayerIsCharging || PlayerIsAttacking;
 
     /// <summary>Дальность удара текущего оружия игрока (м); 2, если оружие не найдено.</summary>
     public float PlayerWeaponRange
