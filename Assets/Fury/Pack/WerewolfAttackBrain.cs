@@ -298,17 +298,25 @@ public class WerewolfAttackBrain : MonoBehaviour, WerewolfPackManager.IPackAgent
         // Агрессия копится только в роли Attack (вне её значение замирает).
         if (stats != null) stats.AddAggression(stats.aggressionPerSecond * dt);
 
-        // Таймер сектора (ступени 1–2): держится ли волк в разрешённой для атаки зоне.
-        // Осторожный — за спиной (behindAngle), средний — вне сектора оружия (+запас).
-        var atier = AggroTier;
-        if (atier <= WerewolfStats.AggressionTier.Mid)
+        // Fleeish: не бьёт → сдать слот, назад в Surround (замена другим).
+        if (CurrentMood == WerewolfStats.CombatMood.Fleeish)
         {
-            float need = atier == WerewolfStats.AggressionTier.Cautious
+            if (_manager != null) _manager.YieldAttackSlot(this);
+            else SetRole(WerewolfPackManager.PackRole.Surround, false);
+            return;
+        }
+
+        // Таймер сектора: бонус для Skittish/Tense (не жёсткий стоп для всех).
+        var mood = CurrentMood;
+        if (mood == WerewolfStats.CombatMood.Skittish || mood == WerewolfStats.CombatMood.Tense)
+        {
+            float need = mood == WerewolfStats.CombatMood.Skittish
                 ? behindAngle
                 : perception.PlayerWeaponConeHalfAngle + weaponSectorMargin;
             if (perception.AngleFromPlayerGaze > need) _sectorTimer += dt;
             else _sectorTimer = 0f;
         }
+        else _sectorTimer = sectorHoldTime; // Rage/Aggressive — сектор не блокирует
 
         // Детект начала/конца удара игрока (фронты перехода IsAttacking).
         bool playerAttacking = perception.PlayerIsAttacking;
@@ -353,20 +361,22 @@ public class WerewolfAttackBrain : MonoBehaviour, WerewolfPackManager.IPackAgent
 
     // ===================== Approach: далеко — подходим =====================
 
-    /// <summary>Biped: Engage/Orbit и короткий отход. Quad: Approach и длинный Retreat.</summary>
+    /// <summary>
+    /// Biped = close-combat: стрейф, удары, контроль (Engage / Orbit / почти на месте).
+    /// Quad = бег: Approach, длинный Retreat, спринт. Не «потому что далеко», а «потому что бегу».
+    /// </summary>
     private bool WantsBipedStance()
     {
         switch (_phase)
         {
             case AttackPhase.Engage:
             case AttackPhase.Orbit:
-                return true;
+                return true; // у цели — всегда close-combat
             case AttackPhase.Retreat:
-                // Пока далеко от дальнего кольца — на четвереньках быстрее; у кольца встаём.
-                return perception.DistanceToPlayer <= ManeuverDistance + 1.5f;
-            default: // Approach
-                return perception.DistanceToPlayer <= bipedDistance
-                       && perception.DistanceToPlayer <= ManeuverDistance + 1f;
+                // Короткий шаг у кольца — biped; длинный отход — quad (бег).
+                return perception.DistanceToPlayer <= ManeuverDistance * 0.85f;
+            default: // Approach — бежим к кольцу
+                return false;
         }
     }
 
@@ -378,20 +388,19 @@ public class WerewolfAttackBrain : MonoBehaviour, WerewolfPackManager.IPackAgent
         Approach(dt);
     }
 
-    // Заход начался — раскладываем серию по ступени агрессии.
-    // Ярость бьёт без счёта и без запаса на уворот, остальные оставляют стамину на один отскок.
+    // Заход: длина серии от CombatMood (Fear+Aggro).
     private void EnterEngage()
     {
         _phase = AttackPhase.Engage;
-        switch (AggroTier)
+        switch (CurrentMood)
         {
-            case WerewolfStats.AggressionTier.Rage:
+            case WerewolfStats.CombatMood.Rage:
                 _hitsLeft = int.MaxValue; _reserveDodge = false; break;
-            case WerewolfStats.AggressionTier.Fierce:
+            case WerewolfStats.CombatMood.Aggressive:
                 _hitsLeft = Mathf.Max(1, hitsFierce); _reserveDodge = true; break;
-            case WerewolfStats.AggressionTier.Mid:
+            case WerewolfStats.CombatMood.Tense:
                 _hitsLeft = Mathf.Max(1, hitsMid); _reserveDodge = true; break;
-            default:
+            default: // Skittish
                 _hitsLeft = Mathf.Max(1, hitsCautious); _reserveDodge = true; break;
         }
     }
@@ -406,7 +415,7 @@ public class WerewolfAttackBrain : MonoBehaviour, WerewolfPackManager.IPackAgent
 
         // Опаска: под замахом/ударом — отойти на дальнее кольцо. Rage игнорит.
         float threatRange = perception.PlayerWeaponRange + threatRangeMargin;
-        if (perception.PlayerThreatActive && dist < threatRange && AggroTier < WerewolfStats.AggressionTier.Rage)
+        if (perception.PlayerThreatActive && dist < threatRange && CurrentMood != WerewolfStats.CombatMood.Rage)
         {
             Vector3 away = perception.DirFromPlayerFlat;
             Vector3 backTarget = perception.PlayerPos + away * ManeuverDistance + SeparationOffset();
@@ -437,42 +446,61 @@ public class WerewolfAttackBrain : MonoBehaviour, WerewolfPackManager.IPackAgent
         LooseFlank(dt);
     }
 
-    /// <summary>Можно ли бить: страх/агрессия (вероятность), сектор, токен, стамина.
-    /// Низкая агрессия не запрещает удар — только реже и короче серия.</summary>
+    /// <summary>Можно ли бить: токен/стамина + шанс от CombatMood.</summary>
     private bool MayAttackNow(float dist)
     {
-        if (TooScaredToAttack) return false;
+        var mood = CurrentMood;
+        if (mood == WerewolfStats.CombatMood.Fleeish) return false;
 
-        var tier = AggroTier;
         bool opportunity = Time.time < _opportunityUntil;
         bool playerBusy = perception.PlayerThreatActive;
 
-        // Под оружием игрока — только ярость или окно после его удара.
-        if (playerBusy && !opportunity && tier < WerewolfStats.AggressionTier.Rage) return false;
+        // Под оружием — только Rage или окно после удара игрока.
+        if (playerBusy && !opportunity && mood != WerewolfStats.CombatMood.Rage) return false;
 
-        // Средний+ держит сектор; осторожный — мягче (половина времени).
-        if (tier == WerewolfStats.AggressionTier.Mid && _sectorTimer < sectorHoldTime) return false;
-        if (tier == WerewolfStats.AggressionTier.Cautious && _sectorTimer < sectorHoldTime * 0.4f && !opportunity)
+        // Skittish/Tense: сектор как мягкий гейт.
+        if (mood == WerewolfStats.CombatMood.Tense && _sectorTimer < sectorHoldTime * 0.5f) return false;
+        if (mood == WerewolfStats.CombatMood.Skittish && _sectorTimer < sectorHoldTime * 0.35f && !opportunity)
             return false;
 
-        // Токен фронта (фланкер и осторожный со спины — без токена).
-        if (tier != WerewolfStats.AggressionTier.Cautious && !_avoidFront && !_hasToken) return false;
+        // Токен фронта (фланкер без токена; Skittish тоже может без токена — бьёт сбоку/сзади).
+        if (mood != WerewolfStats.CombatMood.Skittish && !_avoidFront && !_hasToken) return false;
 
         if (_reserveDodge && stats != null &&
             !stats.HasEnough(AttackCostFor(dist) + dodgeStaminaCost)) return false;
 
-        // Вероятность: страх ↓ атака в лоб, агрессия ↑ желание бить. Один Random — дёшево.
-        float fear01 = Fear01;
-        float aggro01 = Aggression;
-        float chance = Mathf.Lerp(0.55f, 0.18f, fear01) * Mathf.Lerp(0.65f, 1.15f, aggro01);
-        // Лоб при высоком страхе — ещё хуже.
+        float chance = MoodAttackChance(mood);
         bool frontal = perception.AngleFromPlayerGaze < 50f;
-        if (frontal) chance *= Mathf.Lerp(1f, 0.35f, fear01);
+        if (frontal && mood == WerewolfStats.CombatMood.Skittish) chance *= 0.4f;
+        if (frontal && mood == WerewolfStats.CombatMood.Tense) chance *= 0.7f;
         if (opportunity) chance = Mathf.Max(chance, 0.75f);
-        if (tier == WerewolfStats.AggressionTier.Rage) chance = 1f;
         if (Random.value > Mathf.Clamp01(chance)) return false;
 
         return true;
+    }
+
+    private static float MoodAttackChance(WerewolfStats.CombatMood mood)
+    {
+        switch (mood)
+        {
+            case WerewolfStats.CombatMood.Rage: return 1f;
+            case WerewolfStats.CombatMood.Aggressive: return 0.85f;
+            case WerewolfStats.CombatMood.Tense: return 0.55f;
+            case WerewolfStats.CombatMood.Skittish: return 0.28f;
+            default: return 0f;
+        }
+    }
+
+    private static float MoodDodgeChance(WerewolfStats.CombatMood mood)
+    {
+        switch (mood)
+        {
+            case WerewolfStats.CombatMood.Rage: return 0.12f;
+            case WerewolfStats.CombatMood.Aggressive: return 0.35f;
+            case WerewolfStats.CombatMood.Tense: return 0.6f;
+            case WerewolfStats.CombatMood.Skittish: return 0.9f;
+            default: return 0.95f;
+        }
     }
 
     /// <summary>Во сколько стамины обойдётся удар, который выберется на этой дистанции.</summary>
@@ -569,8 +597,7 @@ public class WerewolfAttackBrain : MonoBehaviour, WerewolfPackManager.IPackAgent
         return combat.TryJump();
     }
 
-    // Уворот-прыжок. Параметры (cd/дистанция) фиксированы.
-    // Страх ↑ шанс уворота, агрессия ↓ шанс. Ярость почти не уворачивается.
+    // Уворот-прыжок. cd/дистанция фиксированы; шанс от CombatMood.
     private void TryDodge()
     {
         float dist = perception.DistanceToPlayer;
@@ -579,12 +606,7 @@ public class WerewolfAttackBrain : MonoBehaviour, WerewolfPackManager.IPackAgent
         if (perception.AngleFromPlayerGaze > dodgeThreatAngle) return;
         if (Time.time < _nextDodgeTime) return;
 
-        float fear01 = Fear01;
-        float aggro01 = Aggression;
-        // Базовый шанс растёт со страхом, падает с агрессией.
-        float chance = Mathf.Lerp(0.4f, 0.95f, fear01) * Mathf.Lerp(1f, 0.2f, aggro01);
-        if (AggroTier == WerewolfStats.AggressionTier.Rage) chance *= 0.15f;
-        if (Random.value > Mathf.Clamp01(chance)) return;
+        if (Random.value > MoodDodgeChance(CurrentMood)) return;
 
         if (stats != null)
         {
@@ -649,6 +671,10 @@ public class WerewolfAttackBrain : MonoBehaviour, WerewolfPackManager.IPackAgent
     /// <summary>Ступень агрессии. Без stats — считаем средней.</summary>
     private WerewolfStats.AggressionTier AggroTier =>
         stats != null ? stats.AggroTier : WerewolfStats.AggressionTier.Mid;
+
+    /// <summary>Настроение Fear+Aggro. Без stats — Aggressive.</summary>
+    private WerewolfStats.CombatMood CurrentMood =>
+        stats != null ? stats.Mood : WerewolfStats.CombatMood.Aggressive;
 
     /// <summary>
     /// Дистанция удержания, пока волк НЕ бьёт.

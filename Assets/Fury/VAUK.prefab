@@ -284,7 +284,7 @@ MonoBehaviour:
   pathfinder: {fileID: 0}
   stats: {fileID: 0}
   runSpeed: 10
-  walkSpeed: 5
+  walkSpeed: 4
   behindDistance: 2
   frontLineBias: 0.6
   aggroPerHit: 5

@@ -2,6 +2,9 @@
 
 public class CombatController3D : MonoBehaviour
 {
+    public enum CombatStance { Neutral, High, Low }
+    public enum AttackForm { SlashLeft, SlashRight, Thrust }
+
     [Header("Ссылки")]
     public PlayerResources resources;
     public PlayerLoadout loadout;
@@ -23,11 +26,21 @@ public class CombatController3D : MonoBehaviour
     [Tooltip("Дуга перед игроком (град.), в которой ищутся цели для Tab и автонаведения.")]
     [Range(0f, 360f)] public float aimConeAngle = 200f;
 
-    [Header("Комбо")]
+    [Header("Комбо / стойки")]
     [Tooltip("Аниматор игрока. Пусто — найдётся на объекте.")]
     public Animator animator;
     [Tooltip("Пауза между ударами, после которой серия сбрасывается (сек).")]
     public float comboWindow = 1f;
+    [Tooltip("Длительность High/Low стойки после удара (сек).")]
+    public float stanceDuration = 2f;
+    [Tooltip("Множитель длительности атаки в подходящей стойке (<1 = быстрее).")]
+    [Range(0.5f, 1f)] public float stanceSpeedBonus = 0.85f;
+    [Tooltip("Порог ChargePercent, после которого атака считается тяжёлой.")]
+    [Range(0.3f, 0.9f)] public float heavyChargeThreshold = 0.55f;
+    [Tooltip("Дистанция, выше которой МОЖЕТ выпасть Thrust (и то не всегда). Ниже — только slash.")]
+    public float thrustPreferDistance = 3.6f;
+    [Tooltip("Шанс укола, когда цель дальше thrustPreferDistance (0–1). Остальное — slash.")]
+    [Range(0f, 1f)] public float thrustChanceWhenFar = 0.28f;
 
     [Header("Метка цели")]
     [Tooltip("Высота красного маркера над таргетом (м).")]
@@ -38,8 +51,6 @@ public class CombatController3D : MonoBehaviour
     [Header("Управление боем")]
     [Tooltip("Клавиша блока (щит в левой руке обязателен). ПКМ.")]
     public KeyCode blockKey = KeyCode.Mouse1;
-    [Tooltip("Клавиша вторичной функции оружия. У меча — колющий удар. Параметры самого удара лежат в WeaponData.")]
-    public KeyCode secondaryKey = KeyCode.Q;
     [Tooltip("Клавиша парирования. Одно нажатие открывает короткое окно, удерживать не нужно.")]
     public KeyCode parryKey = KeyCode.F;
 
@@ -50,27 +61,26 @@ public class CombatController3D : MonoBehaviour
     public float parryCooldown = 0.25f;
 
     [Header("Удар под блоком")]
-    [Tooltip("Замах удара с поднятым щитом (сек). 0 — мгновенный удар, как было раньше.")]
+    [Tooltip("Замах удара с поднятым щитом (сек). 0 — мгновенный удар.")]
     public float blockAttackWindup = 0.15f;
+    [Tooltip("Множитель дистанции атаки из-под щита.")]
+    [Range(0.3f, 1f)] public float blockAttackRangeMult = 0.7f;
+    [Tooltip("Множитель стоимости стамины атаки из-под щита.")]
+    public float blockAttackStaminaMult = 1.35f;
 
-    [Header("Выпад (вторичная атака)")]
-    [Tooltip("Скорость выпада = текущая скорость движения × это. Шаг 4, бег 8, спринт 13 м/с. 0 — выпада нет.")]
+    [Header("Выпад / импульс")]
+    [Tooltip("Скорость выпада = текущая скорость движения × это. 0 — выпада нет.")]
     public float lungeSpeedMultiplier = 1.6f;
-    [Tooltip("Насколько точно надо жать в сторону цели: 1 = строго в неё, 0.5 ≈ 60° допуска.")]
     [Range(0f, 1f)] public float lungeInputDot = 0.5f;
-
-    [Header("Импульс движения в удар")]
     [Tooltip("Добавка к урону = скорость(м/с) × масса персонажа × этот коэффициент.")]
     public float movementDamageCoefficient = 0.02f;
 
     [Header("Комбо удар+уворот")]
-    [Tooltip("Минимальная длительность замаха при ударе во время/сразу после уворота.")]
     public float dodgeAttackMinWindup = 0.08f;
-    [Tooltip("Сколько секунд после конца уворота ещё считается комбо-окном.")]
     public float dodgeAttackBufferAfter = 0.2f;
-    [Tooltip("Допуск (сек) для 'идеального' тайминга — удар точно на конце уворота.")]
     public float dodgeAttackPerfectTolerance = 0.08f;
 
+    // --- Публичное состояние ---
     public bool IsWindingUp { get; private set; }
     public bool IsAttacking { get; private set; }
     public bool IsBlocking { get; private set; }
@@ -78,39 +88,49 @@ public class CombatController3D : MonoBehaviour
     public bool IsCharging { get; private set; }
     public bool HasTarget => currentTarget != null;
     public float ChargePercent { get; private set; }
+    public bool IsHeavyReady => IsCharging && ChargePercent >= heavyChargeThreshold;
+    public CombatStance CurrentStance { get; private set; } = CombatStance.Neutral;
     public Transform currentTarget { get; private set; }
 
-    // Цель, с которой реально можно взаимодействовать: ближе combatFaceRange.
-    // Дальше — лок живёт только как метка, всё остальное работает по мыши.
     public Transform NearTarget
     {
         get
         {
-            if (currentTarget == null) return null;
+            if (!IsValidEnemy(currentTarget)) return null;
             Vector3 to = currentTarget.position - transform.position;
             to.y = 0f;
             return to.sqrMagnitude <= combatFaceRange * combatFaceRange ? currentTarget : null;
         }
     }
 
-    // Цель для доворота корпуса: только во время действия (замах/удар/блок) и только внутри боевой зоны.
-    public Transform ActiveAimTarget =>
-        (IsCharging || IsAttacking || IsBlocking) ? (NearTarget != null ? NearTarget : _autoTarget) : null;
+    public Transform ActiveAimTarget
+    {
+        get
+        {
+            if (!(IsCharging || IsBlocking)) return null;
+            if (NearTarget != null) return NearTarget;
+            return IsValidEnemy(_autoTarget) ? _autoTarget : null;
+        }
+    }
 
+    // --- Внутреннее ---
     private float stateTimer;
     private WeaponData currentWeapon;
     private float chargeStartTime;
     private bool isHoldingAttack;
     private int _combo;
     private float _comboExpire;
-    private Transform _autoTarget; // авто-цель текущего замаха, сбрасывается после удара
+    private Transform _autoTarget;
     private PlayerMovement3D movement;
 
-    private bool _isSecondaryAttack;    // текущая атака — вторичная функция оружия
-    private bool _pendingAttack;        // удар ждёт истечения замаха
+    private bool _pendingAttack;
     private float _pendingFireTime;
-    private bool _pendingIsBlockAttack; // отложенный удар начат с поднятым щитом
+    private bool _pendingIsBlockAttack;
     private bool _dodgeAttackPerfectFlag;
+    private bool _fromLowStance;          // текущая атака начата из Low
+    private bool _isHeavyAttack;          // текущая атака — тяжёлая (по заряду)
+    private AttackForm _lastForm = AttackForm.SlashRight;
+    private float _stanceTimer;
 
     private float _parryEndTime;
     private float _parryReadyTime;
@@ -118,8 +138,10 @@ public class CombatController3D : MonoBehaviour
     enum AttackMoveMode { None, Stop, TurnStrike, SideStrike }
     private AttackMoveMode _attackMoveMode;
 
-    private Transform _shiftSavedTarget; // цель на момент нажатия Shift — восстанавливается по отпусканию
-    private Transform _targetMarker;     // красный ромб над головой текущей цели
+    private Transform _shiftSavedTarget;
+    private Transform _targetMarker;
+
+    private System.Collections.Generic.HashSet<string> _animParams;
 
     void Awake()
     {
@@ -128,13 +150,8 @@ public class CombatController3D : MonoBehaviour
         if (hitbox == null) hitbox = GetComponentInChildren<WeaponHitbox>();
         if (animator == null) animator = GetComponent<Animator>();
         if (movement == null) movement = GetComponent<PlayerMovement3D>();
-
         CacheAnimParams();
     }
-
-    // Какие параметры реально есть в контроллере. Аниматор ругается в консоль на каждую
-    // запись несуществующего параметра, поэтому проверяем — клипы добавляются постепенно.
-    private System.Collections.Generic.HashSet<string> _animParams;
 
     private void CacheAnimParams()
     {
@@ -157,7 +174,18 @@ public class CombatController3D : MonoBehaviour
 
     void Update()
     {
-        // Парирование: одно нажатие открывает окно, стамина не тратится.
+        // Стойки: тикаем таймер
+        if (CurrentStance != CombatStance.Neutral)
+        {
+            _stanceTimer -= Time.deltaTime;
+            if (_stanceTimer <= 0f)
+            {
+                CurrentStance = CombatStance.Neutral;
+                // В нейтрали можно будет ускорять реген (пока через ресурсы позже)
+            }
+        }
+
+        // Парирование
         if (IsParrying && Time.time >= _parryEndTime) IsParrying = false;
         if (Input.GetKeyDown(parryKey) && Time.time >= _parryReadyTime)
         {
@@ -167,40 +195,31 @@ public class CombatController3D : MonoBehaviour
             SetTrig("Parry");
         }
 
-        // Удержание таргета: цель ушла дальше targetHoldRange — перехват/сброс.
         if (HasTarget) MaintainLockTarget();
+        if (IsCharging || IsBlocking) TryAcquireCombatTarget();
 
-        // Любое действие (замах/удар/блок) само лочится на ближайшего в боевой зоне.
-        if (IsCharging || IsAttacking || IsBlocking) TryAcquireCombatTarget();
-
-        // Спринт сбрасывает таргет; на отпускании — восстановление старой цели или ближайшей.
         if (Input.GetKeyDown(KeyCode.LeftShift))
         {
             _shiftSavedTarget = currentTarget;
             ClearTarget();
         }
         if (Input.GetKeyUp(KeyCode.LeftShift))
-        {
             RestoreOrAcquireTarget();
-        }
 
         UpdateTargetMarker();
 
-        // Блокировка цели (Tab)
         if (Input.GetKeyDown(KeyCode.Tab))
         {
             if (HasTarget) ClearTarget();
             else if (!Input.GetKey(KeyCode.LeftShift)) currentTarget = FindNearestInCone();
         }
 
-        // Отмена замаха пробелом — до отработки переката/уворота, без списания стамины.
         if (IsCharging && Input.GetKeyDown(KeyCode.Space))
         {
             CancelCharge();
             return;
         }
 
-        // Активная атака — ждём конца
         if (IsAttacking)
         {
             stateTimer -= Time.deltaTime;
@@ -208,7 +227,6 @@ public class CombatController3D : MonoBehaviour
             return;
         }
 
-        // Отложенный удар ждёт истечения замаха: комбо с уворотом или удар под блоком
         if (_pendingAttack)
         {
             IsWindingUp = true;
@@ -216,52 +234,42 @@ public class CombatController3D : MonoBehaviour
             return;
         }
 
-        // Идёт заряд
         if (IsCharging)
         {
-            IsWindingUp = true; // телеграф для ИИ: замах/удержание = угроза
-            // Без цели в боевой зоне — поворот (мышь/WASD) может подобрать её прямо во время замаха.
+            IsWindingUp = true;
             if (NearTarget == null)
             {
                 Transform reTarget = FindClosestToDirection(GetPreferredAimDirection(), combatFaceRange);
-                if (reTarget != null) _autoTarget = reTarget;
+                _autoTarget = reTarget; // null, если живых нет
             }
 
-            // Держим ту же кнопку, с которой начали замах: ЛКМ или вторичную функцию.
-            bool held = _isSecondaryAttack ? Input.GetKey(secondaryKey) : Input.GetMouseButton(0);
-            bool released = _isSecondaryAttack ? Input.GetKeyUp(secondaryKey) : Input.GetMouseButtonUp(0);
+            bool held = Input.GetMouseButton(0);
+            bool released = Input.GetMouseButtonUp(0);
 
-            if (held)
-            {
+            if (held && currentWeapon != null)
                 ChargePercent = Mathf.Clamp01((Time.time - chargeStartTime) / currentWeapon.chargeDuration);
-            }
 
             if (released && isHoldingAttack)
-            {
                 ReleaseHeldAttack();
-            }
 
-            // Авто-атака при максимальном удержании
-            if (currentWeapon.maxHoldTime > 0 && Time.time - chargeStartTime >= currentWeapon.maxHoldTime)
-            {
+            if (currentWeapon != null && currentWeapon.maxHoldTime > 0
+                && Time.time - chargeStartTime >= currentWeapon.maxHoldTime)
                 ReleaseHeldAttack();
-            }
             return;
         }
 
-        // Блок (ПКМ). Держит IsBlocking, но удары под блоком бьют, не снимая его.
-        bool wantsBlock = Input.GetKey(blockKey) && loadout.HasShield();
+        // Блок
+        bool wantsBlock = Input.GetKey(blockKey) && loadout != null && loadout.HasShield();
         IsBlocking = wantsBlock;
         SetB("ShieldBlock", wantsBlock);
 
         if (wantsBlock)
         {
-            if (Input.GetMouseButtonDown(0)) StartBlockAttack(false);
-            else if (Input.GetKeyDown(secondaryKey)) StartBlockAttack(true);
+            if (Input.GetMouseButtonDown(0)) StartBlockAttack();
             return;
         }
 
-        // Удар во время/сразу после уворота (Alt) — отдельное укороченное комбо.
+        // Удар после уворота
         if (Input.GetMouseButtonDown(0) && movement != null &&
             (movement.IsDodging || movement.TimeSinceDodgeEnd <= dodgeAttackBufferAfter))
         {
@@ -269,69 +277,47 @@ public class CombatController3D : MonoBehaviour
             return;
         }
 
-        // Вторичная функция оружия (у меча — укол): замах удержанием, как у ЛКМ.
-        if (Input.GetKeyDown(secondaryKey))
-        {
-            currentWeapon = loadout.GetMainWeapon();
-            if (currentWeapon == null || !currentWeapon.hasSecondary) return;
-
-            if (resources.HasStamina(currentWeapon.staminaCost * currentWeapon.secondaryStaminaMult))
-            {
-                _isSecondaryAttack = true;
-                StartHoldAttack();
-            }
-            return;
-        }
-
-        // Начало атаки (ЛКМ)
+        // Обычная атака (только ЛКМ, Q убран)
         if (Input.GetMouseButtonDown(0))
         {
-            currentWeapon = loadout.GetMainWeapon();
+            currentWeapon = loadout != null ? loadout.GetMainWeapon() : null;
             if (currentWeapon == null) return;
-
-            if (resources.HasStamina(currentWeapon.staminaCost))
-            {
-                _isSecondaryAttack = false;
+            if (resources != null && resources.HasStamina(currentWeapon.staminaCost * 0.5f))
                 StartHoldAttack();
-            }
         }
     }
 
-    // Удар с поднятым щитом: короткий фиксированный замах вместо полноценного заряда.
-    // secondary = вторичная функция оружия (у меча укол), иначе обычный удар.
-    void StartBlockAttack(bool secondary)
+    void StartBlockAttack()
     {
-        currentWeapon = loadout.GetMainWeapon();
+        currentWeapon = loadout != null ? loadout.GetMainWeapon() : null;
         if (currentWeapon == null) return;
-        if (secondary && !currentWeapon.hasSecondary) return;
 
-        float cost = currentWeapon.staminaCost * 0.5f * (secondary ? currentWeapon.secondaryStaminaMult : 1f);
-        if (!resources.HasStamina(cost)) return;
+        float cost = currentWeapon.staminaCost * 0.5f * blockAttackStaminaMult;
+        if (resources == null || !resources.HasStamina(cost)) return;
         resources.SpendStamina(cost);
 
-        _isSecondaryAttack = secondary;
         ChargePercent = currentWeapon.minChargePercent;
+        _isHeavyAttack = false;
+        _fromLowStance = CurrentStance == CombatStance.Low;
         SampleAttackMoveMode();
 
         if (blockAttackWindup <= 0f)
         {
-            ExecuteAttack();
+            ExecuteAttack(fromBlock: true);
             return;
         }
 
         _pendingAttack = true;
         _pendingIsBlockAttack = true;
         _pendingFireTime = Time.time + blockAttackWindup;
-
         if (hitbox != null && hitbox.visual != null) hitbox.visual.ShowWindup();
     }
 
-    // ЛКМ во время/сразу после уворота: замах короче, чем ближе к концу уворота, но не короче минимума.
     void StartDodgeAttack()
     {
-        currentWeapon = loadout.GetMainWeapon();
+        currentWeapon = loadout != null ? loadout.GetMainWeapon() : null;
         if (currentWeapon == null) return;
-        if (!resources.HasStamina(currentWeapon.staminaCost)) return;
+        if (resources == null || !resources.HasStamina(currentWeapon.staminaCost)) return;
         resources.SpendStamina(currentWeapon.staminaCost);
 
         float progress = movement.IsDodging ? movement.DodgeProgress01 : 1f;
@@ -341,7 +327,8 @@ public class CombatController3D : MonoBehaviour
         _pendingAttack = true;
         _pendingIsBlockAttack = false;
         _pendingFireTime = Time.time + windup;
-        _isSecondaryAttack = false;
+        _isHeavyAttack = false;
+        _fromLowStance = CurrentStance == CombatStance.Low;
         SampleAttackMoveMode();
     }
 
@@ -350,21 +337,19 @@ public class CombatController3D : MonoBehaviour
         _pendingAttack = false;
         if (hitbox != null && hitbox.visual != null) hitbox.visual.HideWindup();
 
-        // Удар под блоком: замах фиксированный, тайминг уворота не при чём.
         if (_pendingIsBlockAttack)
         {
             _pendingIsBlockAttack = false;
-            ExecuteAttack();
+            ExecuteAttack(fromBlock: true);
             return;
         }
 
-        // Идеальный тайминг — замах закончился точно на конце уворота (или сразу после).
         _dodgeAttackPerfectFlag = movement != null &&
             ((movement.IsDodging && movement.DodgeTimeRemaining <= dodgeAttackPerfectTolerance) ||
              (!movement.IsDodging && movement.TimeSinceDodgeEnd <= dodgeAttackPerfectTolerance));
 
-        ChargePercent = currentWeapon.minChargePercent;
-        ExecuteAttack();
+        ChargePercent = currentWeapon != null ? currentWeapon.minChargePercent : 0.3f;
+        ExecuteAttack(fromBlock: false);
     }
 
     void CancelCharge()
@@ -383,18 +368,14 @@ public class CombatController3D : MonoBehaviour
         isHoldingAttack = true;
         chargeStartTime = Time.time;
         ChargePercent = 0f;
-
-        // Автонаведение: замах сам лочится на ближайшего в боевой зоне, если цели там нет.
+        _fromLowStance = CurrentStance == CombatStance.Low;
         _autoTarget = null;
         TryAcquireCombatTarget();
         SampleAttackMoveMode();
-
         if (hitbox != null && hitbox.visual != null)
             hitbox.visual.ShowWindup();
     }
 
-    // При зажатом Shift определяет режим удара по WASD: вперёд — стоп, назад — разворот+удар,
-    // вбок — удар на ходу без остановки. Считывается один раз в момент начала атаки.
     void SampleAttackMoveMode()
     {
         _attackMoveMode = AttackMoveMode.None;
@@ -426,18 +407,15 @@ public class CombatController3D : MonoBehaviour
                 movement.StopHorizontalVelocity();
                 movement.SnapRotationToTarget(transform.position + GetAttackDirection());
                 break;
-                // SideStrike: скорость не трогаем — удар на ходу.
         }
         _attackMoveMode = AttackMoveMode.None;
     }
 
-    // Выпад вторичной атакой: если игрок жмёт в сторону цели — доворот корпуса на неё
-    // и добавка скорости от текущей. Стоя (скорость ≈ 0) выпада нет.
     void TryLunge()
     {
         if (movement == null || lungeSpeedMultiplier <= 0f) return;
 
-        Transform t = ActiveAimTarget;
+        Transform t = NearTarget != null ? NearTarget : currentTarget;
         if (t == null) return;
 
         Vector3 toTarget = t.position - transform.position;
@@ -453,17 +431,13 @@ public class CombatController3D : MonoBehaviour
         movement.AddLungeSpeed(toTarget, movement.CurrentSpeed * lungeSpeedMultiplier);
     }
 
-    // Добавка к урону от скорости движения: скорость × масса × коэффициент.
-    // Идеальный тайминг комбо-удара с уворотом — берёт скорость уворота, иначе — Shift + текущая скорость.
     float ComputeMomentumBonus()
     {
         if (movement == null || resources == null) return 0f;
-
         float speed;
         if (_dodgeAttackPerfectFlag) speed = movement.DodgeSpeedValue;
         else if (Input.GetKey(KeyCode.LeftShift)) speed = movement.CurrentSpeed;
         else return 0f;
-
         return speed * resources.mass * movementDamageCoefficient;
     }
 
@@ -474,84 +448,185 @@ public class CombatController3D : MonoBehaviour
         IsCharging = false;
         isHoldingAttack = false;
 
-        // Быстрый клик — атака с минимальным зарядом
+        if (currentWeapon == null) return;
+
         if (ChargePercent < currentWeapon.minChargePercent)
             ChargePercent = currentWeapon.minChargePercent;
 
-        // Стамина масштабируется от заряда
-        float cost = Mathf.Lerp(currentWeapon.staminaCost * 0.5f, currentWeapon.staminaCost, ChargePercent);
-        if (_isSecondaryAttack) cost *= currentWeapon.secondaryStaminaMult;
-        resources.SpendStamina(cost);
+        _isHeavyAttack = ChargePercent >= heavyChargeThreshold;
 
-        ExecuteAttack();
+        float cost = Mathf.Lerp(currentWeapon.staminaCost * 0.5f, currentWeapon.staminaCost, ChargePercent);
+        if (resources != null) resources.SpendStamina(cost);
+
+        ExecuteAttack(fromBlock: false);
     }
 
-    void ExecuteAttack()
+    void ExecuteAttack(bool fromBlock)
     {
         IsWindingUp = false;
         IsAttacking = true;
-        stateTimer = currentWeapon.attackDuration;
 
-        // Серия: удар в окне comboWindow продолжает комбо, иначе — сброс.
+        // Длительность с учётом стойки
+        float dur = currentWeapon != null ? currentWeapon.attackDuration : 0.2f;
+        bool stanceMatch = (CurrentStance == CombatStance.High && !_isHeavyAttack)
+                        || (CurrentStance == CombatStance.Low && (_isHeavyAttack || _fromLowStance));
+        if (stanceMatch) dur *= stanceSpeedBonus;
+        stateTimer = dur;
+
         _combo = Time.time <= _comboExpire ? _combo + 1 : 0;
-        _comboExpire = Time.time + currentWeapon.attackDuration + comboWindow;
+        _comboExpire = Time.time + dur + comboWindow;
 
-        if (_isSecondaryAttack && !string.IsNullOrEmpty(currentWeapon.secondaryTrigger))
-            SetTrig(currentWeapon.secondaryTrigger);
-        else
-            SetTrig(_combo % 2 != 0 ? "AttackLeft" : "AttackRight");
+        // Выбор формы атаки
+        AttackForm form = ChooseAttackForm();
+        _lastForm = form;
+        string trig = form switch
+        {
+            AttackForm.Thrust => "Thrust",
+            AttackForm.SlashLeft => "AttackLeft",
+            _ => "AttackRight"
+        };
+        SetTrig(trig);
 
-        if (currentWeapon.isRanged)
+        if (currentWeapon != null && currentWeapon.isRanged)
         {
             ExecuteRangedAttack(ChargePercent > 0 ? ChargePercent : 1f);
         }
-        else
+        else if (hitbox != null && currentWeapon != null)
         {
-            if (hitbox != null)
+            float damageMult;
+            float staggerMult;
+
+            if (_isHeavyAttack)
             {
-                float damageMult = Mathf.Lerp(0.7f, 1.5f, ChargePercent);
-                float staggerMult = Mathf.Lerp(0.5f, 1.5f, ChargePercent);
-
-                // Вторичная атака: под блоком длина обычная, без блока — удлинённая.
-                bool sec = _isSecondaryAttack;
-                float range = currentWeapon.attackRange * (sec && !IsBlocking ? currentWeapon.secondaryRangeMult : 1f);
-                float radius = currentWeapon.attackRadius * (sec ? currentWeapon.secondaryRadiusMult : 1f);
-                float cone = sec ? currentWeapon.secondaryConeHalfAngle : -1f;
-
-                float damage = currentWeapon.damage * damageMult * (sec ? currentWeapon.secondaryDamageMult : 1f);
-                damage += ComputeMomentumBonus();
-
-                ApplyAttackMoveMode();
-                if (sec && !IsBlocking) TryLunge();
-
-                hitbox.Activate(
-                    range,
-                    radius,
-                    currentWeapon.attackHeight,
-                    currentWeapon.hitboxOffset,
-                    GetAttackDirection(),
-                    damage,
-                    currentWeapon.staggerForce * staggerMult,
-                    currentWeapon.targetLayers,
-                    currentWeapon.attackDuration,
-                    currentWeapon.tickInterval,
-                    ChargePercent,
-                    _combo,
-                    cone
-                );
+                damageMult = Mathf.Lerp(1.1f, 1.5f, (ChargePercent - heavyChargeThreshold) / (1f - heavyChargeThreshold));
+                staggerMult = Mathf.Lerp(1.0f, 1.5f, ChargePercent);
             }
+            else if (_fromLowStance)
+            {
+                // Быстрый удар из Low: сильнее обычного light, слабее heavy
+                damageMult = 1.05f;
+                staggerMult = 0.9f;
+            }
+            else
+            {
+                damageMult = Mathf.Lerp(0.7f, 1.0f, ChargePercent);
+                staggerMult = Mathf.Lerp(0.5f, 1.0f, ChargePercent);
+            }
+
+            float range = currentWeapon.attackRange;
+            float radius = currentWeapon.attackRadius;
+            float cone = -1f;
+
+            if (form == AttackForm.Thrust)
+            {
+                range *= 1.25f;
+                radius *= 0.4f;
+                cone = 18f;
+            }
+
+            if (fromBlock)
+                range *= blockAttackRangeMult;
+
+            float damage = currentWeapon.damage * damageMult;
+            damage += ComputeMomentumBonus();
+
+            ApplyAttackMoveMode();
+
+            // Подшаг: если нет сильного ввода — лёгкий импульс в сторону удара
+            ApplyFootworkStep(form);
+
+            if (_isHeavyAttack && !fromBlock)
+                TryLunge();
+
+            hitbox.Activate(
+                range,
+                radius,
+                currentWeapon.attackHeight,
+                currentWeapon.hitboxOffset,
+                GetAttackDirection(),
+                damage,
+                currentWeapon.staggerForce * staggerMult,
+                currentWeapon.targetLayers,
+                dur,
+                currentWeapon.tickInterval,
+                ChargePercent,
+                _combo,
+                cone
+            );
         }
 
-        _isSecondaryAttack = false;
+        // Переход стойки после удара
+        if (_isHeavyAttack)
+            EnterStance(CombatStance.Low);
+        else
+            EnterStance(CombatStance.High);
+
         _dodgeAttackPerfectFlag = false;
         ChargePercent = 0f;
+        _isHeavyAttack = false;
+        _fromLowStance = false;
+    }
+
+    AttackForm ChooseAttackForm()
+    {
+        // Укол — редкий: только если цель заметно дальше обычной дистанции рубящего
+        // и не два укола подряд. Даже тогда — с шансом thrustChanceWhenFar.
+        Transform aim = NearTarget != null ? NearTarget : _autoTarget;
+        if (aim != null && _lastForm != AttackForm.Thrust)
+        {
+            Vector3 to = aim.position - transform.position;
+            to.y = 0f;
+            float dist = to.magnitude;
+            float range = currentWeapon != null ? currentWeapon.attackRange : 2f;
+            // Дальше max(порог, range * 1.35) — кандидат на укол
+            float thrustDist = Mathf.Max(thrustPreferDistance, range * 1.35f);
+            if (dist >= thrustDist && Random.value < thrustChanceWhenFar)
+                return AttackForm.Thrust;
+        }
+
+        // Основное — чередование Left/Right
+        if (_lastForm == AttackForm.SlashRight)
+            return AttackForm.SlashLeft;
+        if (_lastForm == AttackForm.SlashLeft)
+            return AttackForm.SlashRight;
+
+        // После Thrust или старта — Right
+        return AttackForm.SlashRight;
+    }
+
+    void ApplyFootworkStep(AttackForm form)
+    {
+        if (movement == null) return;
+
+        float h = Input.GetAxisRaw("Horizontal");
+        float v = Input.GetAxisRaw("Vertical");
+        bool hasInput = Mathf.Abs(h) > 0.15f || Mathf.Abs(v) > 0.15f;
+
+        if (hasInput)
+        {
+            // Игрок сам задаёт направление ног — ничего не форсим
+            return;
+        }
+
+        // Нет ввода → небольшой шаг в сторону удара
+        Vector3 attackDir = GetAttackDirection();
+        if (attackDir.sqrMagnitude < 0.01f) return;
+
+        // Лёгкий импульс вперёд по направлению атаки (подшаг)
+        if (movement != null)
+            movement.AddLungeSpeed(attackDir, 2.5f); // маленькая фиксированная скорость
+    }
+
+    void EnterStance(CombatStance s)
+    {
+        CurrentStance = s;
+        _stanceTimer = stanceDuration;
     }
 
     void ExecuteRangedAttack(float chargePercent)
     {
         Vector3 spawnPos = transform.position + Vector3.up * 1.5f + GetAttackDirection() * 0.5f;
         Quaternion baseRotation = Quaternion.LookRotation(GetAttackDirection());
-        // Исправлено: 0.5f как нижняя граница, не minChargePercent
         float dmgMult = Mathf.Lerp(0.5f, 1f, chargePercent);
         float spdMult = Mathf.Lerp(0.5f, 1f, chargePercent);
 
@@ -579,35 +654,35 @@ public class CombatController3D : MonoBehaviour
     {
         IsAttacking = false;
         IsWindingUp = false;
-        _autoTarget = null; // направление замаха сбрасывается после удара
+        _autoTarget = null;
     }
 
-    // Цель дальше радиуса удержания — берём ближайшего врага в targetLockRange, никого нет — сброс.
-    // Внутри closeSwitchRange лок при этом может перехватить враг, который ближе к курсору.
+    // ---------- Таргетинг (без изменений логики) ----------
+
     void MaintainLockTarget()
     {
+        if (!IsValidEnemy(currentTarget))
+        {
+            currentTarget = FindNearestInRadius(targetLockRange);
+            return;
+        }
         TryCloseSwitch();
-
         Vector3 to = currentTarget.position - transform.position;
         to.y = 0f;
         if (to.sqrMagnitude <= targetHoldRange * targetHoldRange) return;
-
         currentTarget = FindNearestInRadius(targetLockRange);
     }
 
-    // Началось/держится действие: цели в боевой зоне нет — лочимся на ближайшего внутри неё.
     void TryAcquireCombatTarget()
     {
         if (NearTarget != null) return;
-
         Transform near = FindPreferredTarget(combatFaceRange);
         if (near != null) currentTarget = near;
     }
 
-    // Вблизи лок отбирает тот, кто ближе к курсору по углу. Запас closeSwitchAngleMargin
-    // не даёт метке мигать между двумя врагами, стоящими рядом.
     void TryCloseSwitch()
     {
+        if (!IsValidEnemy(currentTarget)) return;
         Collider[] enemies = Physics.OverlapSphere(transform.position, closeSwitchRange, enemyLayers);
         if (enemies.Length == 0) return;
 
@@ -617,8 +692,8 @@ public class CombatController3D : MonoBehaviour
 
         foreach (Collider col in enemies)
         {
+            if (!IsValidEnemy(col.transform)) continue;
             if (col.transform == currentTarget) continue;
-
             Vector3 to = col.transform.position - transform.position;
             to.y = 0f;
             float angle = Vector3.Angle(mouse, to);
@@ -639,6 +714,7 @@ public class CombatController3D : MonoBehaviour
         float minDist = float.MaxValue;
         foreach (Collider col in enemies)
         {
+            if (!IsValidEnemy(col.transform)) continue;
             Vector3 to = col.transform.position - transform.position;
             to.y = 0f;
             float dist = to.sqrMagnitude;
@@ -647,8 +723,6 @@ public class CombatController3D : MonoBehaviour
         return closest;
     }
 
-    // Направление наводки без Tab-таргета: WASD, если зажат — приоритет той стороны,
-    // иначе мышь (используется и для смены цели поворотом во время замаха).
     Vector3 GetPreferredAimDirection()
     {
         float h = Input.GetAxisRaw("Horizontal");
@@ -660,15 +734,12 @@ public class CombatController3D : MonoBehaviour
             Vector3 dir = forward * v + right * h;
             if (dir.sqrMagnitude > 0.01f) return dir.normalized;
         }
-
         return MouseDirection();
     }
 
-    // Направление на курсор в плоскости игрока.
     Vector3 MouseDirection()
     {
         if (Camera.main == null) return transform.forward;
-
         Ray ray = Camera.main.ScreenPointToRay(Input.mousePosition);
         Plane ground = new Plane(Vector3.up, transform.position);
         if (ground.Raycast(ray, out float dist))
@@ -680,7 +751,6 @@ public class CombatController3D : MonoBehaviour
         return transform.forward;
     }
 
-    // Смена цели поворотом во время замаха: приоритет стороне поворота, не дистанции.
     Transform FindClosestToDirection(Vector3 preferred, float radius)
     {
         Collider[] enemies = Physics.OverlapSphere(transform.position, radius, enemyLayers);
@@ -690,18 +760,16 @@ public class CombatController3D : MonoBehaviour
 
         foreach (Collider col in enemies)
         {
+            if (!IsValidEnemy(col.transform)) continue;
             Vector3 to = col.transform.position - transform.position;
             to.y = 0f;
             if (Vector3.Angle(transform.forward, to) > halfAngle) continue;
-
             float angle = Vector3.Angle(preferred, to);
             if (angle < bestAngle) { bestAngle = angle; best = col.transform; }
         }
         return best;
     }
 
-    // Ближайший враг в радиусе, 360°, с приоритетом тому, кто ближе к направлению наводки (WASD/мышь).
-    // Вес стороны задаётся aimAnglePenalty: 1° отклонения = столько «юнитов» штрафа к дистанции.
     Transform FindPreferredTarget(float radius)
     {
         Vector3 preferred = GetPreferredAimDirection();
@@ -711,16 +779,15 @@ public class CombatController3D : MonoBehaviour
 
         foreach (Collider col in enemies)
         {
+            if (!IsValidEnemy(col.transform)) continue;
             Vector3 to = col.transform.position - transform.position;
             to.y = 0f;
-
             float score = to.magnitude + Vector3.Angle(preferred, to) * aimAnglePenalty;
             if (score < bestScore) { bestScore = score; best = col.transform; }
         }
         return best;
     }
 
-    // Ближайший враг в конусе aimConeAngle перед игроком (для Tab — без учёта стороны наводки).
     Transform FindNearestInCone()
     {
         Collider[] enemies = Physics.OverlapSphere(transform.position, targetLockRange, enemyLayers);
@@ -730,10 +797,10 @@ public class CombatController3D : MonoBehaviour
 
         foreach (Collider col in enemies)
         {
+            if (!IsValidEnemy(col.transform)) continue;
             Vector3 to = col.transform.position - transform.position;
             to.y = 0f;
             if (Vector3.Angle(transform.forward, to) > halfAngle) continue;
-
             float dist = to.sqrMagnitude;
             if (dist < minDist) { minDist = dist; closest = col.transform; }
         }
@@ -742,23 +809,29 @@ public class CombatController3D : MonoBehaviour
 
     public void ClearTarget() => currentTarget = null;
 
-    // Отпустили Shift: старая цель жива и в радиусе — возвращаем её, иначе берём ближайшую.
     void RestoreOrAcquireTarget()
     {
         currentTarget = IsValidRestoreTarget(_shiftSavedTarget) ? _shiftSavedTarget : FindNearestInCone();
         _shiftSavedTarget = null;
     }
 
-    bool IsValidRestoreTarget(Transform t)
+    /// <summary>Живой враг на enemyLayers (труп / мёртвый WerewolfStats не берём).</summary>
+    bool IsValidEnemy(Transform t)
     {
         if (t == null || !t.gameObject.activeInHierarchy) return false;
+        var stats = t.GetComponentInParent<WerewolfStats>();
+        if (stats != null) return stats.IsAlive;
+        return true; // не оборотень — считаем валидным (другие типы врагов)
+    }
+
+    bool IsValidRestoreTarget(Transform t)
+    {
+        if (!IsValidEnemy(t)) return false;
         Vector3 to = t.position - transform.position;
         to.y = 0f;
         return to.sqrMagnitude <= targetLockRange * targetLockRange;
     }
 
-    // Красный ромб над головой цели: во время спринта таргет подавлен, но метка держится
-    // на сохранённой цели, чтобы было видно, что захват восстановится после спринта.
     void UpdateTargetMarker()
     {
         Transform shown = currentTarget != null ? currentTarget : _shiftSavedTarget;
@@ -792,7 +865,7 @@ public class CombatController3D : MonoBehaviour
             new Vector3(half, half, 0f), new Vector3(-half, half, 0f)
         };
         mesh.uv = new Vector2[] { new Vector2(0, 0), new Vector2(1, 0), new Vector2(1, 1), new Vector2(0, 1) };
-        mesh.triangles = new int[] { 0, 1, 2, 0, 2, 3, 0, 2, 1, 0, 3, 2 }; // двусторонний
+        mesh.triangles = new int[] { 0, 1, 2, 0, 2, 3, 0, 2, 1, 0, 3, 2 };
         mesh.RecalculateNormals();
         mf.mesh = mesh;
 
@@ -813,12 +886,7 @@ public class CombatController3D : MonoBehaviour
         Transform aim = NearTarget != null ? NearTarget : _autoTarget;
         if (aim != null)
         {
-            // Таргет дальше, чем бьёт оружие, — целимся в ближайшего вместо него.
-            float effectiveRange = currentWeapon != null
-                ? currentWeapon.attackRange *
-                  (_isSecondaryAttack && !IsBlocking ? currentWeapon.secondaryRangeMult : 1f)
-                : targetLockRange;
-
+            float effectiveRange = currentWeapon != null ? currentWeapon.attackRange : targetLockRange;
             Vector3 diff = aim.position - transform.position;
             diff.y = 0f;
             if (diff.magnitude > effectiveRange)
@@ -831,6 +899,7 @@ public class CombatController3D : MonoBehaviour
             dir.y = 0f;
             return dir.normalized;
         }
+        if (Camera.main == null) return transform.forward;
         Ray ray = Camera.main.ScreenPointToRay(Input.mousePosition);
         Plane ground = new Plane(Vector3.up, transform.position);
         if (ground.Raycast(ray, out float dist))

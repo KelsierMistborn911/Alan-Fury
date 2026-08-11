@@ -113,6 +113,12 @@ public class WerewolfPackManager : MonoBehaviour
     public int panicFearTiers = 2;
     [Tooltip("Сколько страха стаи остаётся после срыва. 0.5 = половина, второй срыв наступит вдвое быстрее.")]
     [Range(0f, 1f)] public float packFearAfterPanic = 0.5f;
+    [Tooltip("Спад страха стаи вне срыва (ед/сек). Без спада слоты не вернутся после паники.")]
+    public float packFearDecayPerSecond = 8f;
+    [Tooltip("Ниже этой доли PackFearPercent стая снова может выдавать слоты атаки.")]
+    [Range(0f, 1f)] public float packRecoverFearPercent = 0.35f;
+    [Tooltip("Минимальная длительность разбега после срыва (сек).")]
+    public float packScatterMinDuration = 4f;
 
     [Header("Рана рядом сбивает кураж")]
     [Tooltip("Радиус, в котором соседи видят рану и теряют агрессию (м).")]
@@ -122,21 +128,36 @@ public class WerewolfPackManager : MonoBehaviour
 
     private float _nextJumpAllowed;
     private float _packFear;
+    private bool _packScattering;
+    private float _scatterUntil;
 
-    /// <summary>Текущий страх стаи (0..maxPackFear). Общий для всех волков; падает только при срыве.</summary>
+    /// <summary>Текущий страх стаи (0..maxPackFear).</summary>
     public float PackFear => _packFear;
     public float PackFearPercent => maxPackFear > 0f ? _packFear / maxPackFear : 0f;
+    /// <summary>Стая в массовом разбеге — слоты атаки не выдаются, Surround бежит дальше.</summary>
+    public bool IsPackScattering => _packScattering;
 
-    /// <summary>Рана у волка (зовёт WerewolfStats.TakeDamage): страх стаи += урон.
-    /// Упёрлись в потолок — срыв: всем живым +panicFearTiers ступеней личного страха,
-    /// страх стаи падает до packFearAfterPanic (вторая волна дешевле первой).
-    /// Плюс рана рядом сбивает кураж соседям (SpreadWoundAggro).</summary>
+    /// <summary>Рана у волка: страх стаи += урон. Потолок → срыв всей стаи.</summary>
     public void ReportWound(float damage, Vector3 at, Transform wounded)
     {
         SpreadWoundAggro(damage, at, wounded);
 
         _packFear = Mathf.Min(maxPackFear, _packFear + damage);
         if (_packFear < maxPackFear) return;
+
+        BeginPackScatter();
+    }
+
+    private void BeginPackScatter()
+    {
+        // Все атакующие → Surround, слоты пустые.
+        for (int i = 0; i < _attackSlots.Count; i++)
+        {
+            if (_attackSlots[i] == null) continue;
+            Demote(_attackSlots[i]);
+            _attackSlots[i] = null;
+            _slotLockedUntil[i] = 0f;
+        }
 
         int panicked = 0;
         for (int i = 0; i < _wolves.Count; i++)
@@ -147,7 +168,22 @@ public class WerewolfPackManager : MonoBehaviour
             }
 
         _packFear = maxPackFear * packFearAfterPanic;
-        Debug.Log($"[Стая] Срыв: {panicked} волков получили +{panicFearTiers} ступени страха. Страх стаи {_packFear:0}/{maxPackFear:0}.");
+        _packScattering = true;
+        _scatterUntil = Time.time + packScatterMinDuration;
+        Debug.Log($"[Стая] СРЫВ: {panicked} волков, разбег до {packScatterMinDuration:0.#}с+. Страх стаи {_packFear:0}/{maxPackFear:0}.");
+    }
+
+    private void TickPackFear(float dt)
+    {
+        if (_packFear > 0f && packFearDecayPerSecond > 0f)
+            _packFear = Mathf.Max(0f, _packFear - packFearDecayPerSecond * dt);
+
+        if (!_packScattering) return;
+        if (Time.time < _scatterUntil) return;
+        if (PackFearPercent > packRecoverFearPercent) return;
+
+        _packScattering = false;
+        Debug.Log($"[Стая] Сбор: страх стаи {PackFearPercent:0%} ≤ {packRecoverFearPercent:0%}, слоты снова можно выдавать.");
     }
 
     /// <summary>Рана своего рядом сбивает кураж: урон делится поровну между волками
@@ -310,6 +346,8 @@ public class WerewolfPackManager : MonoBehaviour
             }
         }
 
+        TickPackFear(Time.deltaTime);
+
         _slotTimer -= Time.deltaTime;
         if (_slotTimer <= 0f)
         {
@@ -321,7 +359,7 @@ public class WerewolfPackManager : MonoBehaviour
         if (_regroupTimer <= 0f)
         {
             _regroupTimer = regroupInterval + Random.Range(-regroupJitter, regroupJitter);
-            SwapGroups();
+            if (!_packScattering) SwapGroups();
         }
 
         UpdateFrontToken();
@@ -332,6 +370,7 @@ public class WerewolfPackManager : MonoBehaviour
     {
         reason = null;
         if (w == null || !w.IsAlive) { reason = "мёртв"; return false; }
+        if (_packScattering) { reason = "срыв стаи"; return false; }
         if (w.HealthPercent < attackMinHealth) { reason = "ранен"; return false; }
         if (w.Fear01 > attackMaxFear) { reason = "страх"; return false; }
         return true;
@@ -575,6 +614,23 @@ public class WerewolfPackManager : MonoBehaviour
         w.SetRole(PackRole.Surround, false);
         if (_frontTokenHolder == w) { w.SetAttackToken(false); _frontTokenHolder = null; }
         OnSlotRevoked?.Invoke(w);
+    }
+
+    /// <summary>Волк сам сдаёт слот (Fleeish / не бьёт) → Surround, слот свободен для замены.</summary>
+    public void YieldAttackSlot(IPackAgent w)
+    {
+        if (w == null) return;
+        for (int i = 0; i < _attackSlots.Count; i++)
+        {
+            if (_attackSlots[i] != w) continue;
+            _attackSlots[i] = null;
+            _slotLockedUntil[i] = 0f;
+            Demote(w);
+            Log($"Слот {i}: {w.Transform.name} сдал атаку (Fleeish/страх).");
+            return;
+        }
+        // Не в слотах, но роль Attack — всё равно в Surround.
+        Demote(w);
     }
 
     /// <summary>Волк занял слот атаки. Под будущий рык/вой и подсветку в редакторе.</summary>

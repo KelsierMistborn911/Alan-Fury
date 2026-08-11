@@ -2,10 +2,8 @@ using UnityEngine;
 
 /// <summary>
 /// Мелкий HUD над головой игрока: 4 полоски (HP, стамина, оборона, мана)
-/// с цифрами и кружок блока слева (зелёный = готов, жёлтый = блокирую).
-/// Строится из квадов и TextMesh кодом — на сцену вешать только
-/// этот скрипт на объект игрока (рядом с PlayerResources).
-/// Полоски всегда повёрнуты к камере.
+/// с цифрами, кружок блока слева и индикатор заряда атаки рядом с ним.
+/// Строится из квадов и TextMesh кодом.
 /// </summary>
 public class PlayerStatsHUD : MonoBehaviour
 {
@@ -42,9 +40,18 @@ public class PlayerStatsHUD : MonoBehaviour
     [Tooltip("Зазор между кружком и полосками (м).")]
     public float blockCircleGap = 0.05f;
 
+    [Header("Индикатор заряда атаки")]
+    public Color chargeIdleColor = new Color(0.9f, 0.2f, 0.15f, 0.85f);   // красный
+    public Color chargeProgressColor = new Color(0.95f, 0.85f, 0.2f, 0.9f); // жёлтый
+    public Color chargeHeavyColor = new Color(0.25f, 0.55f, 1f, 0.95f);     // синий
+    [Tooltip("Зазор между кружком блока и индикатором заряда.")]
+    public float chargeGap = 0.04f;
+
     private Transform _root;
     private Bar[] _bars;
     private MeshRenderer _blockCircle;
+    private MeshRenderer _chargeIndicator;
+    private GameObject _chargeGo;
 
     private struct Bar
     {
@@ -69,13 +76,13 @@ public class PlayerStatsHUD : MonoBehaviour
         _bars[3] = BuildBar(3, manaColor);
 
         BuildBlockCircle();
+        BuildChargeIndicator();
     }
 
-    // Кружок слева от полосок, диаметром во всю их суммарную высоту.
     void BuildBlockCircle()
     {
         float diameter = 4 * barHeight + 3 * barSpacing;
-        float centerY = -1.5f * (barHeight + barSpacing); // центр стопки полосок
+        float centerY = -1.5f * (barHeight + barSpacing);
 
         var go = GameObject.CreatePrimitive(PrimitiveType.Quad);
         go.name = "BlockCircle";
@@ -97,7 +104,34 @@ public class PlayerStatsHUD : MonoBehaviour
         _blockCircle.material = mat;
     }
 
-    // Генерирует белый круг на прозрачном фоне (64x64), чтобы квад выглядел кружком.
+    void BuildChargeIndicator()
+    {
+        float diameter = 4 * barHeight + 3 * barSpacing;
+        float centerY = -1.5f * (barHeight + barSpacing);
+        float blockX = -(barWidth * 0.5f + blockCircleGap + diameter * 0.5f);
+        float chargeX = blockX - diameter * 0.5f - chargeGap - diameter * 0.35f;
+
+        _chargeGo = GameObject.CreatePrimitive(PrimitiveType.Quad);
+        _chargeGo.name = "ChargeIndicator";
+        Destroy(_chargeGo.GetComponent<Collider>());
+        _chargeGo.transform.SetParent(_root, false);
+        _chargeGo.transform.localPosition = new Vector3(chargeX, centerY, 0f);
+        _chargeGo.transform.localScale = new Vector3(diameter * 0.7f, diameter * 0.7f, 1f);
+
+        var mat = new Material(Shader.Find("Universal Render Pipeline/Unlit"));
+        mat.SetFloat("_Surface", 1f);
+        mat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+        mat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+        mat.SetInt("_ZWrite", 0);
+        mat.renderQueue = 3000;
+        mat.color = chargeIdleColor;
+        mat.mainTexture = MakeCircleTexture();
+        _chargeIndicator = _chargeGo.GetComponent<MeshRenderer>();
+        _chargeIndicator.material = mat;
+
+        _chargeGo.SetActive(false);
+    }
+
     static Texture2D MakeCircleTexture()
     {
         const int size = 64;
@@ -109,7 +143,7 @@ public class PlayerStatsHUD : MonoBehaviour
             for (int x = 0; x < size; x++)
             {
                 float d = Vector2.Distance(new Vector2(x + 0.5f, y + 0.5f), c);
-                float a = Mathf.Clamp01(r - d); // мягкий край в 1 пиксель
+                float a = Mathf.Clamp01(r - d);
                 px[y * size + x] = new Color(1f, 1f, 1f, a);
             }
         tex.SetPixels(px);
@@ -129,13 +163,31 @@ public class PlayerStatsHUD : MonoBehaviour
         if (_blockCircle != null && combat != null)
             _blockCircle.material.color = combat.IsBlocking ? blockActiveColor : blockReadyColor;
 
-        // Лицом к камере
+        // Индикатор заряда
+        if (_chargeGo != null && _chargeIndicator != null && combat != null)
+        {
+            bool show = combat.IsCharging || combat.IsWindingUp;
+            _chargeGo.SetActive(show);
+            if (show)
+            {
+                if (combat.IsHeavyReady)
+                    _chargeIndicator.material.color = chargeHeavyColor;
+                else if (combat.ChargePercent > 0.05f)
+                {
+                    // Лерим красный → жёлтый по прогрессу до порога heavy
+                    float t = Mathf.Clamp01(combat.ChargePercent / Mathf.Max(0.01f, combat.heavyChargeThreshold));
+                    _chargeIndicator.material.color = Color.Lerp(chargeIdleColor, chargeProgressColor, t);
+                }
+                else
+                    _chargeIndicator.material.color = chargeIdleColor;
+            }
+        }
+
         Camera cam = Camera.main;
         if (cam != null)
             _root.rotation = cam.transform.rotation;
     }
 
-    // index — номер строки сверху вниз (0 = верхняя).
     private Bar BuildBar(int index, Color color)
     {
         float y = -index * (barHeight + barSpacing);
@@ -173,7 +225,7 @@ public class PlayerStatsHUD : MonoBehaviour
         go.transform.localScale = localScale;
 
         var mat = new Material(Shader.Find("Universal Render Pipeline/Unlit"));
-        mat.SetFloat("_Surface", 1f); // Transparent
+        mat.SetFloat("_Surface", 1f);
         mat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
         mat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
         mat.SetInt("_ZWrite", 0);
@@ -187,13 +239,10 @@ public class PlayerStatsHUD : MonoBehaviour
     private void UpdateBar(Bar bar, float percent, float value)
     {
         percent = Mathf.Clamp01(percent);
-        // Заливка сжимается вправо-налево: пивот квада в центре,
-        // поэтому сдвигаем к левому краю на половину «потерянной» ширины.
         Vector3 s = bar.fill.localScale;
         s.x = barWidth * percent;
         bar.fill.localScale = s;
         bar.fill.localPosition = new Vector3(-(barWidth - s.x) * 0.5f, 0f, 0f);
-
         bar.text.text = Mathf.RoundToInt(value).ToString();
     }
 }

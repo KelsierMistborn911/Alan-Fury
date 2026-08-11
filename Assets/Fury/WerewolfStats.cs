@@ -36,6 +36,10 @@ public class WerewolfStats : MonoBehaviour, IDamageable
     /// <summary>Ступени агрессии, тот же шаг 25: осторожен / средний / злой / ярость.</summary>
     public enum AggressionTier { Cautious, Mid, Fierce, Rage }
 
+    /// <summary>Боевое настроение из Fear+Aggression (не отдельная шкала).
+    /// Rage…Skittish — как дерётся; Fleeish — не бьёт, AttackBrain сдаёт слот в Surround.</summary>
+    public enum CombatMood { Rage, Aggressive, Tense, Skittish, Fleeish }
+
     /// <summary>Кто первым занял четвёртую ступень — второй упирается в третью.</summary>
     public enum ApexHolder { None, Fear, Aggression }
 
@@ -107,6 +111,25 @@ public class WerewolfStats : MonoBehaviour, IDamageable
 
     /// <summary>Кто сейчас держит вершину (лог, HUD).</summary>
     public ApexHolder Apex => _apex;
+
+    /// <summary>
+    /// Настроение 1–5 из двух шкал. Afraid+ (Tier ≥ Afraid) → Fleeish.
+    /// Иначе по разнице Aggro01−Fear01 и уровню.
+    /// </summary>
+    public CombatMood Mood
+    {
+        get
+        {
+            if (Tier >= FearTier.Afraid) return CombatMood.Fleeish;
+            float d = Aggression01 - Fear01; // −1..+1
+            float peak = Mathf.Max(Aggression01, Fear01);
+            if (d > 0.35f && Aggression01 >= 0.55f) return CombatMood.Rage;
+            if (d > 0.12f) return CombatMood.Aggressive;
+            if (d < -0.12f || Fear01 > 0.4f) return CombatMood.Skittish;
+            if (peak < 0.2f) return CombatMood.Aggressive; // оба низкие — спокойный пресс
+            return CombatMood.Tense;
+        }
+    }
 
     private static int TierIndex(float value, bool capped)
         => Mathf.Clamp(Mathf.FloorToInt(value / FearTierStep), 0, capped ? 2 : 3);
