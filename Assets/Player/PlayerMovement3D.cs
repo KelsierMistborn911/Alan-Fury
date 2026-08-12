@@ -123,10 +123,18 @@ public class PlayerMovement3D : MonoBehaviour
     public float gravity = -20f;
 
     [Header("Анимация")]
-    [Tooltip("Аниматор игрока. Пусто — найдётся на объекте или в детях. Параметры: Gait (int 1/2/3), Moving (bool), Combat (bool), CombatEnter (trigger).")]
+    [Tooltip("Аниматор игрока. Пусто — найдётся на объекте или в детях. Параметры: Gait (int 1/2/3), Moving (bool), Combat (bool), CombatEnter (trigger), Turn (float −180…180 InPlace/старт), MoveAngle (float −180…180 угол движения относительно корпуса).")]
     public Animator animator;
     [Tooltip("Порог скорости, ниже которого игрок считается стоящим (м/с).")]
     public float moveThreshold = 0.15f;
+    [Tooltip("Минимальный угол (°) для записи Turn при стоянии. Меньше — микроповороты игнорируются.")]
+    public float turnInPlaceThreshold = 15f;
+    [Tooltip("Задержка первого шага с места (сек). Пока таймер > 0 скорость сильно снижена — под анимацию Idle→Walk / Walk Start.")]
+    public float walkStartDelay = 0.28f;
+    [Tooltip("Доля скорости во время walkStartDelay (0 = стоим на месте, 0.25 = четверть).")]
+    [Range(0f, 1f)] public float walkStartSpeedFactor = 0.15f;
+    [Tooltip("Если мышь не двигали дольше этого времени (сек) — корпус смотрит по направлению бега, а не на прицел.")]
+    public float mouseLookTimeout = 2f;
 
     [Header("Граница карты (опционально)")]
     [Tooltip("Если не задана — берётся MapBoundary с этого же объекта.")]
@@ -144,6 +152,11 @@ public class PlayerMovement3D : MonoBehaviour
     private bool _inCombat;             // цель в боевой зоне или идёт действие
     private GaitConfig _stepSlowRef;    // нижняя опора для StepController (шаг)
     private GaitConfig _stepFastRef;    // верхняя опора (бег/спринт того же набора)
+    private float _walkStartTimer;      // >0 — старт с места, скорость режется
+    private float _startTurnAngle;      // угол на момент старта шага (для Walk Start 180 и т.п.)
+    private bool _hadMoveInput;         // был ли ввод в прошлом кадре
+    private float _lastMouseMoveTime = -999f;
+    private Vector3 _lastMousePos;
 
     // Манёвры
     private bool _isDodging;
@@ -216,6 +229,8 @@ public class PlayerMovement3D : MonoBehaviour
         if (witchLight == null) witchLight = GetComponentInChildren<WitchLight>();
         if (animator == null) animator = GetComponentInChildren<Animator>();
 
+        _lastMousePos = Input.mousePosition;
+        _lastMouseMoveTime = Time.time; // при старте считаем мышь «свежей»
         CacheAnimParams();
     }
 
@@ -472,16 +487,67 @@ public class PlayerMovement3D : MonoBehaviour
         if (gait == 1) _currentGait = _stepSlowRef;
         else _currentGait = _stepFastRef;
 
-        // Параметры для аниматора: режим движения, факт перемещения и боевая стойка.
+        // Параметры для аниматора.
+        // Moving = есть ввод ИЛИ реальная скорость (чтобы Idle→Walk стартовал сразу по WASD).
+        // Turn: стоя — до мыши; в первые кадры старта шага — угол до направления движения (для 180L и т.п.).
         if (animator != null)
         {
+            bool hasInput = _hadMoveInput;
+            bool isMoving = hasInput || _velocity.magnitude > moveThreshold;
             if (HasParam("Gait")) animator.SetInteger("Gait", gait);
-            if (HasParam("Moving")) animator.SetBool("Moving", _velocity.magnitude > moveThreshold);
+            if (HasParam("Moving")) animator.SetBool("Moving", isMoving);
             if (HasParam("Combat")) animator.SetBool("Combat", combatMode);
             if (combatMode && !_inCombat && HasParam("CombatEnter")) animator.SetTrigger("CombatEnter");
+
+            if (HasParam("Turn"))
+            {
+                float turn = 0f;
+                if (_walkStartTimer > 0f)
+                    turn = _startTurnAngle;                    // держим угол старта, пока идёт Walk Start
+                else if (!isMoving)
+                    turn = ComputeStandingTurnAngle();         // InPlace стоя
+                animator.SetFloat("Turn", turn);
+            }
+
+            // Угол движения относительно корпуса — для Walk Left/Right/Back blend или переходов.
+            if (HasParam("MoveAngle"))
+            {
+                float moveAngle = 0f;
+                if (_velocity.sqrMagnitude > 0.01f)
+                    moveAngle = Vector3.SignedAngle(transform.forward, _velocity.normalized, Vector3.up);
+                animator.SetFloat("MoveAngle", moveAngle);
+            }
         }
 
         _inCombat = combatMode;
+    }
+
+    /// <summary>
+    /// Угол до мыши стоя (InPlace). 0 если угол меньше порога или мышь недоступна.
+    /// Знак: + вправо, − влево (SignedAngle вокруг up).
+    /// </summary>
+    float ComputeStandingTurnAngle()
+    {
+        if (_mainCamera == null) return 0f;
+        // В бою с прицелом на цель — угол до цели, иначе до мыши.
+        Vector3 look = Vector3.zero;
+        Transform aim = _combat != null ? _combat.ActiveAimTarget : null;
+        if (aim != null)
+        {
+            look = aim.position - transform.position;
+        }
+        else
+        {
+            Ray ray = _mainCamera.ScreenPointToRay(Input.mousePosition);
+            if (!new Plane(Vector3.up, transform.position).Raycast(ray, out float dist))
+                return 0f;
+            look = ray.GetPoint(dist) - transform.position;
+        }
+        look.y = 0f;
+        if (look.sqrMagnitude < 0.01f) return 0f;
+
+        float angle = Vector3.SignedAngle(transform.forward, look.normalized, Vector3.up);
+        return Mathf.Abs(angle) >= turnInPlaceThreshold ? angle : 0f;
     }
 
     // ──────────────────────────────────────────────
@@ -493,8 +559,28 @@ public class PlayerMovement3D : MonoBehaviour
         float h = Input.GetAxisRaw("Horizontal");
         float v = Input.GetAxisRaw("Vertical");
         Vector3 input = new Vector3(h, 0f, v).normalized;
+        bool hasInput = input.magnitude > 0.1f && _mainCamera != null;
 
-        if (input.magnitude > 0.1f && _mainCamera != null)
+        // Старт с места: запоминаем угол и включаем задержку под анимацию первого шага.
+        if (hasInput && !_hadMoveInput && _velocity.magnitude <= moveThreshold)
+        {
+            Vector3 startDir = ComputeInputDirection();
+            _startTurnAngle = Vector3.SignedAngle(transform.forward, startDir, Vector3.up);
+            if (Mathf.Abs(_startTurnAngle) < turnInPlaceThreshold)
+                _startTurnAngle = 0f;
+            _walkStartTimer = walkStartDelay;
+        }
+        if (!hasInput)
+        {
+            _walkStartTimer = 0f;
+            _startTurnAngle = 0f;
+        }
+        else if (_walkStartTimer > 0f)
+            _walkStartTimer -= Time.deltaTime;
+
+        _hadMoveInput = hasInput;
+
+        if (hasInput)
         {
             Vector3 targetDir = ComputeInputDirection();
             _maneuverDir = targetDir;
@@ -503,10 +589,14 @@ public class PlayerMovement3D : MonoBehaviour
             _step.TryStart(_currentGait.speed, _stepSlowRef, _stepFastRef);
             float stepImpulse = _step.Tick(Time.deltaTime);
 
-            Vector3 targetVelocity = targetDir *
-                ((_currentGait.speed + stepImpulse) * DirectionSpeedMultiplier(targetDir));
+            float speedMult = DirectionSpeedMultiplier(targetDir);
+            // Пока идёт стартовая анимация — сильно режем скорость, чтобы не уезжать вперёд клипа.
+            if (_walkStartTimer > 0f)
+                speedMult *= walkStartSpeedFactor;
 
-            // Плавный разгон через SmoothDamp
+            Vector3 targetVelocity = targetDir *
+                ((_currentGait.speed + stepImpulse) * speedMult);
+
             _velocity = Vector3.MoveTowards(
                 _velocity,
                 targetVelocity,
@@ -519,10 +609,9 @@ public class PlayerMovement3D : MonoBehaviour
         {
             _step.Cancel();
 
-            // Доворот к мыши стоя — так же, как на ходу
+            // Доворот к мыши стоя
             HandleRotation();
 
-            // Торможение — у walk резкое, у sprint плавное
             if (_velocity.magnitude > 0.05f)
             {
                 _velocity = Vector3.MoveTowards(
@@ -554,7 +643,12 @@ public class PlayerMovement3D : MonoBehaviour
     // moveDir — направление ввода в этом кадре (нулевой, если стоим).
     void HandleRotation(Vector3 moveDir = default)
     {
-        // Во время замаха/удара/блока с целью в боевой зоне — плавный доворот на неё вместо мыши.
+        // Во время активного удара корпус не крутим — иначе после/во время атаки
+        // персонаж разворачивается на мышь или цель и ломает анимацию.
+        if (_combat != null && _combat.IsAttacking)
+            return;
+
+        // Во время замаха/блока с целью в боевой зоне — плавный доворот на неё вместо мыши.
         Transform aim = _combat != null ? _combat.ActiveAimTarget : null;
         if (aim != null)
         {
@@ -568,21 +662,33 @@ public class PlayerMovement3D : MonoBehaviour
             return;
         }
 
-        // Спринт: корпус доворачивается к направлению движения, мышь его не крутит —
-        // спиной вперёд не побежать. Блок сюда не попадает: там мышь или ближайший враг.
+        // Обновляем «мышь недавно двигали».
+        Vector3 mousePos = Input.mousePosition;
+        if ((mousePos - _lastMousePos).sqrMagnitude > 0.01f)
+            _lastMouseMoveTime = Time.time;
+        _lastMousePos = mousePos;
+
+        bool mouseRecentlyMoved = (Time.time - _lastMouseMoveTime) < mouseLookTimeout;
         bool blocking = _combat != null && _combat.IsBlocking;
-        if (!blocking && Input.GetKey(KeyCode.LeftShift) && moveDir.sqrMagnitude > 0.01f)
+
+        // Бежим передом: спринт ИЛИ мышь давно не трогали + есть направление движения.
+        // Иначе смотрим на прицел (стрейф).
+        bool faceMoveDir = !blocking
+            && moveDir.sqrMagnitude > 0.01f
+            && (Input.GetKey(KeyCode.LeftShift) || !mouseRecentlyMoved);
+
+        if (faceMoveDir)
         {
             transform.rotation = Quaternion.Slerp(
                 transform.rotation,
                 Quaternion.LookRotation(moveDir),
-                sprintTurnSpeed * Time.deltaTime);
+                (Input.GetKey(KeyCode.LeftShift) ? sprintTurnSpeed : rotationSpeed) * Time.deltaTime);
             return;
         }
 
         if (_mainCamera == null) return;
 
-        Ray ray = _mainCamera.ScreenPointToRay(Input.mousePosition);
+        Ray ray = _mainCamera.ScreenPointToRay(mousePos);
         if (new Plane(Vector3.up, transform.position).Raycast(ray, out float dist))
         {
             Vector3 look = ray.GetPoint(dist) - transform.position;

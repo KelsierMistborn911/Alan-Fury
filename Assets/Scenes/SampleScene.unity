@@ -179,14 +179,20 @@ MonoBehaviour:
   aimConeAngle: 200
   animator: {fileID: 1535813807}
   comboWindow: 1
+  stanceDuration: 2
+  stanceSpeedBonus: 0.85
+  heavyChargeThreshold: 0.55
+  thrustPreferDistance: 3.6
+  thrustChanceWhenFar: 0.28
   targetMarkerHeight: 2.2
   targetMarkerSize: 0.35
   blockKey: 324
-  secondaryKey: 113
   parryKey: 102
   parryWindow: 0.25
   parryCooldown: 0.25
   blockAttackWindup: 0.15
+  blockAttackRangeMult: 0.7
+  blockAttackStaminaMult: 1.35
   lungeSpeedMultiplier: 1.6
   lungeInputDot: 0.5
   movementDamageCoefficient: 0.02
@@ -207,6 +213,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   rightHandWeapon: {fileID: 11400000, guid: 2e82528f9ee9acc4bb8fda5d7ab08d37, type: 2}
   leftHandWeapon: {fileID: 11400000, guid: d45f00262525fd646b2a96325da47a89, type: 2}
+  currentShieldDurability: 100
 --- !u!114 &81622704
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -315,6 +322,10 @@ MonoBehaviour:
   gravity: -20
   animator: {fileID: 1535813807}
   moveThreshold: 0.15
+  turnInPlaceThreshold: 15
+  walkStartDelay: 0.3
+  walkStartSpeedFactor: 0.15
+  mouseLookTimeout: 2
   boundary: {fileID: 0}
 --- !u!143 &81622706
 CharacterController:
@@ -689,6 +700,10 @@ MonoBehaviour:
   blockReadyColor: {r: 0.25, g: 0.85, b: 0.3, a: 1}
   blockActiveColor: {r: 0.95, g: 0.85, b: 0.2, a: 1}
   blockCircleGap: 0.05
+  chargeIdleColor: {r: 0.9, g: 0.2, b: 0.15, a: 0.85}
+  chargeProgressColor: {r: 0.95, g: 0.85, b: 0.2, a: 0.9}
+  chargeHeavyColor: {r: 0.25, g: 0.55, b: 1, a: 0.95}
+  chargeGap: 0.04
 --- !u!4 &280965120 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: -8679921383154817045, guid: c8d7deedecdbfe64f86dae0f576a4e09,
@@ -3167,6 +3182,9 @@ MonoBehaviour:
   maxPackFear: 500
   panicFearTiers: 2
   packFearAfterPanic: 0.5
+  packFearDecayPerSecond: 8
+  packRecoverFearPercent: 0.35
+  packScatterMinDuration: 4
   woundAggroRadius: 8
   woundAggroPerDamage: 1
 --- !u!4 &1984545283
