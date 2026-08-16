@@ -12,7 +12,6 @@ Material:
   m_Parent: {fileID: 0}
   m_ModifiedSerializedProperties: 0
   m_ValidKeywords:
-  - PROPIXELIZER_DITHERING_ON
   - RECEIVE_SHADOWS_ON
   - USE_OBJECT_POSITION_ON
   m_InvalidKeywords: []
@@ -105,7 +104,7 @@ Material:
     m_Ints: []
     m_Floats:
     - COLOR_GRADING: 0
-    - PROPIXELIZER_DITHERING: 1
+    - PROPIXELIZER_DITHERING: 0
     - RECEIVE_SHADOWS: 1
     - USE_OBJECT_POSITION: 1
     - _AlphaClip: 0
@@ -132,7 +131,7 @@ Material:
     - _Metallic: 0
     - _OcclusionStrength: 1
     - _Parallax: 0.005
-    - _PixelSize: 5
+    - _PixelSize: 2
     - _QueueOffset: 0
     - _ReceiveShadows: 1
     - _Smoothness: 0.5
@@ -147,7 +146,7 @@ Material:
     - _AmbientLight: {r: 0.19999996, g: 0.19999996, b: 0.19999996, a: 1}
     - _BaseColor: {r: 0.49038807, g: 0.7169812, b: 0.5168194, a: 1}
     - _Color: {r: 1, g: 1, b: 1, a: 1}
-    - _EdgeHighlightColor: {r: 0.7830188, g: 0.7830188, b: 0.7830188, a: 0.8}
+    - _EdgeHighlightColor: {r: 0.5019608, g: 0.5019608, b: 0.5019608, a: 0}
     - _EmissionColor: {r: 0.58200234, g: 0.7735849, b: 0.4488252, a: 1}
     - _OutlineColor: {r: 0, g: 0, b: 0, a: 1}
     - _PixelGridOrigin: {r: 0, g: 0, b: 0, a: 0}

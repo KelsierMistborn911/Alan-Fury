@@ -189,6 +189,9 @@ MonoBehaviour:
   blockKey: 324
   parryKey: 102
   sheathKey: 114
+  peaceHoldKey: 49
+  peaceHoldDuration: 1.5
+  combatLingerSeconds: 15
   parryWindow: 0.25
   parryCooldown: 0.25
   blockAttackWindup: 0.15
@@ -323,6 +326,7 @@ MonoBehaviour:
   gravity: -20
   animator: {fileID: 1535813807}
   moveThreshold: 0.15
+  moveDirForwardAngle: 45
   turnInPlaceThreshold: 15
   walkStartDelay: 0.3
   walkStartSpeedFactor: 0.15
@@ -2210,7 +2214,7 @@ Transform:
   serializedVersion: 2
   m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
   m_LocalPosition: {x: 0, y: 10, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_LocalScale: {x: 1, y: 0.047944, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 81622707}
@@ -2358,6 +2362,16 @@ PrefabInstance:
       propertyPath: m_LocalEulerAnglesHint.z
       value: 0
       objectReference: {fileID: 0}
+    - target: {fileID: -7511558181221131132, guid: 0be3360d1aa2ca04880b03e0d21c146d,
+        type: 3}
+      propertyPath: m_Materials.Array.data[0]
+      value: 
+      objectReference: {fileID: 2100000, guid: ed188ef1c5ba1fd4eb324c894974e774, type: 2}
+    - target: {fileID: -7511558181221131132, guid: 0be3360d1aa2ca04880b03e0d21c146d,
+        type: 3}
+      propertyPath: m_Materials.Array.data[1]
+      value: 
+      objectReference: {fileID: 2100000, guid: 64753b49155a3c4478dea92d49616eda, type: 2}
     - target: {fileID: 919132149155446097, guid: 0be3360d1aa2ca04880b03e0d21c146d,
         type: 3}
       propertyPath: m_Name

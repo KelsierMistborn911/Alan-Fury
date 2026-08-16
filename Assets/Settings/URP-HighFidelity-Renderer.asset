@@ -14,9 +14,9 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   m_Active: 1
   UseDepthTestingForIDOutlines: 1
-  DepthTestThreshold: 0.1
+  DepthTestThreshold: 0
   UseNormalsForEdgeDetection: 1
-  NormalEdgeDetectionSensitivity: 0.1
+  NormalEdgeDetectionSensitivity: 0
   GenerateWarnings: 0
   PixelizationShaders:
     PixelizationMap: {fileID: 4800000, guid: 8dd346b62451e76418dabc2355815f15, type: 3}
