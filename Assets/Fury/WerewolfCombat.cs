@@ -141,7 +141,7 @@ public class WerewolfCombat : MonoBehaviour
     private AttackDef _def;
     private float _phaseTimer;
 
-    private bool _hitFired;      // урон уже нанесён в этой атаке (для прыжка — один раз)
+    // урон в active один раз (EnterActive); отдельный флаг не нужен
     private bool _jumpAirborne;  // волк оторвался от земли в прыжке
 
     private readonly float[] _cooldownUntil = new float[3]; // по индексу AttackKind
@@ -238,7 +238,6 @@ public class WerewolfCombat : MonoBehaviour
         if (stats != null) stats.Spend(def.staminaCost);
         _kind = kind;
         _def = def;
-        _hitFired = false;
         _jumpAirborne = false;
         // Кулдаун считаем от конца атаки (фазы + пауза), чтобы типы не спамились.
         _cooldownUntil[(int)kind] = Time.time + def.windup + def.active + def.recover + def.cooldown;
@@ -288,13 +287,11 @@ public class WerewolfCombat : MonoBehaviour
             {
                 locomotion.Leap(perception.PlayerPos, jumpArc);
                 FireHitbox(_def, jumpHitDuration);
-                _hitFired = true;
             }
             else
             {
                 // Прыгнуть не смогли (не на земле / нет игрока) — бьём на месте.
                 FireHitbox(_def);
-                _hitFired = true;
             }
         }
         else
@@ -310,7 +307,6 @@ public class WerewolfCombat : MonoBehaviour
 
             // Свип / особый — урон в начале окна active.
             FireHitbox(_def);
-            _hitFired = true;
         }
     }
 

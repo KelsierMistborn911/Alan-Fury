@@ -53,6 +53,14 @@ public class CombatController3D : MonoBehaviour
     public KeyCode blockKey = KeyCode.Mouse1;
     [Tooltip("Клавиша парирования. Одно нажатие открывает короткое окно, удерживать не нужно.")]
     public KeyCode parryKey = KeyCode.F;
+    [Tooltip("Убрать / достать оружие (мгновенно по тапу, если нужно).")]
+    public KeyCode sheathKey = KeyCode.R;
+    [Tooltip("Зажать ≥ peaceHoldDuration → принудительно мирный режим + анимация выхода из боя.")]
+    public KeyCode peaceHoldKey = KeyCode.Alpha1;
+    [Tooltip("Сколько держать peaceHoldKey (сек), чтобы выйти в мирный режим.")]
+    public float peaceHoldDuration = 1.5f;
+    [Tooltip("После удара/врага: сколько секунд держать боевой режим, если врагов уже нет. Сброс сразу по удержанию 1.")]
+    public float combatLingerSeconds = 15f;
 
     [Header("Парирование")]
     [Tooltip("Длительность окна (сек). Урон в окне гасится целиком, оборона и стамина не тратятся.")]
@@ -86,6 +94,12 @@ public class CombatController3D : MonoBehaviour
     public bool IsBlocking { get; private set; }
     public bool IsParrying { get; private set; }
     public bool IsCharging { get; private set; }
+    /// <summary>Оружие в руках. false = убрано, мирная стойка/анимки. Атака/блок автоматически достают.</summary>
+    public bool IsArmed { get; private set; } = true;
+    /// <summary>Принудительный мирный режим (удержание 1 ≥ 1.5с). Снимается атакой/Draw.</summary>
+    public bool ForcePeace { get; private set; }
+    /// <summary>Боевой режим для анимаций: удар/блок/заряд/враг рядом, либо linger после этого. False при ForcePeace.</summary>
+    public bool IsInCombat { get; private set; }
     public bool HasTarget => currentTarget != null;
     public float ChargePercent { get; private set; }
     public bool IsHeavyReady => IsCharging && ChargePercent >= heavyChargeThreshold;
@@ -151,6 +165,7 @@ public class CombatController3D : MonoBehaviour
         if (animator == null) animator = GetComponent<Animator>();
         if (movement == null) movement = GetComponent<PlayerMovement3D>();
         CacheAnimParams();
+        SetB("Armed", IsArmed);
     }
 
     private void CacheAnimParams()
@@ -185,9 +200,13 @@ public class CombatController3D : MonoBehaviour
             }
         }
 
-        // Парирование
+        // Удержание 1 ≥ 1.5с → мирный. Боевой режим + linger 15с без врагов.
+        TickPeaceHold();
+        TickCombatState();
+
+        // Парирование — только с оружием в руках
         if (IsParrying && Time.time >= _parryEndTime) IsParrying = false;
-        if (Input.GetKeyDown(parryKey) && Time.time >= _parryReadyTime)
+        if (IsArmed && Input.GetKeyDown(parryKey) && Time.time >= _parryReadyTime)
         {
             IsParrying = true;
             _parryEndTime = Time.time + parryWindow;
@@ -258,8 +277,8 @@ public class CombatController3D : MonoBehaviour
             return;
         }
 
-        // Блок
-        bool wantsBlock = Input.GetKey(blockKey) && loadout != null && loadout.HasShield();
+        // Блок — только с оружием в руках
+        bool wantsBlock = IsArmed && Input.GetKey(blockKey) && loadout != null && loadout.HasShield();
         IsBlocking = wantsBlock;
         SetB("ShieldBlock", wantsBlock);
 
@@ -296,6 +315,7 @@ public class CombatController3D : MonoBehaviour
         if (resources == null || !resources.HasStamina(cost)) return;
         resources.SpendStamina(cost);
 
+        DrawWeapon();
         ChargePercent = currentWeapon.minChargePercent;
         _isHeavyAttack = false;
         _fromLowStance = CurrentStance == CombatStance.Low;
@@ -320,6 +340,7 @@ public class CombatController3D : MonoBehaviour
         if (resources == null || !resources.HasStamina(currentWeapon.staminaCost)) return;
         resources.SpendStamina(currentWeapon.staminaCost);
 
+        DrawWeapon();
         float progress = movement.IsDodging ? movement.DodgeProgress01 : 1f;
         float windup = Mathf.Max(dodgeAttackMinWindup,
             Mathf.Lerp(currentWeapon.chargeDuration, dodgeAttackMinWindup, progress));
@@ -364,6 +385,7 @@ public class CombatController3D : MonoBehaviour
 
     void StartHoldAttack()
     {
+        DrawWeapon();
         IsCharging = true;
         isHoldingAttack = true;
         chargeStartTime = Time.time;
@@ -808,6 +830,100 @@ public class CombatController3D : MonoBehaviour
     }
 
     public void ClearTarget() => currentTarget = null;
+
+    private float _peaceHoldTimer;
+    private float _combatLingerUntil;
+
+    void TickPeaceHold()
+    {
+        if (IsAttacking || _pendingAttack)
+        {
+            _peaceHoldTimer = 0f;
+            return;
+        }
+
+        if (Input.GetKey(peaceHoldKey))
+        {
+            _peaceHoldTimer += Time.deltaTime;
+            if (_peaceHoldTimer >= peaceHoldDuration && (IsArmed || !ForcePeace))
+                EnterForcePeace();
+        }
+        else
+            _peaceHoldTimer = 0f;
+    }
+
+    /// <summary>Обновляет IsInCombat: активный бой продлевает linger; без врагов/действий — держим combatLingerSeconds; 1 — сброс.</summary>
+    void TickCombatState()
+    {
+        if (ForcePeace)
+        {
+            IsInCombat = false;
+            _combatLingerUntil = 0f;
+            return;
+        }
+
+        bool active = IsArmed &&
+                      (NearTarget != null || IsCharging || IsAttacking || IsBlocking || IsWindingUp || _pendingAttack);
+        if (active)
+            _combatLingerUntil = Time.time + combatLingerSeconds;
+
+        IsInCombat = IsArmed && Time.time < _combatLingerUntil;
+    }
+
+    /// <summary>Удержание 1 ≥ 1.5с: убрать оружие, сброс лока, мирный режим до следующей атаки.</summary>
+    public void EnterForcePeace()
+    {
+        _peaceHoldTimer = 0f;
+        ForcePeace = true;
+        IsInCombat = false;
+        _combatLingerUntil = 0f;
+        if (IsCharging) CancelCharge();
+        IsArmed = false;
+        CurrentStance = CombatStance.Neutral;
+        _stanceTimer = 0f;
+        ClearTarget();
+        _autoTarget = null;
+        _shiftSavedTarget = null;
+        IsBlocking = false;
+        SetB("ShieldBlock", false);
+        SetB("Armed", false);
+        SetB("Combat", false);
+        SetTrig("Sheath");
+        SetTrig("ToPeace");
+    }
+
+    public void ToggleArmed()
+    {
+        if (IsArmed) SheathWeapon();
+        else DrawWeapon();
+    }
+
+    /// <summary>Убрать оружие: сброс лока, стойки, заряда. Combat-анимки гаснут через IsArmed.</summary>
+    public void SheathWeapon()
+    {
+        if (!IsArmed) return;
+        if (IsCharging) CancelCharge();
+        IsArmed = false;
+        CurrentStance = CombatStance.Neutral;
+        _stanceTimer = 0f;
+        ClearTarget();
+        _autoTarget = null;
+        _shiftSavedTarget = null;
+        IsBlocking = false;
+        SetB("ShieldBlock", false);
+        SetB("Armed", false);
+        SetTrig("Sheath");
+    }
+
+    /// <summary>Достать оружие. Атака/блок сами вызывают, если было убрано. Снимает ForcePeace.</summary>
+    public void DrawWeapon()
+    {
+        ForcePeace = false;
+        if (IsArmed) return;
+        IsArmed = true;
+        SetB("Armed", true);
+        SetTrig("Draw");
+    }
 
     void RestoreOrAcquireTarget()
     {

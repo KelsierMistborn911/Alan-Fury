@@ -61,6 +61,8 @@ public class WerewolfPackManager : MonoBehaviour
     public Transform spawnCenter;
 
     [Header("Вой (авто-спавн)")]
+    [Tooltip("Если true — через howlDelay после старта автоматически вызывается SpawnPack(). Обычно false: призыв идёт с объекта WolfSummonPoint.")]
+    public bool autoHowlOnStart = false;
     [Tooltip("Через сколько секунд после старта альфа 'воет' и поднимает стаю (разово).")]
     public float howlDelay = 2f;
     [Tooltip("Альфа в сцене. Если задана — волки выходят веером с дальней от игрока стороны альфы.")]
@@ -335,8 +337,8 @@ public class WerewolfPackManager : MonoBehaviour
 
     void Update()
     {
-        // Вой: разово через howlDelay поднимаем стаю (переиспользуем SpawnPack).
-        if (!_howled)
+        // Вой: разово через howlDelay (только если autoHowlOnStart). Иначе призыв с WolfSummonPoint.
+        if (autoHowlOnStart && !_howled)
         {
             _howlTimer -= Time.deltaTime;
             if (_howlTimer <= 0f)
