@@ -1,5 +1,5 @@
 fileFormatVersion: 2
-guid: b764d78efc6de3842b0825963914e7c9
+guid: 4164fef4ca8922e469fe1c010ff465fe
 ModelImporter:
   serializedVersion: 22200
   internalIDToNameTable: []
@@ -24,7 +24,7 @@ ModelImporter:
     animationDoRetargetingWarnings: 0
     importAnimatedCustomProperties: 0
     importConstraints: 0
-    animationCompression: 3
+    animationCompression: 1
     animationRotationError: 0.5
     animationPositionError: 0.5
     animationScaleError: 0.5
@@ -33,11 +33,11 @@ ModelImporter:
     extraUserProperties: []
     clipAnimations:
     - serializedVersion: 16
-      name: Medium Battle Step Forward
-      takeName: mixamo.com
-      internalID: -203655887218126122
+      name: B_W_I
+      takeName: Take 001
+      internalID: 1827226128182048838
       firstFrame: 0
-      lastFrame: 28
+      lastFrame: 100
       wrapMode: 0
       orientationOffsetY: 0
       level: 0

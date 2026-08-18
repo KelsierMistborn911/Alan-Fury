@@ -1,5 +1,5 @@
 fileFormatVersion: 2
-guid: 37f55c27fb3399e42b015e2579e4d72d
+guid: adb4e1a334cb6d940be126dfde301eb6
 ModelImporter:
   serializedVersion: 22200
   internalIDToNameTable: []
@@ -33,11 +33,11 @@ ModelImporter:
     extraUserProperties: []
     clipAnimations:
     - serializedVersion: 16
-      name: Long Battle Step Backward
-      takeName: mixamo.com
-      internalID: -203655887218126122
+      name: B_W_F
+      takeName: Take 001
+      internalID: 1827226128182048838
       firstFrame: 0
-      lastFrame: 25
+      lastFrame: 26
       wrapMode: 0
       orientationOffsetY: 0
       level: 0

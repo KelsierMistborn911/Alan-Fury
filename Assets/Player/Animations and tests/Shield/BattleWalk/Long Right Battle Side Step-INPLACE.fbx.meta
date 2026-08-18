@@ -1,5 +1,5 @@
 fileFormatVersion: 2
-guid: 115192440feea534398df7e7bdf60eac
+guid: 645b9cb37e74bfb48bf1af61b0e4e9ce
 ModelImporter:
   serializedVersion: 22200
   internalIDToNameTable: []
@@ -33,9 +33,9 @@ ModelImporter:
     extraUserProperties: []
     clipAnimations:
     - serializedVersion: 16
-      name: Long Right Battle Side Step
-      takeName: mixamo.com
-      internalID: -203655887218126122
+      name: B_W_R
+      takeName: Take 001
+      internalID: 1827226128182048838
       firstFrame: 0
       lastFrame: 25
       wrapMode: 0
