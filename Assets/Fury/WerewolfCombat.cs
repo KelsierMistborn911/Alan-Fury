@@ -17,7 +17,7 @@ using UnityEngine;
 ///
 /// Прыжок использует locomotion.Leap (баллистический наскок в игрока); урон — на приземлении.
 /// Обычный — свип спереди, сцепляется в серию повторным TrySwipe в окне (maxCombo/comboWindow).
-/// Особый — долгий замах на месте + удлинённый хитбокс укуса ("дотянуться").
+/// Особый — подлая атака сзади: длинный замах, подскок вперёд в момент удара, отскок назад после.
 /// </summary>
 [RequireComponent(typeof(WerewolfPerception))]
 [RequireComponent(typeof(WerewolfLocomotion))]
@@ -118,7 +118,11 @@ public class WerewolfCombat : MonoBehaviour
         stagger = 3f
     };
 
-    [Header("Особый удар с места (дотянуться)")]
+    [Header("Особый удар (подлый, сзади)")]
+    [Tooltip("Импульс подскока вперёд в момент удара (м/с). 0 = без hop.")]
+    public float specialHopImpulse = 6.5f;
+    [Tooltip("Импульс отскока назад после удара (м/с). 0 = без bounce.")]
+    public float specialBounceImpulse = 8f;
     public AttackDef special = new AttackDef
     {
         windup = 0.80f,
@@ -126,7 +130,7 @@ public class WerewolfCombat : MonoBehaviour
         recover = 0.70f,
         cooldown = 4f,
         staminaCost = 36f,
-        range = 3.5f,
+        range = 5.5f,
         radius = 1.0f,
         height = 2f,
         offset = new Vector3(0f, 1f, 0f),
@@ -304,6 +308,14 @@ public class WerewolfCombat : MonoBehaviour
                     : transform.forward;
                 locomotion.AddImpulse(lungeDir * swipeLungeImpulse);
             }
+            // Special: подскок вперёд в момент удара.
+            else if (_kind == AttackKind.Special && specialHopImpulse > 0f)
+            {
+                Vector3 hopDir = perception.HasPlayer
+                    ? Flat(perception.PlayerPos - transform.position)
+                    : transform.forward;
+                locomotion.AddImpulse(hopDir * specialHopImpulse);
+            }
 
             // Свип / особый — урон в начале окна active.
             FireHitbox(_def);
@@ -329,6 +341,15 @@ public class WerewolfCombat : MonoBehaviour
     {
         _phase = Phase.Recover;
         _phaseTimer = _def.recover;
+
+        // Special: отскок назад сразу после удара (подлый уход).
+        if (_kind == AttackKind.Special && specialBounceImpulse > 0f && locomotion != null)
+        {
+            Vector3 away = perception != null && perception.HasPlayer
+                ? Flat(transform.position - perception.PlayerPos)
+                : -transform.forward;
+            locomotion.AddImpulse(away * specialBounceImpulse);
+        }
     }
 
     // ===================== Урон =====================

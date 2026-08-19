@@ -16,7 +16,7 @@ using UnityEngine;
 ///   • Engage — заход. На входе раскладывается серия по ступени агрессии (EnterEngage):
 ///     осторожный hitsCautious, средний hitsMid, злой hitsFierce, ярость — без счёта.
 ///     Пока удар не готов, волк НЕ топчется вплотную, а держит SafeDistance и закручивается к спине.
-///     Дистанция решает атаку: ближе → свип, средне → особая, дальше → прыжок.
+///     Дистанция + позиция: сзади → special (подлый hop+отскок), вплотную → свип, дальше → прыжок.
 ///   • Retreat — серия кончилась (или стамины нет даже на уворот) — отход на SafeDistance,
 ///     шагом в сторону мимо ближайшего соседа. Без стамины отход идёт пешком (walkSpeed).
 ///   • Orbit — кружит на SafeDistance; aggression сокращает время до нового захода.
@@ -62,6 +62,8 @@ public class WerewolfAttackBrain : MonoBehaviour, WerewolfPackManager.IPackAgent
     [Header("Заход не спереди (для второго)")]
     [Tooltip("На сколько метров позади игрока целиться второму волку.")]
     public float behindDistance = 2f;
+    [Tooltip("Угол от взгляда игрока, выше которого special считается «сзади» и получает приоритет (град).")]
+    public float specialBehindAngle = 110f;
 
     [Header("Фронт по лучу альфа→игрок")]
     [Tooltip("0 = целиться прямо на игрока; 1 = держаться на линии между игроком и альфой. Только для фронтовиков (не второго).")]
@@ -589,6 +591,12 @@ public class WerewolfAttackBrain : MonoBehaviour, WerewolfPackManager.IPackAgent
     {
         // Напуган — не лезет бить вообще, какой бы ни была агрессия.
         if (TooScaredToAttack) return false;
+
+        bool behind = perception.AngleFromPlayerGaze >= specialBehindAngle;
+
+        // Сзади и в зоне special — всегда предпочитаем подлую атаку (hop + отскок).
+        if (behind && dist <= SpecialReach && combat.TrySpecial())
+            return true;
 
         if (dist <= MeleeRange) return combat.TrySwipe();
         if (dist <= SpecialReach) return combat.TrySpecial();

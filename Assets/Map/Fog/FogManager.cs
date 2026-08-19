@@ -44,6 +44,9 @@ public class FogManager : MonoBehaviour
 
     void Start()
     {
+        if (player == null)
+            player = PlayerRegistry.ResolvePrimary();
+
         if (player == null && !string.IsNullOrEmpty(playerTag))
         {
             var go = GameObject.FindGameObjectWithTag(playerTag);
@@ -54,6 +57,9 @@ public class FogManager : MonoBehaviour
 
     void Update()
     {
+        if (player == null)
+            player = PlayerRegistry.ResolvePrimary();
+
         _timer -= Time.deltaTime;
         if (_timer <= 0f)
         {

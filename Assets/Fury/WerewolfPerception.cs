@@ -8,9 +8,11 @@
 /// </summary>
 public class WerewolfPerception : MonoBehaviour
 {
-    [Header("Игрок")]
+    [Header("Игрок (текущая цель)")]
+    [Tooltip("Не единственный герой мира — выбранная цель из PlayerRegistry (обычно nearest).")]
     public Transform player;
-    public string playerTag = "Player";
+    [Tooltip("Устарело: тег больше не используется. Цель только из PlayerRegistry.")]
+    public string playerTag = "";
 
     [Header("Угол обзора игрока")]
     [Tooltip("Половина конуса обзора (град). В пределах него игрок считается смотрящим на цель.")]
@@ -72,15 +74,43 @@ public class WerewolfPerception : MonoBehaviour
 
     void Awake()
     {
-        if (player == null && !string.IsNullOrEmpty(playerTag))
-        {
-            var go = GameObject.FindGameObjectWithTag(playerTag);
-            if (go != null) player = go.transform;
-        }
-        if (player != null) _playerCombat = player.GetComponent<CombatController3D>();
-        if (player != null) _playerLoadout = player.GetComponent<PlayerLoadout>();
-        if (player != null) _playerHitbox = player.GetComponentInChildren<WeaponHitbox>();
+        ResolvePlayer();
         _stalker = GetComponent<WerewolfAlphaStalker>();
+    }
+
+    void Update()
+    {
+        // Игрок появляется после Host-спавна — подхватываем из реестра, если ещё null / сменился.
+        if (player == null)
+            ResolvePlayer();
+        else if (PlayerRegistry.Instance != null && PlayerRegistry.Instance.Count > 0)
+        {
+            var nearest = PlayerRegistry.Instance.GetNearest(transform.position);
+            if (nearest != null && nearest != player)
+                BindPlayer(nearest);
+        }
+    }
+
+    void ResolvePlayer()
+    {
+        Transform next = null;
+
+        if (PlayerRegistry.Instance != null && PlayerRegistry.Instance.Count > 0)
+            next = PlayerRegistry.Instance.GetNearest(transform.position);
+
+        if (next == null)
+            next = PlayerRegistry.ResolvePrimary();
+
+        if (next != null)
+            BindPlayer(next);
+    }
+
+    void BindPlayer(Transform t)
+    {
+        player = t;
+        _playerCombat = t != null ? t.GetComponent<CombatController3D>() : null;
+        _playerLoadout = t != null ? t.GetComponent<PlayerLoadout>() : null;
+        _playerHitbox = t != null ? t.GetComponentInChildren<WeaponHitbox>() : null;
     }
 
     /// <summary>Горизонтальная дистанция до игрока (Y игнорируется).</summary>

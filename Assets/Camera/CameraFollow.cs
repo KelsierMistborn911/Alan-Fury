@@ -51,8 +51,8 @@ public class CameraFollow : MonoBehaviour
 
         _targetSize = cam != null ? cam.orthographicSize : orthographicSize;
 
-        if (target == null)
-            target = GameObject.FindGameObjectWithTag("Player")?.transform;
+        // Цель не ищем по тегу Player: её выставляет NetworkPlayer (локальный владелец)
+        // или ResolveTarget(), если играешь без сети / target ещё пуст.
 
         // Автоопределение границ карты
         if (clampToMap && mapBounds.size == Vector3.zero)
@@ -67,8 +67,33 @@ public class CameraFollow : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// Подхватить цель: предпочтительно локальный NetworkPlayer, иначе primary из реестра.
+    /// Не использует тег "Player".
+    /// </summary>
+    public void ResolveTarget()
+    {
+        // Локальный владелец (кооп / Host)
+        var nets = FindObjectsOfType<NetworkPlayer>();
+        for (int i = 0; i < nets.Length; i++)
+        {
+            if (nets[i] != null && nets[i].IsLocalControlled)
+            {
+                target = nets[i].transform;
+                return;
+            }
+        }
+
+        var primary = PlayerRegistry.ResolvePrimary();
+        if (primary != null)
+            target = primary;
+    }
+
     void Update()
     {
+        if (target == null)
+            ResolveTarget();
+
         if (!enableZoom || cam == null || !cam.orthographic) return;
 
         float scroll = Input.GetAxis("Mouse ScrollWheel");

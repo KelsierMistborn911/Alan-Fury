@@ -31,9 +31,9 @@ public class CombatController3D : MonoBehaviour
     public Animator animator;
     [Tooltip("Пауза между ударами, после которой серия сбрасывается (сек).")]
     public float comboWindow = 1f;
-    [Tooltip("Длительность High/Low стойки после удара (сек).")]
-    public float stanceDuration = 2f;
-    [Tooltip("Множитель длительности атаки в подходящей стойке (<1 = быстрее).")]
+    [Tooltip("Длительность High/Low стойки после удара или удержания клавиши (сек).")]
+    public float stanceDuration = 5f;
+    [Tooltip("Множитель длительности атаки в подходящей стойке (<1 = быстрее). Вне стойки = 1 (полный замах).")]
     [Range(0.5f, 1f)] public float stanceSpeedBonus = 0.85f;
     [Tooltip("Порог ChargePercent, после которого атака считается тяжёлой.")]
     [Range(0.3f, 0.9f)] public float heavyChargeThreshold = 0.55f;
@@ -53,6 +53,10 @@ public class CombatController3D : MonoBehaviour
     public KeyCode blockKey = KeyCode.Mouse1;
     [Tooltip("Клавиша парирования. Одно нажатие открывает короткое окно, удерживать не нужно.")]
     public KeyCode parryKey = KeyCode.F;
+    [Tooltip("Укол (Thrust).")]
+    public KeyCode thrustKey = KeyCode.Q;
+    [Tooltip("Удержание → задняя (Low) стойка. После отпускания таймер догорает.")]
+    public KeyCode lowStanceKey = KeyCode.E;
     [Tooltip("Убрать / достать оружие (мгновенно по тапу, если нужно).")]
     public KeyCode sheathKey = KeyCode.R;
     [Tooltip("Зажать ≥ peaceHoldDuration → принудительно мирный режим + анимация выхода из боя.")]
@@ -189,16 +193,7 @@ public class CombatController3D : MonoBehaviour
 
     void Update()
     {
-        // Стойки: тикаем таймер
-        if (CurrentStance != CombatStance.Neutral)
-        {
-            _stanceTimer -= Time.deltaTime;
-            if (_stanceTimer <= 0f)
-            {
-                CurrentStance = CombatStance.Neutral;
-                // В нейтрали можно будет ускорять реген (пока через ресурсы позже)
-            }
-        }
+        TickStance();
 
         // Удержание 1 ≥ 1.5с → мирный. Боевой режим + linger 15с без врагов.
         TickPeaceHold();
@@ -296,7 +291,14 @@ public class CombatController3D : MonoBehaviour
             return;
         }
 
-        // Обычная атака (только ЛКМ, Q убран)
+        // Укол по Q (без заряда)
+        if (Input.GetKeyDown(thrustKey))
+        {
+            TryStartThrust();
+            return;
+        }
+
+        // Обычная атака (ЛКМ — hold/charge)
         if (Input.GetMouseButtonDown(0))
         {
             currentWeapon = loadout != null ? loadout.GetMainWeapon() : null;
@@ -304,6 +306,22 @@ public class CombatController3D : MonoBehaviour
             if (resources != null && resources.HasStamina(currentWeapon.staminaCost * 0.5f))
                 StartHoldAttack();
         }
+    }
+
+    void TryStartThrust()
+    {
+        if (!IsArmed || IsAttacking || IsCharging || _pendingAttack) return;
+        currentWeapon = loadout != null ? loadout.GetMainWeapon() : null;
+        if (currentWeapon == null) return;
+        if (resources != null && !resources.HasStamina(currentWeapon.staminaCost * 0.5f)) return;
+        if (resources != null) resources.SpendStamina(currentWeapon.staminaCost * 0.5f);
+
+        DrawWeapon();
+        ChargePercent = currentWeapon.minChargePercent;
+        _isHeavyAttack = false;
+        _fromLowStance = CurrentStance == CombatStance.Low;
+        SampleAttackMoveMode();
+        ExecuteAttack(fromBlock: false, forcedForm: AttackForm.Thrust);
     }
 
     void StartBlockAttack()
@@ -483,7 +501,7 @@ public class CombatController3D : MonoBehaviour
         ExecuteAttack(fromBlock: false);
     }
 
-    void ExecuteAttack(bool fromBlock)
+    void ExecuteAttack(bool fromBlock, AttackForm? forcedForm = null)
     {
         IsWindingUp = false;
         IsAttacking = true;
@@ -495,11 +513,13 @@ public class CombatController3D : MonoBehaviour
         if (stanceMatch) dur *= stanceSpeedBonus;
         stateTimer = dur;
 
-        _combo = Time.time <= _comboExpire ? _combo + 1 : 0;
+        // wasInCombo до обновления окна — чтобы ChooseAttackForm видел предыдущий интервал
+        bool wasInCombo = Time.time <= _comboExpire;
+        _combo = wasInCombo ? _combo + 1 : 0;
         _comboExpire = Time.time + dur + comboWindow;
 
         // Выбор формы атаки
-        AttackForm form = ChooseAttackForm();
+        AttackForm form = ChooseAttackForm(wasInCombo, forcedForm);
         _lastForm = form;
         string trig = form switch
         {
@@ -589,31 +609,51 @@ public class CombatController3D : MonoBehaviour
         _fromLowStance = false;
     }
 
-    AttackForm ChooseAttackForm()
+    AttackForm ChooseAttackForm(bool wasInCombo, AttackForm? forced = null)
     {
-        // Укол — редкий: только если цель заметно дальше обычной дистанции рубящего
-        // и не два укола подряд. Даже тогда — с шансом thrustChanceWhenFar.
-        Transform aim = NearTarget != null ? NearTarget : _autoTarget;
-        if (aim != null && _lastForm != AttackForm.Thrust)
+        if (forced.HasValue)
+            return forced.Value;
+
+        Transform aim = NearTarget != null ? NearTarget
+            : (_autoTarget != null ? _autoTarget : currentTarget);
+
+        // В комбо после рубящего: укол, если дистанция лучше для укола, чем для удара
+        if (wasInCombo && _lastForm != AttackForm.Thrust && aim != null)
         {
             Vector3 to = aim.position - transform.position;
             to.y = 0f;
             float dist = to.magnitude;
             float range = currentWeapon != null ? currentWeapon.attackRange : 2f;
-            // Дальше max(порог, range * 1.35) — кандидат на укол
             float thrustDist = Mathf.Max(thrustPreferDistance, range * 1.35f);
-            if (dist >= thrustDist && Random.value < thrustChanceWhenFar)
+            if (dist >= thrustDist)
                 return AttackForm.Thrust;
         }
 
-        // Основное — чередование Left/Right
-        if (_lastForm == AttackForm.SlashRight)
-            return AttackForm.SlashLeft;
-        if (_lastForm == AttackForm.SlashLeft)
+        // В комбо (< comboWindow) — чередование L/R от первого удара
+        if (wasInCombo && (_lastForm == AttackForm.SlashLeft || _lastForm == AttackForm.SlashRight))
+        {
+            return _lastForm == AttackForm.SlashRight
+                ? AttackForm.SlashLeft
+                : AttackForm.SlashRight;
+        }
+
+        // Первый удар или разрыв > comboWindow — по стороне цели
+        return ChooseFormBySide(aim);
+    }
+
+    AttackForm ChooseFormBySide(Transform aim)
+    {
+        if (aim == null)
             return AttackForm.SlashRight;
 
-        // После Thrust или старта — Right
-        return AttackForm.SlashRight;
+        Vector3 to = aim.position - transform.position;
+        to.y = 0f;
+        if (to.sqrMagnitude < 0.01f)
+            return AttackForm.SlashRight;
+
+        // side > 0 → цель справа от игрока → AttackRight
+        float side = Vector3.Dot(transform.right, to.normalized);
+        return side >= 0f ? AttackForm.SlashRight : AttackForm.SlashLeft;
     }
 
     void ApplyFootworkStep(AttackForm form)
@@ -639,10 +679,52 @@ public class CombatController3D : MonoBehaviour
             movement.AddLungeSpeed(attackDir, 2.5f); // маленькая фиксированная скорость
     }
 
+    void TickStance()
+    {
+        // Удержание E → задняя (Low) стойка, таймер обновляется пока клавиша зажата
+        if (IsArmed && !ForcePeace && Input.GetKey(lowStanceKey))
+        {
+            if (CurrentStance != CombatStance.Low)
+                EnterStance(CombatStance.Low);
+            else
+                _stanceTimer = stanceDuration;
+            return;
+        }
+
+        if (CurrentStance == CombatStance.Neutral)
+            return;
+
+        _stanceTimer -= Time.deltaTime;
+        if (_stanceTimer <= 0f)
+            EnterStance(CombatStance.Neutral);
+    }
+
     void EnterStance(CombatStance s)
     {
+        if (CurrentStance == s)
+        {
+            _stanceTimer = stanceDuration;
+            return;
+        }
+
+        CombatStance prev = CurrentStance;
         CurrentStance = s;
-        _stanceTimer = stanceDuration;
+        _stanceTimer = (s == CombatStance.Neutral) ? 0f : stanceDuration;
+
+        // Animator: int Stance 0=Neutral 1=High 2=Low
+        if (HasParam("Stance"))
+            animator.SetInteger("Stance", (int)s);
+
+        // Триггеры входа в стойку (замах)
+        if (s == CombatStance.High && prev == CombatStance.Neutral)
+            SetTrig("EnterHigh");
+        else if (s == CombatStance.Low && prev != CombatStance.Low)
+            SetTrig("EnterLow");
+    }
+
+    bool HasParam(string name)
+    {
+        return animator != null && _animParams != null && _animParams.Contains(name);
     }
 
     void ExecuteRangedAttack(float chargePercent)

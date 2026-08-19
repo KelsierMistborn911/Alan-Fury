@@ -735,12 +735,15 @@ public class PlayerMovement3D : MonoBehaviour
 
         bool mouseRecentlyMoved = (Time.time - _lastMouseMoveTime) < mouseLookTimeout;
         bool blocking = _combat != null && _combat.IsBlocking;
+        bool inCombat = _combat != null && _combat.IsInCombat;
 
         bool isSprinting = Input.GetKey(KeyCode.LeftShift);
 
-        // Бежим передом, если мышь давно не трогали (и не спринт — на спринте всегда мышь/A/D).
+        // Бежим передом, если мышь давно не трогали.
+        // В бою всегда смотрим на мышь/цель — timeout не применяем.
         bool faceMoveDir = !blocking
             && !isSprinting
+            && !inCombat
             && moveDir.sqrMagnitude > 0.01f
             && !mouseRecentlyMoved;
 

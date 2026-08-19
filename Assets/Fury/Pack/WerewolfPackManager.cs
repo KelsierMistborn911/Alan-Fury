@@ -45,10 +45,11 @@ public class WerewolfPackManager : MonoBehaviour
         void OnPackPanic();
     }
 
-    [Header("Игрок")]
-    [Tooltip("Если пусто — найдётся по тегу в Awake.")]
+    [Header("Игрок (опорная цель стаи)")]
+    [Tooltip("Если пусто — nearest / primary из PlayerRegistry. Тег Player не используется.")]
     public Transform player;
-    public string playerTag = "Player";
+    [Tooltip("Устарело, не используется.")]
+    public string playerTag = "";
 
     [Header("Спавн")]
     [Tooltip("Префаб волка (на нём WerewolfAttackBrain + WerewolfSurroundBrain + WerewolfCombat + локомоция/восприятие).")]
@@ -249,12 +250,7 @@ public class WerewolfPackManager : MonoBehaviour
         }
         Instance = this;
 
-        if (player == null && !string.IsNullOrEmpty(playerTag))
-        {
-            var go = GameObject.FindGameObjectWithTag(playerTag);
-            if (go != null) player = go.transform;
-        }
-
+        player = PlayerRegistry.ResolvePrimary();
         _howlTimer = howlDelay; // отсчёт до воя стартует со сцены
     }
 
@@ -337,6 +333,16 @@ public class WerewolfPackManager : MonoBehaviour
 
     void Update()
     {
+        // После сетевого спавна игрока — подхватить из реестра (Awake часто раньше Host).
+        if (player == null)
+            player = PlayerRegistry.ResolvePrimary();
+        else if (PlayerRegistry.Instance != null && PlayerRegistry.Instance.Count > 0)
+        {
+            var nearest = PlayerRegistry.Instance.GetNearest(transform.position);
+            if (nearest != null)
+                player = nearest;
+        }
+
         // Вой: разово через howlDelay (только если autoHowlOnStart). Иначе призыв с WolfSummonPoint.
         if (autoHowlOnStart && !_howled)
         {

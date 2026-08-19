@@ -10,7 +10,7 @@ using UnityEngine.UI;
 public class InventoryUI : MonoBehaviour
 {
     [Header("Ссылки")]
-    [Tooltip("Пусто — ищется на объекте с тегом Player.")]
+    [Tooltip("Пусто — берётся с локального игрока (NetworkPlayer / PlayerRegistry), не по тегу.")]
     public Inventory inventory;
 
     [Header("Настройки")]
@@ -31,22 +31,7 @@ public class InventoryUI : MonoBehaviour
 
     void Start()
     {
-        if (inventory == null)
-        {
-            var player = GameObject.FindGameObjectWithTag("Player");
-            if (player != null) inventory = player.GetComponent<Inventory>();
-        }
-        if (inventory == null)
-        {
-            Debug.LogWarning("InventoryUI: инвентарь не найден.");
-            enabled = false;
-            return;
-        }
-
-        BuildUI();
-        inventory.onChanged += Refresh;
-        Refresh();
-        _panel.SetActive(false);
+        TryBindInventory();
     }
 
     void OnDestroy()
@@ -56,8 +41,54 @@ public class InventoryUI : MonoBehaviour
 
     void Update()
     {
+        // Игрок спавнится после Host — подвязываемся отложенно.
+        if (inventory == null)
+            TryBindInventory();
+
+        if (inventory == null || _panel == null) return;
+
         if (Input.GetKeyDown(toggleKey))
             _panel.SetActive(!_panel.activeSelf);
+    }
+
+    void TryBindInventory()
+    {
+        if (inventory != null)
+        {
+            if (!_built)
+            {
+                BuildUI();
+                inventory.onChanged += Refresh;
+                Refresh();
+                if (_panel != null) _panel.SetActive(false);
+            }
+            return;
+        }
+
+        // 1) Локальный NetworkPlayer
+        var nets = FindObjectsOfType<NetworkPlayer>();
+        for (int i = 0; i < nets.Length; i++)
+        {
+            if (nets[i] == null || !nets[i].IsLocalControlled) continue;
+            inventory = nets[i].GetComponent<Inventory>();
+            if (inventory != null) break;
+        }
+
+        // 2) Реестр
+        if (inventory == null)
+        {
+            var primary = PlayerRegistry.ResolvePrimary();
+            if (primary != null)
+                inventory = primary.GetComponent<Inventory>();
+        }
+
+        if (inventory == null)
+            return;
+
+        BuildUI();
+        inventory.onChanged += Refresh;
+        Refresh();
+        if (_panel != null) _panel.SetActive(false);
     }
 
     // ==================== Построение ====================
