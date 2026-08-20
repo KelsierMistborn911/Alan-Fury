@@ -29,6 +29,8 @@ public class WeaponHitbox : MonoBehaviour
     private float damage;
     private float stagger;
     private LayerMask layers;
+    private HitInfo _hitInfo;
+    private bool _hasHitInfo;
 
     private Dictionary<GameObject, float> lastHitTime = new Dictionary<GameObject, float>();
 
@@ -39,6 +41,13 @@ public class WeaponHitbox : MonoBehaviour
     {
         if (visual == null)
             visual = GetComponent<SwordAttackVisual>();
+    }
+
+    /// <summary>Контекст удара (зона, intent, charge). Задать до/вместе с Activate.</summary>
+    public void SetHitInfo(HitInfo info)
+    {
+        _hitInfo = info;
+        _hasHitInfo = true;
     }
 
     public void Activate(float range, float radius, float height, Vector3 offset,
@@ -59,6 +68,22 @@ public class WeaponHitbox : MonoBehaviour
         this.tickInterval = tickInterval;
         this.nextTickTime = 0f;
 
+        // если SetHitInfo не вызывали — собираем минимальный контекст
+        if (!_hasHitInfo)
+        {
+            _hitInfo = HitInfo.Basic(damage, transform.position);
+            _hitInfo.stagger = stagger;
+            _hitInfo.hitDirection = this.direction;
+            _hitInfo.chargePercent = chargePercent;
+        }
+        else
+        {
+            _hitInfo.rawDamage = damage;
+            _hitInfo.stagger = stagger;
+            _hitInfo.hitDirection = this.direction;
+            _hitInfo.sourcePosition = transform.position;
+        }
+
         isActive = true;
         timer = 0f;
         lastHitTime.Clear();
@@ -77,6 +102,7 @@ public class WeaponHitbox : MonoBehaviour
         if (timer >= duration)
         {
             isActive = false;
+            _hasHitInfo = false;
             if (visual != null) visual.HideArc();
             if (_debugZone != null) _debugZone.gameObject.SetActive(false);
             return;
@@ -126,18 +152,27 @@ public class WeaponHitbox : MonoBehaviour
             if (lastHitTime.TryGetValue(col.gameObject, out float lastHit))
                 if (Time.time - lastHit < tickInterval) continue;
 
-            if (col.TryGetComponent<IDamageable>(out var damageable))
-            {
-                damageable.TakeDamage(damage, transform.position);
+            // IDamageable может быть на родителе (WerewolfStats на корне)
+            IDamageable damageable = col.GetComponentInParent<IDamageable>();
+            if (damageable == null) continue;
 
-                Vector3 knockback = (col.transform.position - transform.position).normalized;
-                knockback.y = 0f;
-                damageable.ApplyKnockback(knockback * stagger);
+            HitInfo hit = _hitInfo;
+            hit.rawDamage = damage;
+            hit.sourcePosition = transform.position;
+            hit.hitDirection = direction;
+            hit.stagger = stagger;
+            // finalDamage посчитает WoundTracker; до него = raw
+            hit.finalDamage = damage;
 
-                lastHitTime[col.gameObject] = Time.time;
+            damageable.TakeHit(hit);
 
-                onHit?.Invoke();
-            }
+            Vector3 knockback = (col.transform.position - transform.position).normalized;
+            knockback.y = 0f;
+            damageable.ApplyKnockback(knockback * stagger);
+
+            lastHitTime[col.gameObject] = Time.time;
+
+            onHit?.Invoke();
         }
     }
 

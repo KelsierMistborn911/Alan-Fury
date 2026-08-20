@@ -202,21 +202,61 @@ public class WerewolfStats : MonoBehaviour, IDamageable
         _locomotion = GetComponent<WerewolfLocomotion>();
         // Фаза тика разъезжается по волкам, чтобы вся стая не пересчитывалась в один кадр.
         _slowTimer = Random.value * slowTickInterval;
+
+        // Раны v1: если компонента нет — добавим, чтобы лог и bleed работали без ручной настройки.
+        _wounds = GetComponent<WoundTracker>();
+        if (_wounds == null)
+            _wounds = gameObject.AddComponent<WoundTracker>();
     }
 
     // ===================== IDamageable (урон от меча игрока через WeaponHitbox) =====================
 
+    private WoundTracker _wounds;
+
     public void TakeDamage(float amount)
     {
+        ApplyHealthDamage(amount, default, reportFear: true, showPopup: true);
+    }
+
+    public void TakeDamage(float amount, Vector3 sourcePosition)
+    {
+        TakeDamage(amount);
+    }
+
+    /// <summary>
+    /// Полный хит: если есть WoundTracker — зона/пробитие/ступень/bleed + лог.
+    /// Иначе обычный урон.
+    /// </summary>
+    public void TakeHit(HitInfo hit)
+    {
         if (!IsAlive) return;
+        if (_wounds == null) _wounds = GetComponent<WoundTracker>();
+        if (_wounds != null)
+        {
+            _wounds.ApplyHit(hit);
+            return;
+        }
+        ApplyHealthDamage(hit.rawDamage > 0f ? hit.rawDamage : hit.finalDamage, hit, reportFear: true, showPopup: true);
+    }
+
+    /// <summary>
+    /// Прямое списание HP. reportFear=false для тиков кровотечения (без спама страха стаи).
+    /// </summary>
+    public void ApplyHealthDamage(float amount, HitInfo hit = default, bool reportFear = true, bool showPopup = true)
+    {
+        if (!IsAlive || amount <= 0f) return;
         _health = Mathf.Max(0f, _health - amount);
 
-        // Своя рана пугает лично (мгновенно, мимо редкого тика) и копится в страх стаи.
-        AddFear(amount);
-        if (WerewolfPackManager.Instance != null)
-            WerewolfPackManager.Instance.ReportWound(amount, transform.position, transform);
+        if (reportFear)
+        {
+            AddFear(amount);
+            if (WerewolfPackManager.Instance != null)
+                WerewolfPackManager.Instance.ReportWound(amount, transform.position, transform);
+        }
 
-        DamagePopup.Spawn(transform.position + Vector3.up * 2f, amount, Color.white);
+        if (showPopup)
+            DamagePopup.Spawn(transform.position + Vector3.up * 2f, amount, Color.white);
+
         if (_health <= 0f) OnDeath?.Invoke();
     }
 

@@ -251,6 +251,8 @@ GameObject:
   - component: {fileID: 7904059381815620236}
   - component: {fileID: 4151050063159446848}
   - component: {fileID: -569320717972397483}
+  - component: {fileID: 5959815558790199976}
+  - component: {fileID: 1795750833806650394}
   m_Layer: 6
   m_Name: Player
   m_TagString: Player
@@ -469,6 +471,8 @@ MonoBehaviour:
   targetMarkerSize: 0.35
   blockKey: 324
   parryKey: 102
+  thrustKey: 113
+  lowStanceKey: 101
   sheathKey: 114
   peaceHoldKey: 49
   peaceHoldDuration: 1.5
@@ -882,6 +886,30 @@ MonoBehaviour:
   movement: {fileID: 2045750287254660310}
   cameraFollow: {fileID: 0}
   autoFindCamera: 1
+--- !u!114 &5959815558790199976
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6846430933918887357}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 944dccffd36586d4c846e241af50b7b6, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+--- !u!114 &1795750833806650394
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6846430933918887357}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c13b26b102ebf0e4cb30008b20be23b1, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
 --- !u!1001 &2313389075563756968
 PrefabInstance:
   m_ObjectHideFlags: 0

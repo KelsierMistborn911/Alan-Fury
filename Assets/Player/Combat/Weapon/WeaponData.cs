@@ -13,6 +13,8 @@ public class WeaponData : ScriptableObject
     [Header("Урон")]
     public float damage = 10f;
     public float staggerForce = 5f;
+    [Tooltip("Базовое пробитие оружия. Сравнивается с WoundTracker.baseResistance.")]
+    public float penetration = 1f;
 
     [Header("Хитбокс")]
     public float attackRange = 2f;

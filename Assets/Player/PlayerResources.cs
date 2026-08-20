@@ -135,6 +135,13 @@ public class PlayerResources : MonoBehaviour, IDamageable
     // Требуется интерфейсом IDamageable. Отталкивания игрока нет — метод пуст.
     public void ApplyKnockback(Vector3 force) { }
 
+    /// <summary>Полный хит (зоны пока только у волков). Игрок — обычный урон с учётом блока.</summary>
+    public void TakeHit(HitInfo hit)
+    {
+        float dmg = hit.finalDamage > 0f ? hit.finalDamage : hit.rawDamage;
+        TakeDamage(dmg, hit.sourcePosition);
+    }
+
     public void Heal(float amount)
     {
         CurrentHealth = Mathf.Min(maxHealth, CurrentHealth + amount);

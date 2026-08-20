@@ -2,37 +2,20 @@
 
 public class CombatController3D : MonoBehaviour
 {
-    public enum CombatStance { Neutral, High, Low }
     public enum AttackForm { SlashLeft, SlashRight, Thrust }
 
     [Header("Ссылки")]
     public PlayerResources resources;
     public PlayerLoadout loadout;
     public WeaponHitbox hitbox;
-
-    [Header("Захват цели")]
-    public float targetLockRange = 15f;
-    [Tooltip("Дальше этой дистанции лок сбрасывается (перехват на ближайшего в targetLockRange). До неё держится метка.")]
-    public float targetHoldRange = 30f;
-    [Tooltip("Боевая зона: ближе — автолок, доворот корпуса и удары в цель. Дальше — только метка, всё по мыши.")]
-    public float combatFaceRange = 10f;
-    [Tooltip("Внутри этого радиуса лок перехватывает тот враг, что ближе к курсору.")]
-    public float closeSwitchRange = 6f;
-    [Tooltip("На сколько градусов кандидат должен выигрывать у текущей цели, чтобы отобрать лок. Больше — реже мигает.")]
-    public float closeSwitchAngleMargin = 20f;
-    [Tooltip("Сколько юнитов дистанции стоит 1° отклонения от курсора при автолоке. 0 — чисто ближайший.")]
-    public float aimAnglePenalty = 0.1f;
-    public LayerMask enemyLayers;
-    [Tooltip("Дуга перед игроком (град.), в которой ищутся цели для Tab и автонаведения.")]
-    [Range(0f, 360f)] public float aimConeAngle = 200f;
-
-    [Header("Комбо / стойки")]
+    public PlayerTargeting targeting;
+    public PlayerStance stance;
     [Tooltip("Аниматор игрока. Пусто — найдётся на объекте.")]
     public Animator animator;
+
+    [Header("Комбо / стойки (атака)")]
     [Tooltip("Пауза между ударами, после которой серия сбрасывается (сек).")]
     public float comboWindow = 1f;
-    [Tooltip("Длительность High/Low стойки после удара или удержания клавиши (сек).")]
-    public float stanceDuration = 5f;
     [Tooltip("Множитель длительности атаки в подходящей стойке (<1 = быстрее). Вне стойки = 1 (полный замах).")]
     [Range(0.5f, 1f)] public float stanceSpeedBonus = 0.85f;
     [Tooltip("Порог ChargePercent, после которого атака считается тяжёлой.")]
@@ -42,12 +25,6 @@ public class CombatController3D : MonoBehaviour
     [Tooltip("Шанс укола, когда цель дальше thrustPreferDistance (0–1). Остальное — slash.")]
     [Range(0f, 1f)] public float thrustChanceWhenFar = 0.28f;
 
-    [Header("Метка цели")]
-    [Tooltip("Высота красного маркера над таргетом (м).")]
-    public float targetMarkerHeight = 2.2f;
-    [Tooltip("Размер маркера (м).")]
-    public float targetMarkerSize = 0.35f;
-
     [Header("Управление боем")]
     [Tooltip("Клавиша блока (щит в левой руке обязателен). ПКМ.")]
     public KeyCode blockKey = KeyCode.Mouse1;
@@ -55,8 +32,6 @@ public class CombatController3D : MonoBehaviour
     public KeyCode parryKey = KeyCode.F;
     [Tooltip("Укол (Thrust).")]
     public KeyCode thrustKey = KeyCode.Q;
-    [Tooltip("Удержание → задняя (Low) стойка. После отпускания таймер догорает.")]
-    public KeyCode lowStanceKey = KeyCode.E;
     [Tooltip("Убрать / достать оружие (мгновенно по тапу, если нужно).")]
     public KeyCode sheathKey = KeyCode.R;
     [Tooltip("Зажать ≥ peaceHoldDuration → принудительно мирный режим + анимация выхода из боя.")]
@@ -87,12 +62,22 @@ public class CombatController3D : MonoBehaviour
     [Tooltip("Добавка к урону = скорость(м/с) × масса персонажа × этот коэффициент.")]
     public float movementDamageCoefficient = 0.02f;
 
+    [Header("Застревание оружия")]
+    [Tooltip("После успешного попадания (укол и рубка): ограничение движения на это время (сек). 0 = выкл.")]
+    public float weaponStuckDuration = 1.6f;
+    [Tooltip("Базовый множитель скорости, пока оружие «застряло».")]
+    [Range(0.15f, 0.9f)] public float stuckSpeedMult = 0.45f;
+    [Tooltip("Доп. множитель, если давить вперёд по направлению удара (ещё сильнее «не отпускает»).")]
+    [Range(0.05f, 0.6f)] public float stuckForwardExtraMult = 0.25f;
+    [Tooltip("Сколько секунд активного отхода (назад/бок) нужно, чтобы выдернуть раньше таймера.")]
+    public float stuckPullFreeTime = 0.22f;
+
     [Header("Комбо удар+уворот")]
     public float dodgeAttackMinWindup = 0.08f;
     public float dodgeAttackBufferAfter = 0.2f;
     public float dodgeAttackPerfectTolerance = 0.08f;
 
-    // --- Публичное состояние ---
+    // --- Публичное состояние (API для Movement / HUD / Perception) ---
     public bool IsWindingUp { get; private set; }
     public bool IsAttacking { get; private set; }
     public bool IsBlocking { get; private set; }
@@ -104,30 +89,31 @@ public class CombatController3D : MonoBehaviour
     public bool ForcePeace { get; private set; }
     /// <summary>Боевой режим для анимаций: удар/блок/заряд/враг рядом, либо linger после этого. False при ForcePeace.</summary>
     public bool IsInCombat { get; private set; }
-    public bool HasTarget => currentTarget != null;
+    public bool HasTarget => targeting != null && targeting.HasTarget;
     public float ChargePercent { get; private set; }
     public bool IsHeavyReady => IsCharging && ChargePercent >= heavyChargeThreshold;
-    public CombatStance CurrentStance { get; private set; } = CombatStance.Neutral;
-    public Transform currentTarget { get; private set; }
 
-    public Transform NearTarget
+    /// <summary>Прокси на PlayerStance.Current — внешний код не ломается.</summary>
+    public CombatStance CurrentStance => stance != null ? stance.Current : CombatStance.Neutral;
+
+    /// <summary>Прокси на PlayerTargeting.CurrentTarget.</summary>
+    public Transform currentTarget => targeting != null ? targeting.CurrentTarget : null;
+
+    public Transform NearTarget => targeting != null ? targeting.NearTarget : null;
+
+    /// <summary>Сброс лока. Прокси на PlayerTargeting — нужен PlayerMovement (перекат/телепорт).</summary>
+    public void ClearTarget()
     {
-        get
-        {
-            if (!IsValidEnemy(currentTarget)) return null;
-            Vector3 to = currentTarget.position - transform.position;
-            to.y = 0f;
-            return to.sqrMagnitude <= combatFaceRange * combatFaceRange ? currentTarget : null;
-        }
+        if (targeting != null) targeting.ClearTarget();
     }
 
     public Transform ActiveAimTarget
     {
         get
         {
-            if (!(IsCharging || IsBlocking)) return null;
+            if (!(IsCharging || IsBlocking) || targeting == null) return null;
             if (NearTarget != null) return NearTarget;
-            return IsValidEnemy(_autoTarget) ? _autoTarget : null;
+            return targeting.IsValidEnemy(targeting.AutoTarget) ? targeting.AutoTarget : null;
         }
     }
 
@@ -138,26 +124,44 @@ public class CombatController3D : MonoBehaviour
     private bool isHoldingAttack;
     private int _combo;
     private float _comboExpire;
-    private Transform _autoTarget;
     private PlayerMovement3D movement;
 
     private bool _pendingAttack;
     private float _pendingFireTime;
     private bool _pendingIsBlockAttack;
     private bool _dodgeAttackPerfectFlag;
-    private bool _fromLowStance;          // текущая атака начата из Low
-    private bool _isHeavyAttack;          // текущая атака — тяжёлая (по заряду)
+    private bool _fromLowStance;
+    private bool _isHeavyAttack;
     private AttackForm _lastForm = AttackForm.SlashRight;
-    private float _stanceTimer;
 
     private float _parryEndTime;
     private float _parryReadyTime;
 
+    private bool _canStickThisAttack;
+    private Vector3 _stuckAttackDir;
+
     enum AttackMoveMode { None, Stop, TurnStrike, SideStrike }
     private AttackMoveMode _attackMoveMode;
 
-    private Transform _shiftSavedTarget;
-    private Transform _targetMarker;
+    private float _peaceHoldTimer;
+    private float _combatLingerUntil;
+
+    // --- Буфер шагов во время charge (последние 1–2) ---
+    private struct StepSample
+    {
+        public Vector3 dir;   // мир, горизонталь, нормализован
+        public float time;
+    }
+    private StepSample _step0; // старше
+    private StepSample _step1; // новее (последний)
+    private int _stepCount;
+    private float _nextStepSampleTime;
+    private const float StepMinInterval = 0.12f;
+    private const float StepInputThreshold = 0.35f;
+
+    private HitIntent _pendingIntent = HitIntent.Neutral;
+    private bool _pendingStepBoost;
+    private BodyZone _pendingZone = BodyZone.Torso;
 
     private System.Collections.Generic.HashSet<string> _animParams;
 
@@ -168,8 +172,39 @@ public class CombatController3D : MonoBehaviour
         if (hitbox == null) hitbox = GetComponentInChildren<WeaponHitbox>();
         if (animator == null) animator = GetComponent<Animator>();
         if (movement == null) movement = GetComponent<PlayerMovement3D>();
+        if (targeting == null) targeting = GetComponent<PlayerTargeting>();
+        if (stance == null) stance = GetComponent<PlayerStance>();
+
+        if (targeting == null)
+            Debug.LogError("[CombatController3D] Нет PlayerTargeting на объекте. Добавь компонент.");
+        if (stance == null)
+            Debug.LogError("[CombatController3D] Нет PlayerStance на объекте. Добавь компонент.");
+
         CacheAnimParams();
         SetB("Armed", IsArmed);
+
+        if (hitbox != null)
+            hitbox.onHit += OnWeaponHit;
+    }
+
+    void OnDestroy()
+    {
+        if (hitbox != null)
+            hitbox.onHit -= OnWeaponHit;
+    }
+
+    void OnWeaponHit()
+    {
+        if (!_canStickThisAttack || movement == null || weaponStuckDuration <= 0f)
+            return;
+
+        _canStickThisAttack = false;
+        movement.EnterWeaponStuck(
+            weaponStuckDuration,
+            _stuckAttackDir,
+            stuckSpeedMult,
+            stuckForwardExtraMult,
+            stuckPullFreeTime);
     }
 
     private void CacheAnimParams()
@@ -193,9 +228,9 @@ public class CombatController3D : MonoBehaviour
 
     void Update()
     {
-        TickStance();
+        if (stance != null)
+            stance.Tick(IsArmed, ForcePeace);
 
-        // Удержание 1 ≥ 1.5с → мирный. Боевой режим + linger 15с без врагов.
         TickPeaceHold();
         TickCombatState();
 
@@ -209,23 +244,21 @@ public class CombatController3D : MonoBehaviour
             SetTrig("Parry");
         }
 
-        if (HasTarget) MaintainLockTarget();
-        if (IsCharging || IsBlocking) TryAcquireCombatTarget();
-
-        if (Input.GetKeyDown(KeyCode.LeftShift))
+        if (targeting != null)
         {
-            _shiftSavedTarget = currentTarget;
-            ClearTarget();
-        }
-        if (Input.GetKeyUp(KeyCode.LeftShift))
-            RestoreOrAcquireTarget();
+            targeting.TickLock();
+            if (IsCharging || IsBlocking)
+                targeting.TryAcquireIfNeeded();
 
-        UpdateTargetMarker();
+            if (Input.GetKeyDown(KeyCode.LeftShift))
+                targeting.SaveAndClearForShift();
+            if (Input.GetKeyUp(KeyCode.LeftShift))
+                targeting.RestoreAfterShift();
 
-        if (Input.GetKeyDown(KeyCode.Tab))
-        {
-            if (HasTarget) ClearTarget();
-            else if (!Input.GetKey(KeyCode.LeftShift)) currentTarget = FindNearestInCone();
+            targeting.UpdateMarker();
+
+            if (Input.GetKeyDown(KeyCode.Tab))
+                targeting.ToggleOrAcquireByTab();
         }
 
         if (IsCharging && Input.GetKeyDown(KeyCode.Space))
@@ -251,10 +284,14 @@ public class CombatController3D : MonoBehaviour
         if (IsCharging)
         {
             IsWindingUp = true;
-            if (NearTarget == null)
+            SampleChargeSteps();
+
+            if (NearTarget == null && targeting != null)
             {
-                Transform reTarget = FindClosestToDirection(GetPreferredAimDirection(), combatFaceRange);
-                _autoTarget = reTarget; // null, если живых нет
+                Transform reTarget = targeting.FindClosestToDirection(
+                    targeting.GetPreferredAimDirection(),
+                    targeting.combatFaceRange);
+                targeting.SetAutoTarget(reTarget);
             }
 
             bool held = Input.GetMouseButton(0);
@@ -397,7 +434,7 @@ public class CombatController3D : MonoBehaviour
         IsWindingUp = false;
         isHoldingAttack = false;
         ChargePercent = 0f;
-        _autoTarget = null;
+        if (targeting != null) targeting.ClearAutoTarget();
         if (hitbox != null && hitbox.visual != null) hitbox.visual.HideWindup();
     }
 
@@ -409,11 +446,112 @@ public class CombatController3D : MonoBehaviour
         chargeStartTime = Time.time;
         ChargePercent = 0f;
         _fromLowStance = CurrentStance == CombatStance.Low;
-        _autoTarget = null;
-        TryAcquireCombatTarget();
+        ClearStepBuffer();
+        if (targeting != null)
+        {
+            targeting.ClearAutoTarget();
+            targeting.TryAcquireIfNeeded();
+        }
         SampleAttackMoveMode();
         if (hitbox != null && hitbox.visual != null)
             hitbox.visual.ShowWindup();
+    }
+
+    void ClearStepBuffer()
+    {
+        _stepCount = 0;
+        _nextStepSampleTime = 0f;
+        _pendingIntent = HitIntent.Neutral;
+        _pendingStepBoost = false;
+        _pendingZone = BodyZone.Torso;
+    }
+
+    /// <summary>
+    /// Во время charge пишем до 2 значимых шагов. Один хватает; два в одном духе → boost.
+    /// </summary>
+    void SampleChargeSteps()
+    {
+        if (movement == null) return;
+        if (Time.time < _nextStepSampleTime) return;
+
+        Vector3 input = movement.InputDirection;
+        if (input.sqrMagnitude < StepInputThreshold * StepInputThreshold) return;
+
+        input.y = 0f;
+        input.Normalize();
+
+        // не дублируем почти то же направление подряд
+        if (_stepCount > 0)
+        {
+            Vector3 last = _stepCount >= 2 ? _step1.dir : _step0.dir;
+            if (Vector3.Dot(last, input) > 0.92f) return;
+        }
+
+        if (_stepCount == 0)
+        {
+            _step0 = new StepSample { dir = input, time = Time.time };
+            _stepCount = 1;
+        }
+        else if (_stepCount == 1)
+        {
+            _step1 = new StepSample { dir = input, time = Time.time };
+            _stepCount = 2;
+        }
+        else
+        {
+            _step0 = _step1;
+            _step1 = new StepSample { dir = input, time = Time.time };
+        }
+
+        _nextStepSampleTime = Time.time + StepMinInterval;
+    }
+
+    /// <summary>
+    /// На release heavy: последний шаг → intent/зона; два согласованных → boost.
+    /// </summary>
+    void ResolveStepsForHeavy()
+    {
+        _pendingIntent = HitIntent.Neutral;
+        _pendingStepBoost = false;
+        _pendingZone = BodyZone.Torso;
+
+        if (_stepCount <= 0) return;
+
+        StepSample last = _stepCount >= 2 ? _step1 : _step0;
+        Vector3 f = transform.forward; f.y = 0f; f.Normalize();
+        Vector3 r = transform.right; r.y = 0f; r.Normalize();
+        float fwd = Vector3.Dot(last.dir, f);
+        float side = Vector3.Dot(last.dir, r);
+
+        if (fwd > 0.45f)
+        {
+            _pendingIntent = HitIntent.ThrustLine;
+            // сильный charge + вперёд → голова, иначе торс
+            _pendingZone = ChargePercent >= 0.85f ? BodyZone.Head : BodyZone.Torso;
+        }
+        else if (fwd < -0.45f)
+        {
+            _pendingIntent = HitIntent.Limb;
+            _pendingZone = side >= 0f ? BodyZone.RightLeg : BodyZone.LeftLeg;
+        }
+        else if (Mathf.Abs(side) > 0.4f)
+        {
+            _pendingIntent = HitIntent.Bypass;
+            _pendingZone = side >= 0f ? BodyZone.RightArm : BodyZone.LeftArm;
+        }
+        else
+        {
+            _pendingIntent = HitIntent.Neutral;
+            _pendingZone = BodyZone.Torso;
+        }
+
+        // два шага: оба roughly в ту же полусферу → boost
+        if (_stepCount >= 2)
+        {
+            float align = Vector3.Dot(_step0.dir, _step1.dir);
+            if (align > 0.25f)
+                _pendingStepBoost = true;
+        }
     }
 
     void SampleAttackMoveMode()
@@ -495,6 +633,16 @@ public class CombatController3D : MonoBehaviour
 
         _isHeavyAttack = ChargePercent >= heavyChargeThreshold;
 
+        // Heavy: форма/зона от шагов. Light: intent остаётся Neutral, авто-форма как раньше.
+        if (_isHeavyAttack)
+            ResolveStepsForHeavy();
+        else
+        {
+            _pendingIntent = HitIntent.Neutral;
+            _pendingStepBoost = false;
+            _pendingZone = BodyZone.Torso;
+        }
+
         float cost = Mathf.Lerp(currentWeapon.staminaCost * 0.5f, currentWeapon.staminaCost, ChargePercent);
         if (resources != null) resources.SpendStamina(cost);
 
@@ -506,20 +654,33 @@ public class CombatController3D : MonoBehaviour
         IsWindingUp = false;
         IsAttacking = true;
 
-        // Длительность с учётом стойки
         float dur = currentWeapon != null ? currentWeapon.attackDuration : 0.2f;
         bool stanceMatch = (CurrentStance == CombatStance.High && !_isHeavyAttack)
                         || (CurrentStance == CombatStance.Low && (_isHeavyAttack || _fromLowStance));
         if (stanceMatch) dur *= stanceSpeedBonus;
         stateTimer = dur;
 
-        // wasInCombo до обновления окна — чтобы ChooseAttackForm видел предыдущий интервал
         bool wasInCombo = Time.time <= _comboExpire;
         _combo = wasInCombo ? _combo + 1 : 0;
         _comboExpire = Time.time + dur + comboWindow;
 
-        // Выбор формы атаки
-        AttackForm form = ChooseAttackForm(wasInCombo, forcedForm);
+        // Heavy + ThrustLine без forced → укол; иначе обычный ChooseAttackForm
+        AttackForm form;
+        if (forcedForm.HasValue)
+            form = forcedForm.Value;
+        else if (_isHeavyAttack && _pendingIntent == HitIntent.ThrustLine)
+            form = AttackForm.Thrust;
+        else
+            form = ChooseAttackForm(wasInCombo, null);
+
+        // Bypass: сторона по последнему шагу, если есть
+        if (_isHeavyAttack && _pendingIntent == HitIntent.Bypass && _stepCount > 0)
+        {
+            StepSample last = _stepCount >= 2 ? _step1 : _step0;
+            float side = Vector3.Dot(last.dir, transform.right);
+            form = side >= 0f ? AttackForm.SlashRight : AttackForm.SlashLeft;
+        }
+
         _lastForm = form;
         string trig = form switch
         {
@@ -528,6 +689,9 @@ public class CombatController3D : MonoBehaviour
             _ => "AttackRight"
         };
         SetTrig(trig);
+
+        _canStickThisAttack = weaponStuckDuration > 0f;
+        _stuckAttackDir = GetAttackDirection();
 
         if (currentWeapon != null && currentWeapon.isRanged)
         {
@@ -542,10 +706,10 @@ public class CombatController3D : MonoBehaviour
             {
                 damageMult = Mathf.Lerp(1.1f, 1.5f, (ChargePercent - heavyChargeThreshold) / (1f - heavyChargeThreshold));
                 staggerMult = Mathf.Lerp(1.0f, 1.5f, ChargePercent);
+                if (_pendingStepBoost) damageMult *= 1.15f;
             }
             else if (_fromLowStance)
             {
-                // Быстрый удар из Low: сильнее обычного light, слабее heavy
                 damageMult = 1.05f;
                 staggerMult = 0.9f;
             }
@@ -566,19 +730,62 @@ public class CombatController3D : MonoBehaviour
                 cone = 18f;
             }
 
+            // Обход — длиннее и чуть шире
+            if (_isHeavyAttack && _pendingIntent == HitIntent.Bypass)
+            {
+                range *= 1.2f;
+                radius *= 1.15f;
+            }
+
             if (fromBlock)
                 range *= blockAttackRangeMult;
 
             float damage = currentWeapon.damage * damageMult;
             damage += ComputeMomentumBonus();
+            // скорость шага в силу: если есть шаги и движение — доп. кусок momentum
+            if (_isHeavyAttack && _stepCount > 0 && movement != null)
+                damage += movement.CurrentSpeed * (resources != null ? resources.mass : 80f) * movementDamageCoefficient * (_pendingStepBoost ? 1.5f : 1f);
 
             ApplyAttackMoveMode();
-
-            // Подшаг: если нет сильного ввода — лёгкий импульс в сторону удара
             ApplyFootworkStep(form);
 
-            if (_isHeavyAttack && !fromBlock)
+            if (_isHeavyAttack && !fromBlock && _pendingIntent == HitIntent.ThrustLine)
                 TryLunge();
+            else if (_isHeavyAttack && !fromBlock)
+                TryLunge();
+
+            // Зона для light: торс; slash по стороне → рука
+            BodyZone zone = _pendingZone;
+            if (!_isHeavyAttack)
+            {
+                zone = BodyZone.Torso;
+                if (form == AttackForm.SlashLeft) zone = BodyZone.LeftArm;
+                else if (form == AttackForm.SlashRight) zone = BodyZone.RightArm;
+                else if (form == AttackForm.Thrust) zone = BodyZone.Torso;
+            }
+
+            float pen = currentWeapon.penetration;
+            float penScore = pen * (0.55f + ChargePercent * 0.9f);
+            if (_isHeavyAttack) penScore *= 1.2f;
+            if (_pendingStepBoost) penScore *= 1.15f;
+            if (form == AttackForm.Thrust) penScore *= 1.2f;
+
+            var info = new HitInfo
+            {
+                rawDamage = damage,
+                finalDamage = damage,
+                stagger = currentWeapon.staggerForce * staggerMult,
+                sourcePosition = transform.position,
+                hitDirection = GetAttackDirection(),
+                zone = zone,
+                intent = _isHeavyAttack ? _pendingIntent : HitIntent.Neutral,
+                isHeavy = _isHeavyAttack,
+                stepBoost = _pendingStepBoost,
+                chargePercent = ChargePercent,
+                penetrationScore = penScore,
+                weaponPenetration = pen
+            };
+            hitbox.SetHitInfo(info);
 
             hitbox.Activate(
                 range,
@@ -597,16 +804,20 @@ public class CombatController3D : MonoBehaviour
             );
         }
 
-        // Переход стойки после удара
-        if (_isHeavyAttack)
-            EnterStance(CombatStance.Low);
-        else
-            EnterStance(CombatStance.High);
+        // Переход стойки после удара — те же триггеры EnterHigh / EnterLow
+        if (stance != null)
+        {
+            if (_isHeavyAttack)
+                stance.Enter(CombatStance.Low);
+            else
+                stance.Enter(CombatStance.High);
+        }
 
         _dodgeAttackPerfectFlag = false;
         ChargePercent = 0f;
         _isHeavyAttack = false;
         _fromLowStance = false;
+        ClearStepBuffer();
     }
 
     AttackForm ChooseAttackForm(bool wasInCombo, AttackForm? forced = null)
@@ -615,9 +826,8 @@ public class CombatController3D : MonoBehaviour
             return forced.Value;
 
         Transform aim = NearTarget != null ? NearTarget
-            : (_autoTarget != null ? _autoTarget : currentTarget);
+            : (targeting != null && targeting.AutoTarget != null ? targeting.AutoTarget : currentTarget);
 
-        // В комбо после рубящего: укол, если дистанция лучше для укола, чем для удара
         if (wasInCombo && _lastForm != AttackForm.Thrust && aim != null)
         {
             Vector3 to = aim.position - transform.position;
@@ -629,7 +839,6 @@ public class CombatController3D : MonoBehaviour
                 return AttackForm.Thrust;
         }
 
-        // В комбо (< comboWindow) — чередование L/R от первого удара
         if (wasInCombo && (_lastForm == AttackForm.SlashLeft || _lastForm == AttackForm.SlashRight))
         {
             return _lastForm == AttackForm.SlashRight
@@ -637,7 +846,6 @@ public class CombatController3D : MonoBehaviour
                 : AttackForm.SlashRight;
         }
 
-        // Первый удар или разрыв > comboWindow — по стороне цели
         return ChooseFormBySide(aim);
     }
 
@@ -651,7 +859,6 @@ public class CombatController3D : MonoBehaviour
         if (to.sqrMagnitude < 0.01f)
             return AttackForm.SlashRight;
 
-        // side > 0 → цель справа от игрока → AttackRight
         float side = Vector3.Dot(transform.right, to.normalized);
         return side >= 0f ? AttackForm.SlashRight : AttackForm.SlashLeft;
     }
@@ -665,66 +872,12 @@ public class CombatController3D : MonoBehaviour
         bool hasInput = Mathf.Abs(h) > 0.15f || Mathf.Abs(v) > 0.15f;
 
         if (hasInput)
-        {
-            // Игрок сам задаёт направление ног — ничего не форсим
             return;
-        }
 
-        // Нет ввода → небольшой шаг в сторону удара
         Vector3 attackDir = GetAttackDirection();
         if (attackDir.sqrMagnitude < 0.01f) return;
 
-        // Лёгкий импульс вперёд по направлению атаки (подшаг)
-        if (movement != null)
-            movement.AddLungeSpeed(attackDir, 2.5f); // маленькая фиксированная скорость
-    }
-
-    void TickStance()
-    {
-        // Удержание E → задняя (Low) стойка, таймер обновляется пока клавиша зажата
-        if (IsArmed && !ForcePeace && Input.GetKey(lowStanceKey))
-        {
-            if (CurrentStance != CombatStance.Low)
-                EnterStance(CombatStance.Low);
-            else
-                _stanceTimer = stanceDuration;
-            return;
-        }
-
-        if (CurrentStance == CombatStance.Neutral)
-            return;
-
-        _stanceTimer -= Time.deltaTime;
-        if (_stanceTimer <= 0f)
-            EnterStance(CombatStance.Neutral);
-    }
-
-    void EnterStance(CombatStance s)
-    {
-        if (CurrentStance == s)
-        {
-            _stanceTimer = stanceDuration;
-            return;
-        }
-
-        CombatStance prev = CurrentStance;
-        CurrentStance = s;
-        _stanceTimer = (s == CombatStance.Neutral) ? 0f : stanceDuration;
-
-        // Animator: int Stance 0=Neutral 1=High 2=Low
-        if (HasParam("Stance"))
-            animator.SetInteger("Stance", (int)s);
-
-        // Триггеры входа в стойку (замах)
-        if (s == CombatStance.High && prev == CombatStance.Neutral)
-            SetTrig("EnterHigh");
-        else if (s == CombatStance.Low && prev != CombatStance.Low)
-            SetTrig("EnterLow");
-    }
-
-    bool HasParam(string name)
-    {
-        return animator != null && _animParams != null && _animParams.Contains(name);
+        movement.AddLungeSpeed(attackDir, 2.5f);
     }
 
     void ExecuteRangedAttack(float chargePercent)
@@ -758,163 +911,9 @@ public class CombatController3D : MonoBehaviour
     {
         IsAttacking = false;
         IsWindingUp = false;
-        _autoTarget = null;
+        if (targeting != null) targeting.ClearAutoTarget();
+        _canStickThisAttack = false;
     }
-
-    // ---------- Таргетинг (без изменений логики) ----------
-
-    void MaintainLockTarget()
-    {
-        if (!IsValidEnemy(currentTarget))
-        {
-            currentTarget = FindNearestInRadius(targetLockRange);
-            return;
-        }
-        TryCloseSwitch();
-        Vector3 to = currentTarget.position - transform.position;
-        to.y = 0f;
-        if (to.sqrMagnitude <= targetHoldRange * targetHoldRange) return;
-        currentTarget = FindNearestInRadius(targetLockRange);
-    }
-
-    void TryAcquireCombatTarget()
-    {
-        if (NearTarget != null) return;
-        Transform near = FindPreferredTarget(combatFaceRange);
-        if (near != null) currentTarget = near;
-    }
-
-    void TryCloseSwitch()
-    {
-        if (!IsValidEnemy(currentTarget)) return;
-        Collider[] enemies = Physics.OverlapSphere(transform.position, closeSwitchRange, enemyLayers);
-        if (enemies.Length == 0) return;
-
-        Vector3 mouse = MouseDirection();
-        Transform best = null;
-        float bestAngle = float.MaxValue;
-
-        foreach (Collider col in enemies)
-        {
-            if (!IsValidEnemy(col.transform)) continue;
-            if (col.transform == currentTarget) continue;
-            Vector3 to = col.transform.position - transform.position;
-            to.y = 0f;
-            float angle = Vector3.Angle(mouse, to);
-            if (angle < bestAngle) { bestAngle = angle; best = col.transform; }
-        }
-        if (best == null) return;
-
-        Vector3 cur = currentTarget.position - transform.position;
-        cur.y = 0f;
-        if (bestAngle + closeSwitchAngleMargin < Vector3.Angle(mouse, cur))
-            currentTarget = best;
-    }
-
-    Transform FindNearestInRadius(float radius)
-    {
-        Collider[] enemies = Physics.OverlapSphere(transform.position, radius, enemyLayers);
-        Transform closest = null;
-        float minDist = float.MaxValue;
-        foreach (Collider col in enemies)
-        {
-            if (!IsValidEnemy(col.transform)) continue;
-            Vector3 to = col.transform.position - transform.position;
-            to.y = 0f;
-            float dist = to.sqrMagnitude;
-            if (dist < minDist) { minDist = dist; closest = col.transform; }
-        }
-        return closest;
-    }
-
-    Vector3 GetPreferredAimDirection()
-    {
-        float h = Input.GetAxisRaw("Horizontal");
-        float v = Input.GetAxisRaw("Vertical");
-        if ((Mathf.Abs(h) > 0.1f || Mathf.Abs(v) > 0.1f) && Camera.main != null)
-        {
-            Vector3 forward = Camera.main.transform.forward; forward.y = 0f; forward.Normalize();
-            Vector3 right = Camera.main.transform.right; right.y = 0f; right.Normalize();
-            Vector3 dir = forward * v + right * h;
-            if (dir.sqrMagnitude > 0.01f) return dir.normalized;
-        }
-        return MouseDirection();
-    }
-
-    Vector3 MouseDirection()
-    {
-        if (Camera.main == null) return transform.forward;
-        Ray ray = Camera.main.ScreenPointToRay(Input.mousePosition);
-        Plane ground = new Plane(Vector3.up, transform.position);
-        if (ground.Raycast(ray, out float dist))
-        {
-            Vector3 dir = ray.GetPoint(dist) - transform.position;
-            dir.y = 0f;
-            if (dir.sqrMagnitude > 0.01f) return dir.normalized;
-        }
-        return transform.forward;
-    }
-
-    Transform FindClosestToDirection(Vector3 preferred, float radius)
-    {
-        Collider[] enemies = Physics.OverlapSphere(transform.position, radius, enemyLayers);
-        Transform best = null;
-        float bestAngle = float.MaxValue;
-        float halfAngle = aimConeAngle * 0.5f;
-
-        foreach (Collider col in enemies)
-        {
-            if (!IsValidEnemy(col.transform)) continue;
-            Vector3 to = col.transform.position - transform.position;
-            to.y = 0f;
-            if (Vector3.Angle(transform.forward, to) > halfAngle) continue;
-            float angle = Vector3.Angle(preferred, to);
-            if (angle < bestAngle) { bestAngle = angle; best = col.transform; }
-        }
-        return best;
-    }
-
-    Transform FindPreferredTarget(float radius)
-    {
-        Vector3 preferred = GetPreferredAimDirection();
-        Collider[] enemies = Physics.OverlapSphere(transform.position, radius, enemyLayers);
-        Transform best = null;
-        float bestScore = float.MaxValue;
-
-        foreach (Collider col in enemies)
-        {
-            if (!IsValidEnemy(col.transform)) continue;
-            Vector3 to = col.transform.position - transform.position;
-            to.y = 0f;
-            float score = to.magnitude + Vector3.Angle(preferred, to) * aimAnglePenalty;
-            if (score < bestScore) { bestScore = score; best = col.transform; }
-        }
-        return best;
-    }
-
-    Transform FindNearestInCone()
-    {
-        Collider[] enemies = Physics.OverlapSphere(transform.position, targetLockRange, enemyLayers);
-        Transform closest = null;
-        float minDist = float.MaxValue;
-        float halfAngle = aimConeAngle * 0.5f;
-
-        foreach (Collider col in enemies)
-        {
-            if (!IsValidEnemy(col.transform)) continue;
-            Vector3 to = col.transform.position - transform.position;
-            to.y = 0f;
-            if (Vector3.Angle(transform.forward, to) > halfAngle) continue;
-            float dist = to.sqrMagnitude;
-            if (dist < minDist) { minDist = dist; closest = col.transform; }
-        }
-        return closest;
-    }
-
-    public void ClearTarget() => currentTarget = null;
-
-    private float _peaceHoldTimer;
-    private float _combatLingerUntil;
 
     void TickPeaceHold()
     {
@@ -934,7 +933,6 @@ public class CombatController3D : MonoBehaviour
             _peaceHoldTimer = 0f;
     }
 
-    /// <summary>Обновляет IsInCombat: активный бой продлевает linger; без врагов/действий — держим combatLingerSeconds; 1 — сброс.</summary>
     void TickCombatState()
     {
         if (ForcePeace)
@@ -961,11 +959,12 @@ public class CombatController3D : MonoBehaviour
         _combatLingerUntil = 0f;
         if (IsCharging) CancelCharge();
         IsArmed = false;
-        CurrentStance = CombatStance.Neutral;
-        _stanceTimer = 0f;
-        ClearTarget();
-        _autoTarget = null;
-        _shiftSavedTarget = null;
+        if (stance != null) stance.ResetToNeutral();
+        if (targeting != null)
+        {
+            targeting.ClearTarget();
+            targeting.ClearAutoTarget();
+        }
         IsBlocking = false;
         SetB("ShieldBlock", false);
         SetB("Armed", false);
@@ -986,11 +985,12 @@ public class CombatController3D : MonoBehaviour
         if (!IsArmed) return;
         if (IsCharging) CancelCharge();
         IsArmed = false;
-        CurrentStance = CombatStance.Neutral;
-        _stanceTimer = 0f;
-        ClearTarget();
-        _autoTarget = null;
-        _shiftSavedTarget = null;
+        if (stance != null) stance.ResetToNeutral();
+        if (targeting != null)
+        {
+            targeting.ClearTarget();
+            targeting.ClearAutoTarget();
+        }
         IsBlocking = false;
         SetB("ShieldBlock", false);
         SetB("Armed", false);
@@ -1007,89 +1007,19 @@ public class CombatController3D : MonoBehaviour
         SetTrig("Draw");
     }
 
-    void RestoreOrAcquireTarget()
-    {
-        currentTarget = IsValidRestoreTarget(_shiftSavedTarget) ? _shiftSavedTarget : FindNearestInCone();
-        _shiftSavedTarget = null;
-    }
-
-    /// <summary>Живой враг на enemyLayers (труп / мёртвый WerewolfStats не берём).</summary>
-    bool IsValidEnemy(Transform t)
-    {
-        if (t == null || !t.gameObject.activeInHierarchy) return false;
-        var stats = t.GetComponentInParent<WerewolfStats>();
-        if (stats != null) return stats.IsAlive;
-        return true; // не оборотень — считаем валидным (другие типы врагов)
-    }
-
-    bool IsValidRestoreTarget(Transform t)
-    {
-        if (!IsValidEnemy(t)) return false;
-        Vector3 to = t.position - transform.position;
-        to.y = 0f;
-        return to.sqrMagnitude <= targetLockRange * targetLockRange;
-    }
-
-    void UpdateTargetMarker()
-    {
-        Transform shown = currentTarget != null ? currentTarget : _shiftSavedTarget;
-        if (shown == null)
-        {
-            if (_targetMarker != null) _targetMarker.gameObject.SetActive(false);
-            return;
-        }
-
-        EnsureTargetMarker();
-        _targetMarker.gameObject.SetActive(true);
-        _targetMarker.position = shown.position + Vector3.up * targetMarkerHeight;
-
-        if (Camera.main != null)
-            _targetMarker.rotation = Quaternion.LookRotation(Camera.main.transform.forward) * Quaternion.Euler(0f, 0f, 45f);
-    }
-
-    void EnsureTargetMarker()
-    {
-        if (_targetMarker != null) return;
-
-        var go = new GameObject("TargetLockMarker");
-        var mf = go.AddComponent<MeshFilter>();
-        var mr = go.AddComponent<MeshRenderer>();
-        mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-
-        float half = targetMarkerSize * 0.5f;
-        var mesh = new Mesh();
-        mesh.vertices = new Vector3[] {
-            new Vector3(-half, -half, 0f), new Vector3(half, -half, 0f),
-            new Vector3(half, half, 0f), new Vector3(-half, half, 0f)
-        };
-        mesh.uv = new Vector2[] { new Vector2(0, 0), new Vector2(1, 0), new Vector2(1, 1), new Vector2(0, 1) };
-        mesh.triangles = new int[] { 0, 1, 2, 0, 2, 3, 0, 2, 1, 0, 3, 2 };
-        mesh.RecalculateNormals();
-        mf.mesh = mesh;
-
-        var mat = new Material(Shader.Find("Universal Render Pipeline/Unlit"));
-        mat.color = Color.red;
-        mr.material = mat;
-
-        _targetMarker = go.transform;
-    }
-
-    void OnDestroy()
-    {
-        if (_targetMarker != null) Destroy(_targetMarker.gameObject);
-    }
-
     Vector3 GetAttackDirection()
     {
-        Transform aim = NearTarget != null ? NearTarget : _autoTarget;
+        Transform aim = NearTarget != null ? NearTarget
+            : (targeting != null ? targeting.AutoTarget : null);
         if (aim != null)
         {
-            float effectiveRange = currentWeapon != null ? currentWeapon.attackRange : targetLockRange;
+            float effectiveRange = currentWeapon != null ? currentWeapon.attackRange
+                : (targeting != null ? targeting.targetLockRange : 15f);
             Vector3 diff = aim.position - transform.position;
             diff.y = 0f;
-            if (diff.magnitude > effectiveRange)
+            if (diff.magnitude > effectiveRange && targeting != null)
             {
-                Transform nearest = FindNearestInRadius(combatFaceRange);
+                Transform nearest = targeting.FindNearestInRadius(targeting.combatFaceRange);
                 if (nearest != null) aim = nearest;
             }
 

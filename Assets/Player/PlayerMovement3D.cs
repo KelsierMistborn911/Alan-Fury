@@ -182,6 +182,41 @@ public class PlayerMovement3D : MonoBehaviour
 
     public void StopHorizontalVelocity() => _velocity = Vector3.zero;
 
+    // --- Застревание оружия (Thrust) ---
+    // CombatController вызывает EnterWeaponStuck после успешного укола.
+    // Пока таймер > 0: скорость режется; давить вперёд ещё сильнее; отход назад/бок — выдернуть раньше.
+    private float _stuckTimer;
+    private Vector3 _stuckDir;          // направление, в котором «всадили» (горизонталь)
+    private float _stuckPullAccum;      // накопленное время отхода
+    private float _stuckSpeedMult = 0.45f;
+    private float _stuckForwardExtraMult = 0.25f;
+    private float _stuckPullFreeTime = 0.22f;
+
+    public bool IsWeaponStuck => _stuckTimer > 0f;
+
+    /// <summary>
+    /// Вход в состояние «оружие застряло во враге». duration — макс. время, embedDir — направление укола.
+    /// speedMult / forwardExtra / pullFree — с CombatController (можно переопределить дефолты).
+    /// </summary>
+    public void EnterWeaponStuck(float duration, Vector3 embedDir,
+        float speedMult = 0.45f, float forwardExtraMult = 0.25f, float pullFreeTime = 0.22f)
+    {
+        embedDir.y = 0f;
+        if (embedDir.sqrMagnitude < 0.01f) embedDir = transform.forward;
+        _stuckDir = embedDir.normalized;
+        _stuckTimer = Mathf.Max(0.1f, duration);
+        _stuckPullAccum = 0f;
+        _stuckSpeedMult = Mathf.Clamp(speedMult, 0.1f, 1f);
+        _stuckForwardExtraMult = Mathf.Clamp(forwardExtraMult, 0.05f, 1f);
+        _stuckPullFreeTime = Mathf.Max(0.05f, pullFreeTime);
+    }
+
+    public void ClearWeaponStuck()
+    {
+        _stuckTimer = 0f;
+        _stuckPullAccum = 0f;
+    }
+
     // Выпад: разовая добавка скорости в момент удара. Отдельного состояния нет —
     // дальше HandleMovement сам гасит её ускорением текущей походки.
     public void AddLungeSpeed(Vector3 dir, float speed)
@@ -268,8 +303,17 @@ public class PlayerMovement3D : MonoBehaviour
         }
 
         HandleGait();
+        TickWeaponStuck();
         HandleMovement();
         ApplyGravity();
+    }
+
+    void TickWeaponStuck()
+    {
+        if (_stuckTimer <= 0f) return;
+        _stuckTimer -= Time.deltaTime;
+        if (_stuckTimer <= 0f)
+            ClearWeaponStuck();
     }
 
     // ──────────────────────────────────────────────
@@ -658,6 +702,28 @@ public class PlayerMovement3D : MonoBehaviour
             // Пока идёт стартовая анимация — сильно режем скорость, чтобы не уезжать вперёд клипа.
             if (_walkStartTimer > 0f)
                 speedMult *= walkStartSpeedFactor;
+
+            // Застревание оружия: общий штраф + ещё сильнее если давим вперёд по направлению укола.
+            // Отход (назад/бок) накапливает время → можно выдернуть раньше таймера.
+            if (_stuckTimer > 0f)
+            {
+                float relativeDot = targetDir.sqrMagnitude > 0.01f
+                    ? Vector3.Dot(targetDir.normalized, _stuckDir)
+                    : 0f;
+
+                speedMult *= _stuckSpeedMult;
+                if (relativeDot > 0.25f)
+                    speedMult *= _stuckForwardExtraMult;
+
+                // Накопление «выдёргивания»
+                if (relativeDot < -0.2f || Mathf.Abs(relativeDot) < 0.35f) // назад или заметный бок
+                    _stuckPullAccum += Time.deltaTime;
+                else
+                    _stuckPullAccum = Mathf.Max(0f, _stuckPullAccum - Time.deltaTime * 0.5f);
+
+                if (_stuckPullAccum >= _stuckPullFreeTime)
+                    ClearWeaponStuck();
+            }
 
             Vector3 targetVelocity = targetDir *
                 ((_currentGait.speed + stepImpulse) * speedMult);
