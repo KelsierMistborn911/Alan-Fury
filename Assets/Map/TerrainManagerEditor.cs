@@ -17,16 +17,16 @@ public class TerrainManagerEditor : Editor
         if (heightGen != null && heightGen.isGenerated)
         {
             EditorGUILayout.HelpBox(
-                $"✅ Карта высот готова: {heightGen.width}×{heightGen.depth}\n" +
-                $"🔧 Seed: {heightGen.seed}\n" +
-                $"📐 Размер тайла: {(manager.terrainBuilder != null ? manager.terrainBuilder.tileSize : 0)}",
+                $"Карта высот готова: {heightGen.width}×{heightGen.depth}\n" +
+                $"Seed: {heightGen.seed}\n" +
+                $"Размер тайла: {(manager.chunkedTerrainBuilder != null ? manager.chunkedTerrainBuilder.TileSize : 0)}",
                 MessageType.Info
             );
         }
         else
         {
             EditorGUILayout.HelpBox(
-                "❌ Карта высот не сгенерирована",
+                "Карта высот не сгенерирована",
                 MessageType.Warning
             );
         }

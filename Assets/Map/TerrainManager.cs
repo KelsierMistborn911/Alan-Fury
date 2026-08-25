@@ -2,26 +2,26 @@
 
 /// <summary>
 /// Координирует весь процесс генерации ландшафта.
-/// Поддерживает два режима:
-/// - SeamlessTerrainBuilder (один меш, маленькие карты)
-/// - ChunkedTerrainBuilder (чанки, большие карты) + InstancedObjectPlacer
+/// Меш: ChunkedTerrainBuilder.
 /// </summary>
 public class TerrainManager : MonoBehaviour
 {
     [Header("Источник высот")]
     public HeightMapGenerator heightGenerator;
 
-    [Header("Меш — выберите один из двух")]
-    public SeamlessTerrainBuilder terrainBuilder;       // маленькие карты
-    public ChunkedTerrainBuilder chunkedTerrainBuilder; // большие карты (рекомендуется)
+    [Header("Меш")]
+    public ChunkedTerrainBuilder chunkedTerrainBuilder;
 
-    [Header("Объекты — выберите один из двух")]
+    [Header("Объекты")]
     public ObjectPlacer objectPlacer;                   // GameObject'ы, нужны коллайдеры
-    public InstancedObjectPlacer instancedObjectPlacer; // GPU instancing, без коллайдеров, быстро
-    public SpriteVegetationPlacer vegetationPlacer;    // спрайтовая трава/кусты/грибы (может висеть на другом объекте — назначить вручную)
+    public SpriteVegetationPlacer vegetationPlacer;    // legacy спрайтовая растительность
+    public NaturePlacement naturePlacement;            // единая система деревья + растительность
+    public NatureRenderer natureRenderer;              // отрисовка + live
+
+    [Header("Сетка занятости")]
+    public MapGrid mapGrid;                             // единая occupancy-сетка (base/sector/region)
 
     [Header("Опциональные системы")]
-    public TerrainZoneSystem zoneSystem;
     public RoadGenerator roadGenerator;                 // процедурная дорога
     public MapFogCurtain fogCurtain;                    // туман-занавес по краям карты
     public FogPlacer fogPlacer;                         // очаги тумана на карте
@@ -77,62 +77,56 @@ public class TerrainManager : MonoBehaviour
         heightGenerator.Generate();
         LogStep("Карта высот", ref sw);
 
+        // 1.5 Сетка занятости (пустая, writers заполнят позже)
+        if (mapGrid != null)
+        {
+            mapGrid.Build();
+            LogStep("MapGrid", ref sw);
+        }
+
         // 2. Меш
         if (chunkedTerrainBuilder != null)
         {
             chunkedTerrainBuilder.BuildTerrain();
             LogStep("Чанки меша", ref sw);
         }
-        else if (terrainBuilder != null)
-        {
-            terrainBuilder.BuildTerrain();
-            LogStep("Меш", ref sw);
-        }
 
-        // 3. Зоны
-        if (zoneSystem != null)
-        {
-            zoneSystem.InitializeZones();
-            LogStep("Зоны", ref sw);
-        }
-
-        // 3.5 Дорога (после зон — нужна вода; до объектов — чтобы деревья её обходили)
+        // 3. Дорога (до объектов — чтобы деревья её обходили)
         if (roadGenerator != null)
         {
             roadGenerator.GenerateRoad();
             LogStep("Дорога", ref sw);
         }
 
-        // 3.6 Дорога сгладила карту высот → пересобрать меш и перекрасить зоны,
-        //     чтобы выровненная поверхность под дорогой отобразилась (вариант A).
-        if (roadGenerator != null && roadGenerator.flattenAlongRoad)
+        // 3.5 Дорога сгладила карту высот → пересобрать меш
+        if (roadGenerator != null && roadGenerator.flattenAlongRoad && chunkedTerrainBuilder != null)
         {
-            if (chunkedTerrainBuilder != null) chunkedTerrainBuilder.BuildTerrain();
-            else if (terrainBuilder != null) terrainBuilder.BuildTerrain();
-            if (zoneSystem != null) zoneSystem.UpdateTerrainColors();
+            chunkedTerrainBuilder.BuildTerrain();
             LogStep("Пересборка меша после дороги", ref sw);
         }
 
         // 4. Объекты
-        if (instancedObjectPlacer != null)
-        {
-            instancedObjectPlacer.PlaceAllObjects();
-            LogStep("Instanced объекты", ref sw);
-        }
-        else if (objectPlacer != null)
+        if (objectPlacer != null)
         {
             objectPlacer.PlaceAllObjects();
             LogStep("Объекты", ref sw);
         }
 
-        // 4.2 Спрайтовая растительность
+        // 4.1 Nature (стриминг — только Init, генерация по мере движения игрока)
+        if (naturePlacement != null)
+        {
+            naturePlacement.Init();
+            LogStep("NaturePlacement Init", ref sw);
+        }
+
+        // 4.2 Legacy спрайтовая растительность
         if (vegetationPlacer != null)
         {
             vegetationPlacer.PlaceAll();
-            LogStep("Растительность", ref sw);
+            LogStep("Растительность (legacy)", ref sw);
         }
 
-        // 4.5 Сетка проходимости для AI (после деревьев — они стены) + пересчёт границы карты.
+        // 4.5 Сетка проходимости для AI + пересчёт границы карты.
         if (pathfinder != null)
         {
             pathfinder.Build();
@@ -165,12 +159,12 @@ public class TerrainManager : MonoBehaviour
     public void ClearAll()
     {
         if (chunkedTerrainBuilder != null) chunkedTerrainBuilder.ClearTerrain();
-        if (terrainBuilder != null) terrainBuilder.ClearTerrain();
         if (objectPlacer != null) objectPlacer.ClearOldObjects();
-        if (instancedObjectPlacer != null) instancedObjectPlacer.ClearObjects();
+        if (naturePlacement != null) naturePlacement.UnloadAll();
+        if (natureRenderer != null) natureRenderer.ClearLive();
         if (vegetationPlacer != null) vegetationPlacer.ClearAll();
+        if (mapGrid != null) mapGrid.Clear();
         if (heightGenerator != null) heightGenerator.Clear();
-        if (zoneSystem != null) zoneSystem.ClearZones();
         if (roadGenerator != null) roadGenerator.ClearRoad();
         if (fogCurtain != null) fogCurtain.ClearCurtain();
         if (fogPlacer != null) fogPlacer.ClearFog();
@@ -187,16 +181,28 @@ public class TerrainManager : MonoBehaviour
     private void AutoAssignComponents()
     {
         if (heightGenerator == null) heightGenerator = GetComponent<HeightMapGenerator>();
-        if (terrainBuilder == null) terrainBuilder = GetComponent<SeamlessTerrainBuilder>();
         if (chunkedTerrainBuilder == null) chunkedTerrainBuilder = GetComponent<ChunkedTerrainBuilder>();
         if (objectPlacer == null) objectPlacer = GetComponent<ObjectPlacer>();
-        if (instancedObjectPlacer == null) instancedObjectPlacer = GetComponent<InstancedObjectPlacer>();
-        if (zoneSystem == null) zoneSystem = GetComponent<TerrainZoneSystem>();
+        if (naturePlacement == null) naturePlacement = GetComponent<NaturePlacement>();
+        if (natureRenderer == null) natureRenderer = GetComponent<NatureRenderer>();
+        if (mapGrid == null) mapGrid = GetComponent<MapGrid>();
         if (roadGenerator == null) roadGenerator = GetComponent<RoadGenerator>();
         if (fogCurtain == null) fogCurtain = GetComponent<MapFogCurtain>();
         if (fogPlacer == null) fogPlacer = GetComponent<FogPlacer>();
         if (pathfinder == null) pathfinder = GetComponent<Pathfinder>();
         if (mapBoundary == null) mapBoundary = GetComponent<MapBoundary>();
+
+        if (mapGrid != null)
+        {
+            if (mapGrid.heightSource == null) mapGrid.heightSource = heightGenerator;
+            if (mapGrid.chunkedBuilder == null) mapGrid.chunkedBuilder = chunkedTerrainBuilder;
+        }
+        if (roadGenerator != null && roadGenerator.mapGrid == null)
+            roadGenerator.mapGrid = mapGrid;
+        if (objectPlacer != null && objectPlacer.mapGrid == null)
+            objectPlacer.mapGrid = mapGrid;
+        if (pathfinder != null && pathfinder.mapGrid == null)
+            pathfinder.mapGrid = mapGrid;
     }
 
     private bool ValidateComponents()
@@ -206,9 +212,9 @@ public class TerrainManager : MonoBehaviour
             Debug.LogError("TerrainManager: HeightMapGenerator не найден!");
             return false;
         }
-        if (chunkedTerrainBuilder == null && terrainBuilder == null)
+        if (chunkedTerrainBuilder == null)
         {
-            Debug.LogError("TerrainManager: нужен хотя бы один из TerrainBuilder!");
+            Debug.LogError("TerrainManager: нужен ChunkedTerrainBuilder!");
             return false;
         }
         return true;
