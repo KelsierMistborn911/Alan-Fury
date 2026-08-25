@@ -47,6 +47,7 @@ public class PlayerTargeting : MonoBehaviour
     }
 
     // --- Внутреннее ---
+    private readonly Collider[] _enemyBuffer = new Collider[32];
     private Transform _shiftSavedTarget;
     private Transform _targetMarker;
 
@@ -126,15 +127,16 @@ public class PlayerTargeting : MonoBehaviour
     void TryCloseSwitch()
     {
         if (!IsValidEnemy(CurrentTarget)) return;
-        Collider[] enemies = Physics.OverlapSphere(transform.position, closeSwitchRange, enemyLayers);
-        if (enemies.Length == 0) return;
+        int count = Physics.OverlapSphereNonAlloc(transform.position, closeSwitchRange, _enemyBuffer, enemyLayers);
+        if (count == 0) return;
 
         Vector3 mouse = MouseDirection();
         Transform best = null;
         float bestAngle = float.MaxValue;
 
-        foreach (Collider col in enemies)
+        for (int i = 0; i < count; i++)
         {
+            Collider col = _enemyBuffer[i];
             if (!IsValidEnemy(col.transform)) continue;
             if (col.transform == CurrentTarget) continue;
             Vector3 to = col.transform.position - transform.position;
@@ -152,11 +154,12 @@ public class PlayerTargeting : MonoBehaviour
 
     public Transform FindNearestInRadius(float radius)
     {
-        Collider[] enemies = Physics.OverlapSphere(transform.position, radius, enemyLayers);
+        int count = Physics.OverlapSphereNonAlloc(transform.position, radius, _enemyBuffer, enemyLayers);
         Transform closest = null;
         float minDist = float.MaxValue;
-        foreach (Collider col in enemies)
+        for (int i = 0; i < count; i++)
         {
+            Collider col = _enemyBuffer[i];
             if (!IsValidEnemy(col.transform)) continue;
             Vector3 to = col.transform.position - transform.position;
             to.y = 0f;
@@ -196,13 +199,14 @@ public class PlayerTargeting : MonoBehaviour
 
     public Transform FindClosestToDirection(Vector3 preferred, float radius)
     {
-        Collider[] enemies = Physics.OverlapSphere(transform.position, radius, enemyLayers);
+        int count = Physics.OverlapSphereNonAlloc(transform.position, radius, _enemyBuffer, enemyLayers);
         Transform best = null;
         float bestAngle = float.MaxValue;
         float halfAngle = aimConeAngle * 0.5f;
 
-        foreach (Collider col in enemies)
+        for (int i = 0; i < count; i++)
         {
+            Collider col = _enemyBuffer[i];
             if (!IsValidEnemy(col.transform)) continue;
             Vector3 to = col.transform.position - transform.position;
             to.y = 0f;
@@ -216,12 +220,13 @@ public class PlayerTargeting : MonoBehaviour
     public Transform FindPreferredTarget(float radius)
     {
         Vector3 preferred = GetPreferredAimDirection();
-        Collider[] enemies = Physics.OverlapSphere(transform.position, radius, enemyLayers);
+        int count = Physics.OverlapSphereNonAlloc(transform.position, radius, _enemyBuffer, enemyLayers);
         Transform best = null;
         float bestScore = float.MaxValue;
 
-        foreach (Collider col in enemies)
+        for (int i = 0; i < count; i++)
         {
+            Collider col = _enemyBuffer[i];
             if (!IsValidEnemy(col.transform)) continue;
             Vector3 to = col.transform.position - transform.position;
             to.y = 0f;
@@ -233,13 +238,14 @@ public class PlayerTargeting : MonoBehaviour
 
     public Transform FindNearestInCone()
     {
-        Collider[] enemies = Physics.OverlapSphere(transform.position, targetLockRange, enemyLayers);
+        int count = Physics.OverlapSphereNonAlloc(transform.position, targetLockRange, _enemyBuffer, enemyLayers);
         Transform closest = null;
         float minDist = float.MaxValue;
         float halfAngle = aimConeAngle * 0.5f;
 
-        foreach (Collider col in enemies)
+        for (int i = 0; i < count; i++)
         {
+            Collider col = _enemyBuffer[i];
             if (!IsValidEnemy(col.transform)) continue;
             Vector3 to = col.transform.position - transform.position;
             to.y = 0f;

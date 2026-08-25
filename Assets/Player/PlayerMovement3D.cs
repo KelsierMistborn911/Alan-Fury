@@ -77,6 +77,38 @@ public class PlayerMovement3D : MonoBehaviour
         stepFrequency = 4.5f
     };
 
+    [Header("Скрытность (Ctrl тоггл)")]
+    [Tooltip("Крадущаяся ходьба. Gait 1 при IsSneaking.")]
+    public GaitConfig sneakWalk = new GaitConfig
+    {
+        speed = 2.2f,
+        acceleration = 20f,
+        deceleration = 28f,
+        stepDistance = 0.35f,
+        stepDuration = 0.4f,
+        stepFrequency = 1.8f
+    };
+    [Tooltip("Крадущийся бег. Gait 2 при IsSneaking.")]
+    public GaitConfig sneakRun = new GaitConfig
+    {
+        speed = 5.0f,
+        acceleration = 16f,
+        deceleration = 18f,
+        stepDistance = 0.7f,
+        stepDuration = 0.28f,
+        stepFrequency = 2.6f
+    };
+    [Tooltip("Скрытный спринт. Gait 3 при IsSneaking.")]
+    public GaitConfig sneakSprint = new GaitConfig
+    {
+        speed = 7.5f,
+        acceleration = 12f,
+        deceleration = 10f,
+        stepDistance = 1.1f,
+        stepDuration = 0.2f,
+        stepFrequency = 3.4f
+    };
+
     [Header("Штраф за движение боком и спиной")]
     [Tooltip("До этого угла между корпусом и движением скорость полная.")]
     public float strafeAngle = 45f;
@@ -123,7 +155,7 @@ public class PlayerMovement3D : MonoBehaviour
     public float gravity = -20f;
 
     [Header("Анимация")]
-    [Tooltip("Аниматор. Параметры: Gait, Moving, Combat, Armed, Turn, MoveAngle, MoveDir, MoveX, MoveZ (для Blend Tree Run/Walk).")]
+    [Tooltip("Аниматор. Параметры: Gait, Moving, Combat, Armed, Sneaking, Turn, MoveAngle, MoveDir, MoveX, MoveZ.")]
     public Animator animator;
     [Tooltip("Порог скорости, ниже которого игрок считается стоящим (м/с).")]
     public float moveThreshold = 0.15f;
@@ -151,6 +183,8 @@ public class PlayerMovement3D : MonoBehaviour
     private float _verticalVelocity;
     private GaitConfig _currentGait;
     private bool _isRunning;
+    private bool _isSneaking;           // Ctrl тоггл — крадущийся режим
+    private int _currentGaitLevel = 1;  // 1 walk / 2 run / 3 sprint (для Stealth/Noise)
     private bool _inCombat;             // цель в боевой зоне или идёт действие
     private GaitConfig _stepSlowRef;    // нижняя опора для StepController (шаг)
     private GaitConfig _stepFastRef;    // верхняя опора (бег/спринт того же набора)
@@ -179,6 +213,10 @@ public class PlayerMovement3D : MonoBehaviour
     public float TimeSinceDodgeEnd => Time.time - _lastDodgeEndTime;
     public float DodgeSpeedValue => dodgeSpeed;
     public float CurrentSpeed => _velocity.magnitude;
+    /// <summary>Режим скрытности (Ctrl тоггл). Скорости → sneak*, аниматор Sneaking.</summary>
+    public bool IsSneaking => _isSneaking;
+    /// <summary>1 = walk, 2 = run, 3 = sprint. Не зависит от IsSneaking (только уровень ввода).</summary>
+    public int CurrentGaitLevel => _currentGaitLevel;
 
     public void StopHorizontalVelocity() => _velocity = Vector3.zero;
 
@@ -352,7 +390,11 @@ public class PlayerMovement3D : MonoBehaviour
             && Time.time - _lastRollTime > rollCooldown
             && !(_combat != null && _combat.IsCharging))
         {
+            // Движение → в сторону ввода; стоя → в сторону взгляда (цель / мышь / корпус).
             Vector3 dir = ComputeInputDirection();
+            if (dir.magnitude < 0.1f)
+                dir = ComputeLookDirection();
+
             if (dir.magnitude > 0.1f)
             {
                 _maneuverDir = dir;
@@ -363,6 +405,11 @@ public class PlayerMovement3D : MonoBehaviour
                 {
                     StartManeuver(rollSpeed, rollDuration, ref _isRolling, ref _lastRollTime);
                     if (_combat != null) _combat.ClearTarget(); // перекат сбрасывает привязку
+                    // Сразу лицом в сторону рывка (как faceMoveDir, но мгновенно — без mouseLookTimeout).
+                    if (_maneuverDir.sqrMagnitude > 0.01f)
+                        transform.rotation = Quaternion.LookRotation(_maneuverDir);
+                    // После снапа корпус = направление переката → MoveDir Forward для клипа.
+                    ApplyManeuverAnimDirection(_maneuverDir);
                     // Анимация переката: Trigger + Rolling. Gait остаётся 1/2/3 — Animator сам выбирает клип.
                     if (animator != null)
                     {
@@ -414,6 +461,54 @@ public class PlayerMovement3D : MonoBehaviour
         forward.y = 0f; right.y = 0f;
         forward.Normalize(); right.Normalize();
         return (forward * input.z + right * input.x).normalized;
+    }
+
+    /// <summary>
+    /// Направление взгляда на плоскости: ActiveAimTarget → мышь → transform.forward.
+    /// Для переката стоя (без WASD).
+    /// </summary>
+    Vector3 ComputeLookDirection()
+    {
+        Transform aim = _combat != null ? _combat.ActiveAimTarget : null;
+        if (aim != null)
+        {
+            Vector3 to = aim.position - transform.position;
+            to.y = 0f;
+            if (to.sqrMagnitude > 0.01f) return to.normalized;
+        }
+
+        if (_mainCamera != null)
+        {
+            Ray ray = _mainCamera.ScreenPointToRay(Input.mousePosition);
+            if (new Plane(Vector3.up, transform.position).Raycast(ray, out float dist))
+            {
+                Vector3 look = ray.GetPoint(dist) - transform.position;
+                look.y = 0f;
+                if (look.sqrMagnitude > 0.01f) return look.normalized;
+            }
+        }
+
+        return transform.forward;
+    }
+
+    /// <summary>
+    /// Выставляет MoveAngle / MoveDir / MoveX / MoveZ по направлению манёвра
+    /// относительно корпуса — чтобы клип переката (F/L/R/B) совпал со стороной рывка.
+    /// </summary>
+    void ApplyManeuverAnimDirection(Vector3 worldDir)
+    {
+        if (animator == null || worldDir.sqrMagnitude < 0.01f) return;
+        worldDir.y = 0f;
+        worldDir.Normalize();
+
+        float moveAngle = Vector3.SignedAngle(transform.forward, worldDir, Vector3.up);
+        Vector3 local = transform.InverseTransformDirection(worldDir);
+
+        if (HasParam("MoveAngle")) animator.SetFloat("MoveAngle", moveAngle);
+        if (HasParam("MoveDir")) animator.SetInteger("MoveDir", ComputeMoveDir(moveAngle));
+        if (HasParam("MoveX")) animator.SetFloat("MoveX", local.x);
+        if (HasParam("MoveZ")) animator.SetFloat("MoveZ", local.z);
+        if (HasParam("Moving")) animator.SetBool("Moving", true);
     }
 
     // При лок-цели раскладывает направление манёвра по осям «к врагу / вокруг врага».
@@ -523,25 +618,36 @@ public class PlayerMovement3D : MonoBehaviour
     {
         if (Input.GetKeyDown(KeyCode.CapsLock))
             _isRunning = !_isRunning;
+        if (Input.GetKeyDown(KeyCode.LeftControl))
+            _isSneaking = !_isSneaking;
 
         bool armed = _combat != null && _combat.IsArmed;
         bool blocking = _combat != null && _combat.IsBlocking;
         // Бой из CombatController: удар/враг включают, 15с linger без врагов, сброс удержанием 1.
         bool combatMode = _combat != null && _combat.IsInCombat;
 
-        // Управление без изменений: Shift=3 sprint, CapsLock=2 run, иначе 1 walk.
+        // Управление: Shift=3 sprint, CapsLock=2 run, иначе 1 walk. Ctrl = sneak (скорости отдельно).
         int gait = Input.GetKey(KeyCode.LeftShift) ? 3 : (_isRunning ? 2 : 1);
         if (blocking && gait == 3) gait = 2;
+        _currentGaitLevel = gait;
 
-        _stepSlowRef = combatMode ? combatWalk : walk;
-        _stepFastRef = gait == 3
-            ? (combatMode ? combatSprint : sprint)
-            : (combatMode ? combatRun : run);
+        if (_isSneaking)
+        {
+            // Скрытность перекрывает peace/combat gait-конфиги. Combat-флаг в аниматор всё равно уходит.
+            _stepSlowRef = sneakWalk;
+            _stepFastRef = gait == 3 ? sneakSprint : sneakRun;
+            _currentGait = gait == 1 ? sneakWalk : _stepFastRef;
+        }
+        else
+        {
+            _stepSlowRef = combatMode ? combatWalk : walk;
+            _stepFastRef = gait == 3
+                ? (combatMode ? combatSprint : sprint)
+                : (combatMode ? combatRun : run);
+            _currentGait = gait == 1 ? _stepSlowRef : _stepFastRef;
+        }
 
-        if (gait == 1) _currentGait = _stepSlowRef;
-        else _currentGait = _stepFastRef;
-
-        // Аниматор: Gait 1/2/3 как есть. Run-клипы — на Gait=2 (CapsLock), не на 3 (sprint).
+        // Аниматор: Gait 1/2/3 + Sneaking. Run-клипы — на Gait=2 (CapsLock), не на 3 (sprint).
         if (animator != null)
         {
             bool hasInput = _hadMoveInput;
@@ -550,6 +656,7 @@ public class PlayerMovement3D : MonoBehaviour
             if (HasParam("Moving")) animator.SetBool("Moving", isMoving);
             if (HasParam("Combat")) animator.SetBool("Combat", combatMode);
             if (HasParam("Armed")) animator.SetBool("Armed", armed);
+            if (HasParam("Sneaking")) animator.SetBool("Sneaking", _isSneaking);
             if (combatMode && !_inCombat && HasParam("CombatEnter")) animator.SetTrigger("CombatEnter");
 
             // Слой "Battle Step" — ноги только в бою.

@@ -1,7 +1,7 @@
 using UnityEngine;
 
 /// <summary>
-/// Параметры оборотня: здоровье, стамина, агрессия, страх + текущие приказы стаи.
+/// Параметры оборотня: здоровье, стамина, агрессия, страх.
 ///
 /// Агрессия — накопительная (0..100): старт 0, растёт со скоростью aggressionPerSecond,
 /// пока волк в роли Attack (начисляет WerewolfPackBrain). Раны её больше НЕ режут.
@@ -12,24 +12,10 @@ using UnityEngine;
 /// разом получает +2 ступени, а страх стаи падает вдвое (вторая волна дешевле первой).
 /// Вне драки страх тянется к 0, в драке — к 25 (нижняя боевая ступень).
 ///
-/// Приказы (токены и цель) пишет менеджер стаи, читает мозг. Лежат здесь, чтобы их
-/// было видно в инспекторе и чтобы до них дотягивались аниматор, лог и HUD.
+/// Цель (target) — опорная точка для кольца. Роли/слоты атаки выдаёт WerewolfPackManager.
 /// </summary>
 public class WerewolfStats : MonoBehaviour, IDamageable
 {
-    /// <summary>Приказы от стаи. Набор — волк может держать несколько разом.</summary>
-    [System.Flags]
-    public enum Token
-    {
-        None = 0,
-        Escort = 1,        // сопровождать альфу
-        Surround = 2,      // точка на дуге окружения
-        KeepDistance = 4,  // радиус кольца вокруг своей цели
-        Attack = 8,        // право на инициативу: сближаться ради удара
-        Hurry = 16,        // спешит — гейт на ступень выше
-        Flee = 32          // бегство
-    }
-
     /// <summary>Ступени страха. Шаг — 25 единиц.</summary>
     public enum FearTier { Calm, Wary, Afraid, Terror }
 
@@ -72,11 +58,9 @@ public class WerewolfStats : MonoBehaviour, IDamageable
     [Tooltip("Как часто считается дрейф страха (сек). Урон действует мгновенно, мимо этого тика.")]
     public float slowTickInterval = 1f;
 
-    [Header("Приказы стаи (пишет менеджер)")]
+    [Header("Цель")]
     [Tooltip("Своя цель. Задаёт кольцо с мин. и макс. дистанцией. Пусто — волк вне драки.")]
     public Transform target;
-    [Tooltip("Набор активных токенов. Приоритет между ними разбирает мозг.")]
-    public Token tokens = Token.None;
 
     private float _stamina;
     private float _regenTimer;
@@ -141,20 +125,6 @@ public class WerewolfStats : MonoBehaviour, IDamageable
 
     /// <summary>Срабатывает один раз при смерти (мозг гасит компоненты, тело остаётся).</summary>
     public System.Action OnDeath;
-
-    // ===================== Токены =====================
-
-    /// <summary>Держит ли волк этот токен (можно проверять несколько разом).</summary>
-    public bool Has(Token t) => (tokens & t) != 0;
-
-    /// <summary>Выдать токен(ы). Зовёт менеджер стаи.</summary>
-    public void GrantToken(Token t) => tokens |= t;
-
-    /// <summary>Забрать токен(ы). Зовёт менеджер стаи или сам волк, когда отказывается.</summary>
-    public void RevokeToken(Token t) => tokens &= ~t;
-
-    /// <summary>Заменить весь набор разом.</summary>
-    public void SetTokens(Token t) => tokens = t;
 
     // ===================== Агрессия и страх =====================
 

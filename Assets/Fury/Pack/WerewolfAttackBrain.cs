@@ -42,7 +42,7 @@ public class WerewolfAttackBrain : MonoBehaviour, WerewolfPackManager.IPackAgent
     public WerewolfCombat combat;
     [Tooltip("Мозг окружения. Включается в роли Surround, гасится в Attack.")]
     public WerewolfSurroundBrain surroundBrain;
-    [Tooltip("Сетка пути. Пусто — найдётся на сцене.")]
+    [Tooltip("Сетка пути. Пусто — берётся из WerewolfPackManager.")]
     public Pathfinder pathfinder;
     [Tooltip("Параметры оборотня (агрессия). Пусто — найдётся на волке.")]
     public WerewolfStats stats;
@@ -238,7 +238,6 @@ public class WerewolfAttackBrain : MonoBehaviour, WerewolfPackManager.IPackAgent
         if (locomotion == null) locomotion = GetComponent<WerewolfLocomotion>();
         if (combat == null) combat = GetComponent<WerewolfCombat>();
         if (surroundBrain == null) surroundBrain = GetComponent<WerewolfSurroundBrain>();
-        if (pathfinder == null) pathfinder = FindObjectOfType<Pathfinder>();
         if (stats == null) stats = GetComponent<WerewolfStats>();
         if (stats == null)
             Debug.LogWarning("WerewolfAttackBrain: не найден WerewolfStats — агрессия считается как 0.5.");
@@ -250,6 +249,7 @@ public class WerewolfAttackBrain : MonoBehaviour, WerewolfPackManager.IPackAgent
         if (_manager != null)
         {
             _manager.Register(this);
+            if (pathfinder == null) pathfinder = _manager.pathfinder;
         }
         else
         {

@@ -5,11 +5,11 @@ using System.Collections.Generic;
 /// Делит карту на клетки и хранит по каждой клетке данные о мире.
 ///
 /// Два слоя данных:
-///  - zoneMap (ZoneType)  — зона по высоте: болото / полусухо / сухо. Используется для покраски.
+///  - zoneMap (ZoneType)  — зона по высоте: болото / полусухо / сухо.
 ///  - tileMap (TileType)  — тип клетки: земля / вода / дорога. Используется для игровой логики.
 ///
 /// InitializeZones() вызывается из TerrainManager после построения меша.
-/// Работает и с SeamlessTerrainBuilder, и с ChunkedTerrainBuilder.
+/// tileSize берётся из ChunkedTerrainBuilder.
 /// </summary>
 public class TerrainZoneSystem : MonoBehaviour
 {
@@ -42,9 +42,8 @@ public class TerrainZoneSystem : MonoBehaviour
     [Header("Источник высот")]
     public HeightMapGenerator heightSource;
 
-    [Header("Меш — нужен один из двух (для покраски/tileSize)")]
-    public SeamlessTerrainBuilder terrainBuilder;       // нужен для покраски меша
-    public ChunkedTerrainBuilder chunkedBuilder;        // используется для tileSize, если Seamless = None
+    [Header("Меш (tileSize)")]
+    public ChunkedTerrainBuilder chunkedBuilder;
 
     [Header("Зоны по высоте")]
     public List<Zone> zones = new List<Zone>();
@@ -84,7 +83,7 @@ public class TerrainZoneSystem : MonoBehaviour
     // TerrainZoneSystem.Start() может сработать раньше TerrainManager.Start(),
     // и в этот момент карты высот ещё не будет.
     // Поэтому вызываем InitializeZones() из TerrainManager.GenerateAll()
-    // после terrainBuilder.BuildTerrain().
+    // после BuildTerrain().
 
     public void InitializeZones()
     {
@@ -94,8 +93,6 @@ public class TerrainZoneSystem : MonoBehaviour
             return;
         }
 
-        // Автопоиск билдеров на том же объекте, если не назначены вручную.
-        if (terrainBuilder == null) terrainBuilder = GetComponent<SeamlessTerrainBuilder>();
         if (chunkedBuilder == null) chunkedBuilder = GetComponent<ChunkedTerrainBuilder>();
 
         if (zones.Count == 0)
@@ -118,8 +115,8 @@ public class TerrainZoneSystem : MonoBehaviour
         // Плоскость воды (наглядная заглушка).
         BuildWaterPlane();
 
-        // Покраска меша возможна только для Seamless (один меш с вершинными цветами).
-        if (updateColorsOnMesh && terrainBuilder != null)
+        // Покраска вершин меша (Seamless) снята — чанки красятся в ChunkedTerrainBuilder.
+        if (updateColorsOnMesh)
             UpdateTerrainColors();
 
         Debug.Log($"TerrainZoneSystem: создано {zones.Count} зон, карта {w}x{d}, уровень воды = {waterLevel:F3}");
@@ -191,50 +188,19 @@ public class TerrainZoneSystem : MonoBehaviour
         return ZoneType.SemiDry;
     }
 
+    /// <summary>
+    /// Раньше красила единый Seamless-меш по ZoneType. Для Chunked — no-op
+    /// (цвет чанков задаёт ChunkedTerrainBuilder по высоте).
+    /// </summary>
     public void UpdateTerrainColors()
     {
-        if (terrainBuilder == null)
-        {
-            Debug.LogWarning("TerrainZoneSystem: нет ссылки на SeamlessTerrainBuilder — покраска меша пропущена");
-            return;
-        }
-
-        MeshFilter meshFilter = terrainBuilder.GetComponent<MeshFilter>();
-        if (meshFilter == null || meshFilter.sharedMesh == null)
-        {
-            Debug.LogWarning("TerrainZoneSystem: меш не найден");
-            return;
-        }
-
-        Mesh mesh = meshFilter.sharedMesh;
-        Vector3[] verts = mesh.vertices;
-        Color[] newColors = new Color[verts.Length];
-
-        float ts = ResolveTileSize();
-        Vector3 mapOrigin = ResolveMapOrigin();
-
-        for (int i = 0; i < verts.Length; i++)
-        {
-            Vector3 worldPos = transform.TransformPoint(verts[i]);
-
-            float localX = worldPos.x - mapOrigin.x;
-            float localZ = worldPos.z - mapOrigin.z;
-
-            // FIX: FloorToInt вместо RoundToInt — корректное попадание в клетку.
-            int cellX = Mathf.Clamp(Mathf.FloorToInt(localX / ts), 0, heightSource.width - 1);
-            int cellZ = Mathf.Clamp(Mathf.FloorToInt(localZ / ts), 0, heightSource.depth - 1);
-
-            newColors[i] = GetColorForZone(GetZoneAtCell(cellX, cellZ));
-        }
-
-        mesh.colors = newColors;
+        // Seamless path removed. Chunked uses its own lowColor/highColor gradient.
     }
 
     // =================== Резолверы геометрии ===================
 
     private float ResolveTileSize()
     {
-        if (terrainBuilder != null) return terrainBuilder.tileSize;
         if (chunkedBuilder != null) return chunkedBuilder.tileSize;
         return 1f;
     }

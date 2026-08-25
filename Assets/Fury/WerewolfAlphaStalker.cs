@@ -30,7 +30,7 @@ public class WerewolfAlphaStalker : MonoBehaviour
     [Header("Ссылки")]
     public WerewolfPerception perception;
     public WerewolfLocomotion locomotion;
-    [Tooltip("Сетка проходимости. ОБЯЗАТЕЛЬНА: на ней держится «не за карту».")]
+    [Tooltip("Сетка проходимости. ОБЯЗАТЕЛЬНА: «не за карту». Пусто — из WerewolfPackManager.")]
     public Pathfinder pathfinder;
 
     [Header("Дистанции (м): spook < stalkMin < stalkMax < fleeUntil")]
@@ -71,7 +71,6 @@ public class WerewolfAlphaStalker : MonoBehaviour
 
     // ============ Рантайм ============
     private float _dt, _dist;
-    private bool _seen;
     private bool _fleeing;
     private float _pressure;
     private float _reactTimer;
@@ -94,7 +93,8 @@ public class WerewolfAlphaStalker : MonoBehaviour
     {
         if (perception == null) perception = GetComponent<WerewolfPerception>();
         if (locomotion == null) locomotion = GetComponent<WerewolfLocomotion>();
-        if (pathfinder == null) pathfinder = FindObjectOfType<Pathfinder>();
+        if (pathfinder == null && WerewolfPackManager.Instance != null)
+            pathfinder = WerewolfPackManager.Instance.pathfinder;
         if (pathfinder == null)
             Debug.LogWarning("AlphaStalker: Pathfinder не назначен — защита от ухода за карту не работает!");
         RefreshCovers();
@@ -114,8 +114,13 @@ public class WerewolfAlphaStalker : MonoBehaviour
     {
         _dt = Time.deltaTime;
         if (perception == null || !perception.HasPlayer) return; // поиск/обнаружение — позже
+        if (locomotion == null) return;
+        if (_root == null)
+        {
+            BuildTree();
+            if (_root == null) return;
+        }
         _dist = perception.DistanceToPlayer;
-        _seen = perception.IsSeenByPlayer();
         _root.Tick();
     }
 
@@ -326,6 +331,7 @@ public class WerewolfAlphaStalker : MonoBehaviour
 
     private bool MoveAlongPath(Vector3 goal, float speed, float dt)
     {
+        if (locomotion == null) return false;
         if (pathfinder == null || !pathfinder.IsReady)
             return locomotion.MoveTo(goal, speed, dt);
 

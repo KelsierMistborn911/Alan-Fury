@@ -19,21 +19,24 @@ public class ObjectPlacer : MonoBehaviour
         public float minScale = 0.8f;
         public float maxScale = 1.2f;
         public bool alignToSurface = false;
-        public bool snapToCellCenter = false; // ставить в центр клетки (для деревьев), пропуская воду/дорогу/занятые
+        public bool snapToCellCenter = false; // ставить по клеткам (деревья), через MapGrid
+        [Tooltip("Размер занятости в клетках (дерево 3×3 → footprint=3).")]
+        public int footprint = 1;
         public float heightOffset = 0f;
         [Range(0f, 1f)]
-        public float spawnChance = 1f; // ����������� ������ ������� ���������� �������
-        public float minDistanceBetweenObjects = 1f; // ����������� ���������, ���� ��� ������� ����
-        public LayerMask objectLayer; // слой для заспавненных объектов (Nothing = не менять; напр. Trees для деревьев)
+        public float spawnChance = 1f;
+        public float minDistanceBetweenObjects = 1f;
+        public LayerMask objectLayer;
+        [Tooltip("Флаг MapGrid при Occupy (по умолчанию Tree).")]
+        public MapGrid.OccupancyFlags occupyFlag = MapGrid.OccupancyFlags.Tree;
     }
 
-    [Header("�������� �����")]
+    [Header("Источник высот")]
     public HeightMapGenerator heightSource;
 
-    [Header("�������� ����")]
-    public SeamlessTerrainBuilder terrainBuilder;
-    public ChunkedTerrainBuilder chunkedBuilder;   // используется для tileSize, если Seamless = None
-    public TerrainZoneSystem zoneSystem;           // для пропуска воды/дороги при размещении по клеткам
+    [Header("Меш / сетка")]
+    public ChunkedTerrainBuilder chunkedBuilder;
+    public MapGrid mapGrid;
 
     [Header("���� ��������")]
     public List<ObjectType> objectTypes = new List<ObjectType>();
@@ -55,7 +58,6 @@ public class ObjectPlacer : MonoBehaviour
     private Vector3 mapOrigin;
     private List<Vector3> placedPositions = new List<Vector3>();
     private Dictionary<Vector2Int, List<Vector3>> spatialGrid;
-    private bool[,] occupiedCells; // клетки, занятые объектами в текущем прогоне
 
     /// <summary>
     /// ��������� ����������� ���� ��������.
@@ -114,9 +116,9 @@ public class ObjectPlacer : MonoBehaviour
             Debug.LogError("ObjectPlacer: ����� ������������������ HeightMapGenerator!");
             return false;
         }
-        if (terrainBuilder == null && chunkedBuilder == null)
+        if (chunkedBuilder == null)
         {
-            Debug.LogError("ObjectPlacer: ����� ������ �� SeamlessTerrainBuilder!");
+            Debug.LogError("ObjectPlacer: нужен ChunkedTerrainBuilder!");
             return false;
         }
         if (objectTypes.Count == 0)
@@ -133,9 +135,8 @@ public class ObjectPlacer : MonoBehaviour
         width = heights.GetLength(0);
         depth = heights.GetLength(1);
         if (chunkedBuilder == null) chunkedBuilder = GetComponent<ChunkedTerrainBuilder>();
-        if (zoneSystem == null) zoneSystem = GetComponent<TerrainZoneSystem>();
+        if (mapGrid == null) mapGrid = GetComponent<MapGrid>();
         tileSize = ResolveTileSize();
-        occupiedCells = new bool[width, depth];
         mapOrigin = new Vector3(-width * tileSize / 2f, 0, -depth * tileSize / 2f);
     }
 
@@ -272,14 +273,13 @@ public class ObjectPlacer : MonoBehaviour
 
     private float ResolveTileSize()
     {
-        if (terrainBuilder != null) return terrainBuilder.tileSize;
         if (chunkedBuilder != null) return chunkedBuilder.tileSize;
         return 1f;
     }
 
     /// <summary>
-    /// Размещает объекты строго в центрах клеток, по одному на клетку.
-    /// Пропускает воду, дорогу и уже занятые клетки.
+    /// Размещение по клеткам через MapGrid: CanPlace + Occupy (footprint).
+    /// Не ставит на Tree (blockMask) и на Road.
     /// </summary>
     private void PlaceObjectsOnCells(ObjectType objType)
     {
@@ -289,9 +289,17 @@ public class ObjectPlacer : MonoBehaviour
             return;
         }
 
-        const int cellMargin = 2; // отступ от края карты в клетках
-        int marginX = width > cellMargin * 2 + 1 ? cellMargin : 0;
-        int marginZ = depth > cellMargin * 2 + 1 ? cellMargin : 0;
+        int fp = Mathf.Max(1, objType.footprint);
+        int half = fp / 2;
+        const int cellMargin = 2;
+        int margin = cellMargin + half;
+        int marginX = width > margin * 2 + 1 ? margin : 0;
+        int marginZ = depth > margin * 2 + 1 ? margin : 0;
+
+        bool useGrid = mapGrid != null && mapGrid.IsReady;
+        var flag = objType.occupyFlag != MapGrid.OccupancyFlags.None
+            ? objType.occupyFlag
+            : MapGrid.OccupancyFlags.Tree;
 
         int placed = 0;
         int attempts = 0;
@@ -300,38 +308,30 @@ public class ObjectPlacer : MonoBehaviour
         while (placed < objType.count && attempts < maxTotalAttempts)
         {
             attempts++;
-
-            if (Random.value > objType.spawnChance)
-                continue;
+            if (Random.value > objType.spawnChance) continue;
 
             int cx = Random.Range(marginX, width - marginX);
             int cz = Random.Range(marginZ, depth - marginZ);
 
-            if (occupiedCells != null && occupiedCells[cx, cz])
-                continue;
-
-            if (IsCellBlocked(cx, cz))
-                continue;
+            if (useGrid)
+            {
+                if (!mapGrid.CanPlace(cx, cz, fp, fp, anchorCenter: true)) continue;
+                if (mapGrid.HasFlag(cx, cz, MapGrid.OccupancyFlags.Road)) continue;
+                // footprint пересечение с Road
+                if (FootprintHitsRoad(cx, cz, fp)) continue;
+            }
 
             float h = heightSource.GetHeight(cx, cz);
-            if (h < objType.minHeight || h > objType.maxHeight)
-                continue;
+            if (h < objType.minHeight || h > objType.maxHeight) continue;
 
-            // Центр клетки в мире — той же формулой, что у ChunkedTerrainBuilder (без сдвига на полклетки).
-            Vector3 worldPos = mapOrigin + new Vector3(
-                cx * tileSize,
-                0f,
-                cz * tileSize
-            );
+            Vector3 worldPos = mapOrigin + new Vector3(cx * tileSize, 0f, cz * tileSize);
             worldPos.y = h + objType.heightOffset;
 
-            if (IsTooClose(worldPos, objType.minDistanceBetweenObjects))
-                continue;
+            if (IsTooClose(worldPos, objType.minDistanceBetweenObjects)) continue;
 
             Quaternion rotation = objType.randomRotation
                 ? Quaternion.Euler(0, Random.Range(0f, 360f), 0)
                 : Quaternion.identity;
-
             if (objType.alignToSurface && !objType.randomRotation)
                 rotation = GetSurfaceRotation(worldPos);
 
@@ -339,24 +339,28 @@ public class ObjectPlacer : MonoBehaviour
             obj.name = $"{objType.name}_{placed}";
             float scale = Random.Range(objType.minScale, objType.maxScale);
             obj.transform.localScale = Vector3.one * scale;
-
             ApplyLayer(obj, objType);
 
             placedPositions.Add(worldPos);
             AddToSpatialGrid(worldPos);
-            if (occupiedCells != null) occupiedCells[cx, cz] = true;
+            if (useGrid)
+                mapGrid.Occupy(cx, cz, fp, fp, flag, anchorCenter: true);
             placed++;
         }
 
-        Debug.Log($"ObjectPlacer: по клеткам размещено {placed}/{objType.count} '{objType.name}' за {attempts} попыток.");
+        Debug.Log($"ObjectPlacer: по клеткам {placed}/{objType.count} '{objType.name}' (fp={fp}) за {attempts} попыток.");
     }
 
-    /// <summary>Клетка непригодна для объекта: вода или дорога.</summary>
-    private bool IsCellBlocked(int cx, int cz)
+    private bool FootprintHitsRoad(int cx, int cz, int fp)
     {
-        if (zoneSystem == null) return false;
-        var t = zoneSystem.GetTileType(cx, cz);
-        return t == TerrainZoneSystem.TileType.Water || t == TerrainZoneSystem.TileType.Road;
+        int hx = fp / 2;
+        int x0 = cx - hx, z0 = cz - hx;
+        int x1 = x0 + fp - 1, z1 = z0 + fp - 1;
+        for (int x = x0; x <= x1; x++)
+            for (int z = z0; z <= z1; z++)
+                if (mapGrid.HasFlag(x, z, MapGrid.OccupancyFlags.Road))
+                    return true;
+        return false;
     }
 
     /// <summary>Назначает слой заспавненному объекту и его детям (если в типе задан objectLayer).</summary>

@@ -12,6 +12,8 @@ public class CombatController3D : MonoBehaviour
     public PlayerStance stance;
     [Tooltip("Аниматор игрока. Пусто — найдётся на объекте.")]
     public Animator animator;
+    [Tooltip("Визуал оружия (меч/щит в руке и в ножнах). Пусто — найдётся на объекте.")]
+    public WeaponVisual weaponVisual;
 
     [Header("Комбо / стойки (атака)")]
     [Tooltip("Пауза между ударами, после которой серия сбрасывается (сек).")]
@@ -22,8 +24,6 @@ public class CombatController3D : MonoBehaviour
     [Range(0.3f, 0.9f)] public float heavyChargeThreshold = 0.55f;
     [Tooltip("Дистанция, выше которой МОЖЕТ выпасть Thrust (и то не всегда). Ниже — только slash.")]
     public float thrustPreferDistance = 3.6f;
-    [Tooltip("Шанс укола, когда цель дальше thrustPreferDistance (0–1). Остальное — slash.")]
-    [Range(0f, 1f)] public float thrustChanceWhenFar = 0.28f;
 
     [Header("Управление боем")]
     [Tooltip("Клавиша блока (щит в левой руке обязателен). ПКМ.")]
@@ -32,14 +32,20 @@ public class CombatController3D : MonoBehaviour
     public KeyCode parryKey = KeyCode.F;
     [Tooltip("Укол (Thrust).")]
     public KeyCode thrustKey = KeyCode.Q;
-    [Tooltip("Убрать / достать оружие (мгновенно по тапу, если нужно).")]
+    [Tooltip("Тап: достать / убрать меч (правая рука).")]
+    public KeyCode swordToggleKey = KeyCode.Alpha1;
+    [Tooltip("Тап: достать / убрать щит (левая рука).")]
+    public KeyCode shieldToggleKey = KeyCode.Alpha2;
+    [Tooltip("Убрать всё оружие (меч + щит).")]
     public KeyCode sheathKey = KeyCode.R;
-    [Tooltip("Зажать ≥ peaceHoldDuration → принудительно мирный режим + анимация выхода из боя.")]
-    public KeyCode peaceHoldKey = KeyCode.Alpha1;
+    [Tooltip("Зажать ≥ peaceHoldDuration → принудительно мирный режим. Пока на 3, т.к. 1 = тап меча.")]
+    public KeyCode peaceHoldKey = KeyCode.Alpha3;
     [Tooltip("Сколько держать peaceHoldKey (сек), чтобы выйти в мирный режим.")]
     public float peaceHoldDuration = 1.5f;
-    [Tooltip("После удара/врага: сколько секунд держать боевой режим, если врагов уже нет. Сброс сразу по удержанию 1.")]
+    [Tooltip("После удара/врага: сколько секунд держать боевой режим, если врагов уже нет.")]
     public float combatLingerSeconds = 15f;
+    [Tooltip("Задержка (сек) перед сменой визуала меча при убирании.")]
+    public float sheathVisualDelay = 1f;
 
     [Header("Парирование")]
     [Tooltip("Длительность окна (сек). Урон в окне гасится целиком, оборона и стамина не тратятся.")]
@@ -83,9 +89,13 @@ public class CombatController3D : MonoBehaviour
     public bool IsBlocking { get; private set; }
     public bool IsParrying { get; private set; }
     public bool IsCharging { get; private set; }
-    /// <summary>Оружие в руках. false = убрано, мирная стойка/анимки. Атака/блок автоматически достают.</summary>
-    public bool IsArmed { get; private set; } = true;
-    /// <summary>Принудительный мирный режим (удержание 1 ≥ 1.5с). Снимается атакой/Draw.</summary>
+    /// <summary>Замах / удар / заряд. Для Stealth, Perception и прочих потребителей.</summary>
+    public bool IsInAttackPipeline => IsAttacking || IsWindingUp || IsCharging;
+    /// <summary>Меч в правой руке. false = в ножнах. Атака требует IsArmed.</summary>
+    public bool IsArmed { get; private set; } = false;
+    /// <summary>Щит в левой руке. false = на спине / убран.</summary>
+    public bool IsShieldArmed { get; private set; } = false;
+    /// <summary>Принудительный мирный режим. Снимается атакой/Draw.</summary>
     public bool ForcePeace { get; private set; }
     /// <summary>Боевой режим для анимаций: удар/блок/заряд/враг рядом, либо linger после этого. False при ForcePeace.</summary>
     public bool IsInCombat { get; private set; }
@@ -126,9 +136,6 @@ public class CombatController3D : MonoBehaviour
     private float _comboExpire;
     private PlayerMovement3D movement;
 
-    private bool _pendingAttack;
-    private float _pendingFireTime;
-    private bool _pendingIsBlockAttack;
     private bool _dodgeAttackPerfectFlag;
     private bool _fromLowStance;
     private bool _isHeavyAttack;
@@ -140,7 +147,21 @@ public class CombatController3D : MonoBehaviour
     private bool _canStickThisAttack;
     private Vector3 _stuckAttackDir;
 
-    enum AttackMoveMode { None, Stop, TurnStrike, SideStrike }
+    // Подготовленный удар: анимация уже стартовала, хитбокс ждёт конца windup
+    private struct PreparedAttack
+    {
+        public bool isRanged;
+        public float range, radius, height, damage, stagger;
+        public float cone, dur, tick, charge;
+        public Vector3 offset, dir;
+        public LayerMask layers;
+        public int combo;
+        public HitInfo info;
+    }
+    private PreparedAttack _prep;
+    private bool _hitPrepared;
+
+    enum AttackMoveMode { None, Stop, TurnStrike }
     private AttackMoveMode _attackMoveMode;
 
     private float _peaceHoldTimer;
@@ -174,6 +195,7 @@ public class CombatController3D : MonoBehaviour
         if (movement == null) movement = GetComponent<PlayerMovement3D>();
         if (targeting == null) targeting = GetComponent<PlayerTargeting>();
         if (stance == null) stance = GetComponent<PlayerStance>();
+        if (weaponVisual == null) weaponVisual = GetComponent<WeaponVisual>();
 
         if (targeting == null)
             Debug.LogError("[CombatController3D] Нет PlayerTargeting на объекте. Добавь компонент.");
@@ -182,6 +204,8 @@ public class CombatController3D : MonoBehaviour
 
         CacheAnimParams();
         SetB("Armed", IsArmed);
+        SetB("ShieldArmed", IsShieldArmed);
+        ApplyWeaponVisualsImmediate();
 
         if (hitbox != null)
             hitbox.onHit += OnWeaponHit;
@@ -216,8 +240,10 @@ public class CombatController3D : MonoBehaviour
 
     private void SetTrig(string name)
     {
-        if (animator != null && _animParams != null && _animParams.Contains(name))
-            animator.SetTrigger(name);
+        if (animator == null || _animParams == null || !_animParams.Contains(name)) return;
+        // Сброс, чтобы повторный вызов того же триггера не залипал
+        animator.ResetTrigger(name);
+        animator.SetTrigger(name);
     }
 
     private void SetB(string name, bool value)
@@ -233,8 +259,9 @@ public class CombatController3D : MonoBehaviour
 
         TickPeaceHold();
         TickCombatState();
+        TickWeaponToggleInput();
 
-        // Парирование — только с оружием в руках
+        // Парирование — только с мечом в руках
         if (IsParrying && Time.time >= _parryEndTime) IsParrying = false;
         if (IsArmed && Input.GetKeyDown(parryKey) && Time.time >= _parryReadyTime)
         {
@@ -270,14 +297,20 @@ public class CombatController3D : MonoBehaviour
         if (IsAttacking)
         {
             stateTimer -= Time.deltaTime;
-            if (stateTimer <= 0f) EndAttack();
-            return;
-        }
-
-        if (_pendingAttack)
-        {
-            IsWindingUp = true;
-            if (Time.time >= _pendingFireTime) FirePendingAttack();
+            if (stateTimer <= 0f)
+            {
+                // Конец замаха → окно урона (анимация уже играет с момента Commit)
+                if (IsWindingUp)
+                {
+                    IsWindingUp = false;
+                    ActivatePreparedHitbox();
+                    stateTimer = _prep.dur > 0f ? _prep.dur : 0.2f;
+                }
+                else
+                {
+                    EndAttack();
+                }
+            }
             return;
         }
 
@@ -309,8 +342,8 @@ public class CombatController3D : MonoBehaviour
             return;
         }
 
-        // Блок — только с оружием в руках
-        bool wantsBlock = IsArmed && Input.GetKey(blockKey) && loadout != null && loadout.HasShield();
+        // Блок — только если щит в руке
+        bool wantsBlock = IsShieldArmed && Input.GetKey(blockKey) && loadout != null && loadout.HasShield();
         IsBlocking = wantsBlock;
         SetB("ShieldBlock", wantsBlock);
 
@@ -335,9 +368,14 @@ public class CombatController3D : MonoBehaviour
             return;
         }
 
-        // Обычная атака (ЛКМ — hold/charge)
+        // Обычная атака (ЛКМ — hold/charge). Если меч убран — только достаём, без удара.
         if (Input.GetMouseButtonDown(0))
         {
+            if (!IsArmed)
+            {
+                DrawAll();
+                return;
+            }
             currentWeapon = loadout != null ? loadout.GetMainWeapon() : null;
             if (currentWeapon == null) return;
             if (resources != null && resources.HasStamina(currentWeapon.staminaCost * 0.5f))
@@ -345,87 +383,100 @@ public class CombatController3D : MonoBehaviour
         }
     }
 
-    void TryStartThrust()
+    bool TrySpendStamina(float cost)
     {
-        if (!IsArmed || IsAttacking || IsCharging || _pendingAttack) return;
-        currentWeapon = loadout != null ? loadout.GetMainWeapon() : null;
-        if (currentWeapon == null) return;
-        if (resources != null && !resources.HasStamina(currentWeapon.staminaCost * 0.5f)) return;
-        if (resources != null) resources.SpendStamina(currentWeapon.staminaCost * 0.5f);
+        if (resources == null) return true;
+        if (!resources.HasStamina(cost)) return false;
+        resources.SpendStamina(cost);
+        return true;
+    }
 
+    void PrepareLightAttack()
+    {
         DrawWeapon();
         ChargePercent = currentWeapon.minChargePercent;
         _isHeavyAttack = false;
         _fromLowStance = CurrentStance == CombatStance.Low;
         SampleAttackMoveMode();
-        ExecuteAttack(fromBlock: false, forcedForm: AttackForm.Thrust);
+    }
+
+    void TryStartThrust()
+    {
+        if (IsAttacking || IsCharging) return;
+        if (!IsArmed)
+        {
+            DrawAll();
+            return;
+        }
+        currentWeapon = loadout != null ? loadout.GetMainWeapon() : null;
+        if (currentWeapon == null) return;
+        if (!TrySpendStamina(currentWeapon.staminaCost * 0.5f)) return;
+
+        ChargePercent = currentWeapon.minChargePercent;
+        _isHeavyAttack = false;
+        _fromLowStance = CurrentStance == CombatStance.Low;
+        SampleAttackMoveMode();
+        BeginWindupThenAttack(fromBlock: false, forcedForm: AttackForm.Thrust);
     }
 
     void StartBlockAttack()
     {
         currentWeapon = loadout != null ? loadout.GetMainWeapon() : null;
         if (currentWeapon == null) return;
+        if (!TrySpendStamina(currentWeapon.staminaCost * 0.5f * blockAttackStaminaMult)) return;
 
-        float cost = currentWeapon.staminaCost * 0.5f * blockAttackStaminaMult;
-        if (resources == null || !resources.HasStamina(cost)) return;
-        resources.SpendStamina(cost);
-
-        DrawWeapon();
-        ChargePercent = currentWeapon.minChargePercent;
-        _isHeavyAttack = false;
-        _fromLowStance = CurrentStance == CombatStance.Low;
-        SampleAttackMoveMode();
-
-        if (blockAttackWindup <= 0f)
-        {
-            ExecuteAttack(fromBlock: true);
-            return;
-        }
-
-        _pendingAttack = true;
-        _pendingIsBlockAttack = true;
-        _pendingFireTime = Time.time + blockAttackWindup;
-        if (hitbox != null && hitbox.visual != null) hitbox.visual.ShowWindup();
+        PrepareLightAttack();
+        BeginWindupThenAttack(fromBlock: true, windupOverride: blockAttackWindup);
     }
 
     void StartDodgeAttack()
     {
         currentWeapon = loadout != null ? loadout.GetMainWeapon() : null;
         if (currentWeapon == null) return;
-        if (resources == null || !resources.HasStamina(currentWeapon.staminaCost)) return;
-        resources.SpendStamina(currentWeapon.staminaCost);
+        if (!TrySpendStamina(currentWeapon.staminaCost)) return;
 
-        DrawWeapon();
+        PrepareLightAttack();
         float progress = movement.IsDodging ? movement.DodgeProgress01 : 1f;
         float windup = Mathf.Max(dodgeAttackMinWindup,
             Mathf.Lerp(currentWeapon.chargeDuration, dodgeAttackMinWindup, progress));
-
-        _pendingAttack = true;
-        _pendingIsBlockAttack = false;
-        _pendingFireTime = Time.time + windup;
-        _isHeavyAttack = false;
-        _fromLowStance = CurrentStance == CombatStance.Low;
-        SampleAttackMoveMode();
-    }
-
-    void FirePendingAttack()
-    {
-        _pendingAttack = false;
-        if (hitbox != null && hitbox.visual != null) hitbox.visual.HideWindup();
-
-        if (_pendingIsBlockAttack)
-        {
-            _pendingIsBlockAttack = false;
-            ExecuteAttack(fromBlock: true);
-            return;
-        }
 
         _dodgeAttackPerfectFlag = movement != null &&
             ((movement.IsDodging && movement.DodgeTimeRemaining <= dodgeAttackPerfectTolerance) ||
              (!movement.IsDodging && movement.TimeSinceDodgeEnd <= dodgeAttackPerfectTolerance));
 
-        ChargePercent = currentWeapon != null ? currentWeapon.minChargePercent : 0.3f;
-        ExecuteAttack(fromBlock: false);
+        BeginWindupThenAttack(fromBlock: false, windupOverride: windup);
+    }
+
+    /// <summary>
+    /// Как у волков: сразу стартует анимация замаха, урон (хитбокс) — только после windup.
+    /// windup из WeaponData (или override для блока/уворота); в стойке укорочен stanceSpeedBonus.
+    /// </summary>
+    void BeginWindupThenAttack(bool fromBlock, AttackForm? forcedForm = null, float? windupOverride = null)
+    {
+        float windup = windupOverride ?? (currentWeapon != null ? currentWeapon.windupDuration : 0.15f);
+        if (!windupOverride.HasValue)
+        {
+            bool stanceMatch = (CurrentStance == CombatStance.High && !_isHeavyAttack)
+                            || (CurrentStance == CombatStance.Low && (_isHeavyAttack || _fromLowStance));
+            if (stanceMatch) windup *= stanceSpeedBonus;
+        }
+
+        // Анимация + расчёт удара — СРАЗУ
+        CommitSwing(fromBlock, forcedForm);
+        _comboExpire = Time.time + windup + _prep.dur + comboWindow;
+
+        if (windup <= 0f)
+        {
+            IsWindingUp = false;
+            ActivatePreparedHitbox();
+            stateTimer = _prep.dur > 0f ? _prep.dur : 0.2f;
+            return;
+        }
+
+        // Ждём конец замаха, потом ActivatePreparedHitbox в Update
+        IsWindingUp = true;
+        stateTimer = windup;
+        if (hitbox != null && hitbox.visual != null) hitbox.visual.ShowWindup();
     }
 
     void CancelCharge()
@@ -559,18 +610,9 @@ public class CombatController3D : MonoBehaviour
         _attackMoveMode = AttackMoveMode.None;
         if (!Input.GetKey(KeyCode.LeftShift)) return;
 
-        float h = Input.GetAxisRaw("Horizontal");
         float v = Input.GetAxisRaw("Vertical");
-
-        if (Mathf.Abs(v) >= Mathf.Abs(h))
-        {
-            if (v > 0.1f) _attackMoveMode = AttackMoveMode.Stop;
-            else if (v < -0.1f) _attackMoveMode = AttackMoveMode.TurnStrike;
-        }
-        else if (Mathf.Abs(h) > 0.1f)
-        {
-            _attackMoveMode = AttackMoveMode.SideStrike;
-        }
+        if (v > 0.1f) _attackMoveMode = AttackMoveMode.Stop;
+        else if (v < -0.1f) _attackMoveMode = AttackMoveMode.TurnStrike;
     }
 
     void ApplyAttackMoveMode()
@@ -646,34 +688,34 @@ public class CombatController3D : MonoBehaviour
         float cost = Mathf.Lerp(currentWeapon.staminaCost * 0.5f, currentWeapon.staminaCost, ChargePercent);
         if (resources != null) resources.SpendStamina(cost);
 
-        ExecuteAttack(fromBlock: false);
+        BeginWindupThenAttack(fromBlock: false);
     }
 
-    void ExecuteAttack(bool fromBlock, AttackForm? forcedForm = null)
+    /// <summary>
+    /// Старт удара: выбор формы, триггер анимации, расчёт урона. Хитбокс НЕ активируется.
+    /// </summary>
+    void CommitSwing(bool fromBlock, AttackForm? forcedForm = null)
     {
-        IsWindingUp = false;
         IsAttacking = true;
 
         float dur = currentWeapon != null ? currentWeapon.attackDuration : 0.2f;
         bool stanceMatch = (CurrentStance == CombatStance.High && !_isHeavyAttack)
                         || (CurrentStance == CombatStance.Low && (_isHeavyAttack || _fromLowStance));
         if (stanceMatch) dur *= stanceSpeedBonus;
-        stateTimer = dur;
 
         bool wasInCombo = Time.time <= _comboExpire;
         _combo = wasInCombo ? _combo + 1 : 0;
+        // окно комбо считает и замах, и active — Expire обновим после windup в Begin, тут запасной
         _comboExpire = Time.time + dur + comboWindow;
 
-        // Heavy + ThrustLine без forced → укол; иначе обычный ChooseAttackForm
         AttackForm form;
         if (forcedForm.HasValue)
             form = forcedForm.Value;
         else if (_isHeavyAttack && _pendingIntent == HitIntent.ThrustLine)
             form = AttackForm.Thrust;
         else
-            form = ChooseAttackForm(wasInCombo, null);
+            form = ChooseAttackForm(wasInCombo);
 
-        // Bypass: сторона по последнему шагу, если есть
         if (_isHeavyAttack && _pendingIntent == HitIntent.Bypass && _stepCount > 0)
         {
             StepSample last = _stepCount >= 2 ? _step1 : _step0;
@@ -688,16 +730,25 @@ public class CombatController3D : MonoBehaviour
             AttackForm.SlashLeft => "AttackLeft",
             _ => "AttackRight"
         };
-        SetTrig(trig);
+        SetTrig(trig); // анимация замаха — СРАЗУ
 
         _canStickThisAttack = weaponStuckDuration > 0f;
         _stuckAttackDir = GetAttackDirection();
 
-        if (currentWeapon != null && currentWeapon.isRanged)
+        _prep = new PreparedAttack
         {
-            ExecuteRangedAttack(ChargePercent > 0 ? ChargePercent : 1f);
+            dur = dur,
+            charge = ChargePercent,
+            combo = _combo,
+            isRanged = currentWeapon != null && currentWeapon.isRanged
+        };
+        _hitPrepared = true;
+
+        if (_prep.isRanged)
+        {
+            // ranged — выстрел в момент active
         }
-        else if (hitbox != null && currentWeapon != null)
+        else if (currentWeapon != null)
         {
             float damageMult;
             float staggerMult;
@@ -730,7 +781,6 @@ public class CombatController3D : MonoBehaviour
                 cone = 18f;
             }
 
-            // Обход — длиннее и чуть шире
             if (_isHeavyAttack && _pendingIntent == HitIntent.Bypass)
             {
                 range *= 1.2f;
@@ -742,19 +792,15 @@ public class CombatController3D : MonoBehaviour
 
             float damage = currentWeapon.damage * damageMult;
             damage += ComputeMomentumBonus();
-            // скорость шага в силу: если есть шаги и движение — доп. кусок momentum
             if (_isHeavyAttack && _stepCount > 0 && movement != null)
                 damage += movement.CurrentSpeed * (resources != null ? resources.mass : 80f) * movementDamageCoefficient * (_pendingStepBoost ? 1.5f : 1f);
 
             ApplyAttackMoveMode();
             ApplyFootworkStep(form);
 
-            if (_isHeavyAttack && !fromBlock && _pendingIntent == HitIntent.ThrustLine)
-                TryLunge();
-            else if (_isHeavyAttack && !fromBlock)
+            if (_isHeavyAttack && !fromBlock)
                 TryLunge();
 
-            // Зона для light: торс; slash по стороне → рука
             BodyZone zone = _pendingZone;
             if (!_isHeavyAttack)
             {
@@ -770,13 +816,24 @@ public class CombatController3D : MonoBehaviour
             if (_pendingStepBoost) penScore *= 1.15f;
             if (form == AttackForm.Thrust) penScore *= 1.2f;
 
-            var info = new HitInfo
+            _prep.range = range;
+            _prep.radius = radius;
+            _prep.height = currentWeapon.attackHeight;
+            _prep.offset = currentWeapon.hitboxOffset;
+            _prep.dir = GetAttackDirection();
+            _prep.damage = damage;
+            _prep.stagger = currentWeapon.staggerForce * staggerMult;
+            _prep.layers = currentWeapon.targetLayers;
+            _prep.tick = currentWeapon.tickInterval;
+            _prep.cone = cone;
+
+            _prep.info = new HitInfo
             {
                 rawDamage = damage,
                 finalDamage = damage,
-                stagger = currentWeapon.staggerForce * staggerMult,
+                stagger = _prep.stagger,
                 sourcePosition = transform.position,
-                hitDirection = GetAttackDirection(),
+                hitDirection = _prep.dir,
                 zone = zone,
                 intent = _isHeavyAttack ? _pendingIntent : HitIntent.Neutral,
                 isHeavy = _isHeavyAttack,
@@ -785,26 +842,8 @@ public class CombatController3D : MonoBehaviour
                 penetrationScore = penScore,
                 weaponPenetration = pen
             };
-            hitbox.SetHitInfo(info);
-
-            hitbox.Activate(
-                range,
-                radius,
-                currentWeapon.attackHeight,
-                currentWeapon.hitboxOffset,
-                GetAttackDirection(),
-                damage,
-                currentWeapon.staggerForce * staggerMult,
-                currentWeapon.targetLayers,
-                dur,
-                currentWeapon.tickInterval,
-                ChargePercent,
-                _combo,
-                cone
-            );
         }
 
-        // Переход стойки после удара — те же триггеры EnterHigh / EnterLow
         if (stance != null)
         {
             if (_isHeavyAttack)
@@ -820,11 +859,50 @@ public class CombatController3D : MonoBehaviour
         ClearStepBuffer();
     }
 
-    AttackForm ChooseAttackForm(bool wasInCombo, AttackForm? forced = null)
+    /// <summary>
+    /// Конец замаха: включаем хитбокс / выстрел. Дуга атаки рисуется здесь.
+    /// </summary>
+    void ActivatePreparedHitbox()
     {
-        if (forced.HasValue)
-            return forced.Value;
+        if (!_hitPrepared) return;
+        _hitPrepared = false;
 
+        if (hitbox != null && hitbox.visual != null)
+            hitbox.visual.HideWindup();
+
+        if (_prep.isRanged)
+        {
+            ExecuteRangedAttack(_prep.charge > 0f ? _prep.charge : 1f);
+            return;
+        }
+
+        if (hitbox == null || currentWeapon == null) return;
+
+        // направление/источник на момент удара (игрок мог чуть сдвинуться за замах)
+        _prep.dir = GetAttackDirection();
+        _prep.info.sourcePosition = transform.position;
+        _prep.info.hitDirection = _prep.dir;
+
+        hitbox.SetHitInfo(_prep.info);
+        hitbox.Activate(
+            _prep.range,
+            _prep.radius,
+            _prep.height,
+            _prep.offset,
+            _prep.dir,
+            _prep.damage,
+            _prep.stagger,
+            _prep.layers,
+            _prep.dur,
+            _prep.tick,
+            _prep.charge,
+            _prep.combo,
+            _prep.cone
+        );
+    }
+
+    AttackForm ChooseAttackForm(bool wasInCombo)
+    {
         Transform aim = NearTarget != null ? NearTarget
             : (targeting != null && targeting.AutoTarget != null ? targeting.AutoTarget : currentTarget);
 
@@ -911,13 +989,15 @@ public class CombatController3D : MonoBehaviour
     {
         IsAttacking = false;
         IsWindingUp = false;
+        _hitPrepared = false;
         if (targeting != null) targeting.ClearAutoTarget();
         _canStickThisAttack = false;
+        if (hitbox != null && hitbox.visual != null) hitbox.visual.HideWindup();
     }
 
     void TickPeaceHold()
     {
-        if (IsAttacking || _pendingAttack)
+        if (IsAttacking)
         {
             _peaceHoldTimer = 0f;
             return;
@@ -942,15 +1022,14 @@ public class CombatController3D : MonoBehaviour
             return;
         }
 
-        bool active = IsArmed &&
-                      (NearTarget != null || IsCharging || IsAttacking || IsBlocking || IsWindingUp || _pendingAttack);
+        bool active = IsArmed && (NearTarget != null || IsInAttackPipeline || IsBlocking);
         if (active)
             _combatLingerUntil = Time.time + combatLingerSeconds;
 
         IsInCombat = IsArmed && Time.time < _combatLingerUntil;
     }
 
-    /// <summary>Удержание 1 ≥ 1.5с: убрать оружие, сброс лока, мирный режим до следующей атаки.</summary>
+    /// <summary>Принудительный мирный режим: убрать всё, сброс лока.</summary>
     public void EnterForcePeace()
     {
         _peaceHoldTimer = 0f;
@@ -958,29 +1037,57 @@ public class CombatController3D : MonoBehaviour
         IsInCombat = false;
         _combatLingerUntil = 0f;
         if (IsCharging) CancelCharge();
-        IsArmed = false;
+        SheathAll();
         if (stance != null) stance.ResetToNeutral();
         if (targeting != null)
         {
             targeting.ClearTarget();
             targeting.ClearAutoTarget();
         }
-        IsBlocking = false;
-        SetB("ShieldBlock", false);
-        SetB("Armed", false);
         SetB("Combat", false);
-        SetTrig("Sheath");
         SetTrig("ToPeace");
     }
 
-    public void ToggleArmed()
+    void TickWeaponToggleInput()
     {
-        if (IsArmed) SheathWeapon();
-        else DrawWeapon();
+        if (IsAttacking) return;
+
+        if (Input.GetKeyDown(swordToggleKey))
+            ToggleSword();
+
+        if (Input.GetKeyDown(shieldToggleKey))
+            ToggleShield();
+
+        if (Input.GetKeyDown(sheathKey))
+            SheathAll();
     }
 
-    /// <summary>Убрать оружие: сброс лока, стойки, заряда. Combat-анимки гаснут через IsArmed.</summary>
-    public void SheathWeapon()
+    public void ToggleSword()
+    {
+        if (IsArmed) SheathSword();
+        else DrawSword();
+    }
+
+    public void ToggleShield()
+    {
+        if (IsShieldArmed) SheathShield();
+        else DrawShield();
+    }
+
+    /// <summary>Достать меч (правая рука). Снимает ForcePeace. Мгновенно по нажатию.</summary>
+    public void DrawSword()
+    {
+        ForcePeace = false;
+        if (IsArmed) return;
+        CancelInvoke(nameof(ApplySheathSwordVisual));
+        IsArmed = true;
+        SetB("Armed", true);
+        SetTrig("Draw");
+        if (weaponVisual != null) weaponVisual.SetSwordDrawn();
+    }
+
+    /// <summary>Убрать меч в ножны. Визуал меняется через sheathVisualDelay (по умолчанию 1 сек).</summary>
+    public void SheathSword()
     {
         if (!IsArmed) return;
         if (IsCharging) CancelCharge();
@@ -991,20 +1098,72 @@ public class CombatController3D : MonoBehaviour
             targeting.ClearTarget();
             targeting.ClearAutoTarget();
         }
-        IsBlocking = false;
-        SetB("ShieldBlock", false);
         SetB("Armed", false);
         SetTrig("Sheath");
+        CancelInvoke(nameof(ApplySheathSwordVisual));
+        Invoke(nameof(ApplySheathSwordVisual), sheathVisualDelay);
     }
 
-    /// <summary>Достать оружие. Атака/блок сами вызывают, если было убрано. Снимает ForcePeace.</summary>
-    public void DrawWeapon()
+    void ApplySheathSwordVisual()
     {
-        ForcePeace = false;
-        if (IsArmed) return;
-        IsArmed = true;
-        SetB("Armed", true);
-        SetTrig("Draw");
+        if (weaponVisual != null) weaponVisual.SetSwordSheathed();
+    }
+
+    /// <summary>Достать щит (левая рука). Мгновенно.</summary>
+    public void DrawShield()
+    {
+        if (IsShieldArmed) return;
+        CancelInvoke(nameof(ApplySheathShieldVisual));
+        IsShieldArmed = true;
+        SetB("ShieldArmed", true);
+        SetTrig("DrawShield");
+        if (weaponVisual != null) weaponVisual.SetShieldDrawn();
+    }
+
+    /// <summary>Убрать щит. Визуал меняется через sheathVisualDelay (1 сек).</summary>
+    public void SheathShield()
+    {
+        if (!IsShieldArmed) return;
+        IsShieldArmed = false;
+        IsBlocking = false;
+        SetB("ShieldBlock", false);
+        SetB("ShieldArmed", false);
+        SetTrig("SheathShield");
+        CancelInvoke(nameof(ApplySheathShieldVisual));
+        Invoke(nameof(ApplySheathShieldVisual), sheathVisualDelay);
+    }
+
+    void ApplySheathShieldVisual()
+    {
+        if (weaponVisual != null) weaponVisual.SetShieldSheathed();
+    }
+
+    /// <summary>Достать всё (меч + щит). Используется при атаке, если оружие было убрано.</summary>
+    public void DrawAll()
+    {
+        DrawShield();
+        DrawSword();
+    }
+
+    /// <summary>Убрать всё (R).</summary>
+    public void SheathAll()
+    {
+        SheathSword();
+        SheathShield();
+    }
+
+    // Совместимость со старым API
+    public void ToggleArmed() => ToggleSword();
+    public void DrawWeapon() => DrawSword();
+    public void SheathWeapon() => SheathSword();
+
+    void ApplyWeaponVisualsImmediate()
+    {
+        if (weaponVisual == null) return;
+        if (IsArmed) weaponVisual.SetSwordDrawn();
+        else weaponVisual.SetSwordSheathed();
+        if (IsShieldArmed) weaponVisual.SetShieldDrawn();
+        else weaponVisual.SetShieldSheathed();
     }
 
     Vector3 GetAttackDirection()

@@ -65,8 +65,6 @@ public class WerewolfCombat : MonoBehaviour
     public WeaponHitbox hitbox;
     [Tooltip("Параметры оборотня (стамина). Пусто — найдётся на волке.")]
     public WerewolfStats stats;
-    [Tooltip("Аниматор волка (опционально — пока нет, оставь пустым). Триггеры: Jump/Swipe/Special в начале замаха.")]
-    public Animator animator;
 
     [Header("Цель урона")]
     [Tooltip("Слой(и), по которым бьёт волк. Поставь слой игрока.")]

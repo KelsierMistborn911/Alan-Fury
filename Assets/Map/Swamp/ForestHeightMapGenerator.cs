@@ -1,89 +1,113 @@
-// ForestHeightMapGenerator v1.0
-// Плоский лес: база 0, поверх — вложенные широкие плато с очень низкими уступами.
-// Воды нет: минимум карты = 0, TerrainZoneSystem считает водой только height < 0.
-// Порядок: шум -> пороги по квантилям -> квантование -> чистка рванины и мелких пятен.
+// ForestHeightMapGenerator v1.3 — простые настройки
+// Лесной рельеф: крупные плато + макро 5×5 и ступенчатые переходы (база v3.1).
 using UnityEngine;
 
 /// <summary>
-/// Генератор рельефа леса. Крупный низкочастотный шум режется на уровни по квантилям:
-/// каждый следующий уровень занимает долю площади предыдущего (levelFalloff), поэтому
-/// верхние плато редкие и лежат внутри нижних — как контурные линии на карте.
-/// Высота уровня i = i * terraceStep (terraceStep унаследован от базы).
+/// Карта высот леса: плоские площадки разных уровней, ступени между ними.
+/// Три ручки: размер площадок, число уровней, холмистость.
 /// </summary>
 public class ForestHeightMapGenerator : HeightMapGenerator
 {
-    [Header("Плато")]
-    [Tooltip("Сколько уровней над базовым. Высоты: 0, terraceStep, 2*terraceStep ... maxSteps*terraceStep.")]
-    public int maxSteps = 4;
+    public const string ForestVersion = "1.3";
 
-    [Tooltip("Крупность пятен. Умножается на мировые координаты: меньше = шире и реже плато.")]
-    public float plateauScale = 0.008f;
+    [Header("Рельеф")]
+    [Tooltip("Крупность площадок. Больше = шире плоские зоны (примерно в клетках макро).")]
+    [Range(20f, 200f)] public float plateauSize = 80f;
 
-    [Range(0f, 1f)]
-    [Tooltip("Доля карты выше базового уровня (первый уступ).")]
-    public float firstLevelFraction = 0.35f;
+    [Tooltip("Сколько ступеней высоты (1 = почти плоско, 4–5 = заметный рельеф).")]
+    [Range(1, 6)] public int heightLevels = 4;
 
-    [Range(0.05f, 1f)]
-    [Tooltip("Каждый следующий уровень занимает эту долю площади предыдущего. 0.4 = сужение вчетверо к верху.")]
-    public float levelFalloff = 0.4f;
+    [Tooltip("0 = больше низких площадок, 1 = больше высоких.")]
+    [Range(0f, 1f)] public float hilliness = 0.45f;
 
     protected override void BuildHeights(float tileSize)
     {
-        maxHeight = terraceStep * Mathf.Max(1, maxSteps); // держим верх диапазона в согласии с реальным рельефом
-
-        BuildPlateaus(tileSize);
-        FlattenMinorSteps();   // подчищает зубцы на границах плато
+        FillPlateauLevels();
+        ApplyTerraces();
+        FlattenMinorSteps();
         CleanupSmallClusters();
+        ApplyMacroBlocksAndTransitions();
+    }
+
+    private void FillPlateauLevels()
+    {
+        float stepH = terraceStep > 0f ? terraceStep : 1f;
+        int levels = Mathf.Max(1, heightLevels);
+
+        // Пороги от hilliness: низкий hilliness → длинный низ, высокий → больше верхних уровней
+        float[] thresholds = BuildThresholds(levels, hilliness);
+
+        // plateauSize в «клетках шума»: scale = 1/size
+        float scale = 1f / Mathf.Max(8f, plateauSize);
+
+        int m = Mathf.Max(1, macroSize);
+        int mw = Mathf.CeilToInt((float)width / m);
+        int md = Mathf.CeilToInt((float)depth / m);
+
+        float ox = (seed % 997) * 0.13f;
+        float oz = (seed % 991) * 0.17f;
+
+        for (int mx = 0; mx < mw; mx++)
+        {
+            for (int mz = 0; mz < md; mz++)
+            {
+                float cx = mx * m + m * 0.5f;
+                float cz = mz * m + m * 0.5f;
+
+                float n = Mathf.PerlinNoise((cx + ox) * scale, (cz + oz) * scale);
+
+                int level = 0;
+                for (int i = 0; i < levels; i++)
+                {
+                    if (n <= thresholds[i]) { level = i; break; }
+                    level = i;
+                }
+
+                float h = level * stepH;
+
+                int x0 = mx * m;
+                int z0 = mz * m;
+                int x1 = Mathf.Min(x0 + m, width);
+                int z1 = Mathf.Min(z0 + m, depth);
+                for (int x = x0; x < x1; x++)
+                    for (int z = z0; z < z1; z++)
+                        heightMap[x, z] = h;
+            }
+        }
     }
 
     /// <summary>
-    /// Считает шум по всем клеткам, набирает пороги по квантилям (площадь каждого следующего
-    /// уровня = levelFalloff от предыдущего) и присваивает клетке высоту = число пройденных порогов.
-    /// Квантили вместо фиксированных порогов — доля площади держится одинаковой при любом сиде.
+    /// thresholds[i] — верхняя граница шума для уровня i.
+    /// hilliness сдвигает массу в сторону высоких уровней.
     /// </summary>
-    private void BuildPlateaus(float tileSize)
+    private static float[] BuildThresholds(int levels, float hilliness)
     {
-        Vector3 origin = MapOrigin(tileSize);
-        float seedOffset = seed * 0.17f;
-
-        // 1) шум по всем клеткам + копия для сортировки
-        float[,] noise = new float[width, depth];
-        float[] sorted = new float[width * depth];
-        int idx = 0;
-        for (int x = 0; x < width; x++)
-            for (int z = 0; z < depth; z++)
-            {
-                float wx = origin.x + x * tileSize;
-                float wz = origin.z + z * tileSize;
-                float n = Mathf.PerlinNoise(wx * plateauScale + seedOffset, wz * plateauScale + seedOffset);
-                noise[x, z] = n;
-                sorted[idx++] = n;
-            }
-        System.Array.Sort(sorted);
-
-        // 2) пороги: доля площади сужается на каждом уровне
-        int levels = Mathf.Max(1, maxSteps);
-        float[] thresholds = new float[levels];
-        float frac = Mathf.Clamp01(firstLevelFraction);
+        var t = new float[levels];
+        // базовое распределение: больше низа
+        float lowBias = Mathf.Lerp(0.55f, 0.2f, hilliness);
+        float remain = 1f;
+        float acc = 0f;
         for (int i = 0; i < levels; i++)
         {
-            int qi = Mathf.Clamp(Mathf.RoundToInt((1f - frac) * (sorted.Length - 1)), 0, sorted.Length - 1);
-            thresholds[i] = sorted[qi];
-            frac *= Mathf.Clamp(levelFalloff, 0.05f, 1f);
-        }
-
-        // 3) высота = число пройденных порогов * шаг
-        for (int x = 0; x < width; x++)
-            for (int z = 0; z < depth; z++)
+            float w;
+            if (i == 0)
+                w = lowBias;
+            else
             {
-                float n = noise[x, z];
-                int step = 0;
-                for (int i = 0; i < levels; i++)
-                {
-                    if (n < thresholds[i]) break;
-                    step++;
-                }
-                heightMap[x, z] = step * terraceStep;
+                // оставшиеся уровни — почти равномерно, чуть сжимая верх при низком hilliness
+                float topSqueeze = Mathf.Lerp(1.2f, 0.7f, hilliness);
+                float idx = (i) / (float)(levels - 1);
+                w = (1f - lowBias) / (levels - 1) * Mathf.Lerp(1f, topSqueeze, idx);
             }
+            acc += w;
+            t[i] = acc;
+            remain -= w;
+        }
+        // нормализация к 1
+        float last = Mathf.Max(t[levels - 1], 1e-4f);
+        for (int i = 0; i < levels; i++)
+            t[i] = Mathf.Clamp01(t[i] / last);
+        t[levels - 1] = 1f;
+        return t;
     }
 }

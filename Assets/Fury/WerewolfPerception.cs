@@ -11,8 +11,6 @@ public class WerewolfPerception : MonoBehaviour
     [Header("Игрок (текущая цель)")]
     [Tooltip("Не единственный герой мира — выбранная цель из PlayerRegistry (обычно nearest).")]
     public Transform player;
-    [Tooltip("Устарело: тег больше не используется. Цель только из PlayerRegistry.")]
-    public string playerTag = "";
 
     [Header("Угол обзора игрока")]
     [Tooltip("Половина конуса обзора (град). В пределах него игрок считается смотрящим на цель.")]
@@ -39,7 +37,7 @@ public class WerewolfPerception : MonoBehaviour
     public bool PlayerIsWindingUp => _playerCombat != null && _playerCombat.IsWindingUp;
     /// <summary>Игрок замахивается или уже бьёт — угроза для уворота.</summary>
     public bool PlayerThreatActive =>
-        PlayerIsWindingUp || PlayerIsCharging || PlayerIsAttacking;
+        _playerCombat != null && _playerCombat.IsInAttackPipeline;
 
     /// <summary>Дальность удара текущего оружия игрока (м); 2, если оружие не найдено.</summary>
     public float PlayerWeaponRange

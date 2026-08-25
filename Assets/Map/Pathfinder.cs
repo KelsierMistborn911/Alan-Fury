@@ -2,39 +2,24 @@ using UnityEngine;
 using System.Collections.Generic;
 
 /// <summary>
-/// Сетка проходимости по карте высот + поиск пути A* (8 соседей).
-/// Строится один раз после генерации террейна (деревья уже стоят).
-///
-/// Каждая клетка либо стена, либо проходима со своей стоимостью:
-///   - за краем карты клетки просто нет (граница = стена) → AI не может уйти за карту;
-///   - Physics.CheckBox попал в obstacleMask (слой деревьев) → стена;
-///   - вода (через TerrainZoneSystem) → проходима, но дороже (waterCostMultiplier) → объезжает, но может пройти.
-///
-/// Склон в стоимость не кладём: оборотень умеет перепрыгивать рельеф (WerewolfLocomotion).
+/// Сетка проходимости + A* (8 соседей). Читает MapGrid (Tree = стена) + опционально Physics.
+/// Строится после placement (деревья уже в MapGrid).
 ///
 /// API для AI:
-///   Build()                              — построить/перестроить сетку (зовёт TerrainManager).
-///   TryFindPath(from, to, result)        — путь мировыми точками (без стартовой клетки). false, если пути нет.
-///   NearestWalkableWorld(pos, out found) — ближайшая проходимая точка (подтягивает цель на карту/из стены).
-///   IsReady                              — готова ли сетка.
+///   Build() / TryFindPath / NearestWalkableWorld / IsReady
 /// </summary>
 public class Pathfinder : MonoBehaviour
 {
     [Header("Источники")]
     public HeightMapGenerator heightSource;
-    public TerrainZoneSystem zoneSystem;            // для воды (опционально)
-    public ChunkedTerrainBuilder chunkedBuilder;    // tileSize (приоритет)
-    public SeamlessTerrainBuilder seamlessBuilder;  // tileSize (запасной)
+    public ChunkedTerrainBuilder chunkedBuilder;
+    public MapGrid mapGrid;
 
     [Header("Препятствия")]
-    [Tooltip("Слои-препятствия (деревья). Клетка, где Physics.CheckBox их касается, становится стеной.")]
+    [Tooltip("Слои редких GO-препятствий. CheckBox по клетке (доп. к MapGrid).")]
     public LayerMask obstacleMask;
-    [Tooltip("Размер бокса проверки препятствия в клетке (м). XZ — ширина ствола, Y — высота проверки.")]
+    [Tooltip("Размер бокса проверки препятствия в клетке (м).")]
     public Vector3 checkBoxSize = new Vector3(2f, 4f, 2f);
-
-    [Header("Стоимости")]
-    [Tooltip("Во сколько раз дороже идти по воде. Выше = сильнее объезжает воду.")]
-    public float waterCostMultiplier = 4f;
 
     [Header("Поиск проходимой клетки")]
     [Tooltip("Макс. радиус (в клетках) поиска ближайшей проходимой клетки при подтяжке цели.")]
@@ -65,9 +50,8 @@ public class Pathfinder : MonoBehaviour
             return;
         }
 
-        if (zoneSystem == null) zoneSystem = GetComponent<TerrainZoneSystem>();
         if (chunkedBuilder == null) chunkedBuilder = GetComponent<ChunkedTerrainBuilder>();
-        if (seamlessBuilder == null) seamlessBuilder = GetComponent<SeamlessTerrainBuilder>();
+        if (mapGrid == null) mapGrid = GetComponent<MapGrid>();
 
         _w = heightSource.width;
         _d = heightSource.depth;
@@ -78,10 +62,10 @@ public class Pathfinder : MonoBehaviour
         _walkable = new bool[n];
         _cost = new float[n];
 
-        // Коллайдеры деревьев заспавнены в этом же прогоне — синхронизируем физику перед сканом.
         Physics.SyncTransforms();
-
         Vector3 half = checkBoxSize * 0.5f;
+        bool usePhysicsObstacles = obstacleMask != 0;
+        bool useGrid = mapGrid != null && mapGrid.IsReady;
 
         for (int x = 0; x < _w; x++)
         {
@@ -91,20 +75,19 @@ public class Pathfinder : MonoBehaviour
                 float h = heightSource.GetHeight(x, z);
                 Vector3 center = new Vector3(_origin.x + x * _ts, h + half.y, _origin.z + z * _ts);
 
-                bool blocked = Physics.CheckBox(center, half, Quaternion.identity,
-                                                obstacleMask, QueryTriggerInteraction.Ignore);
+                bool blocked = useGrid && mapGrid.IsBlocked(x, z);
+                if (!blocked && usePhysicsObstacles &&
+                    Physics.CheckBox(center, half, Quaternion.identity,
+                                     obstacleMask, QueryTriggerInteraction.Ignore))
+                    blocked = true;
 
                 _walkable[idx] = !blocked;
-
-                float c = 1f;
-                if (zoneSystem != null && zoneSystem.IsWaterAtCell(x, z))
-                    c = Mathf.Max(1f, waterCostMultiplier);
-                _cost[idx] = c;
+                _cost[idx] = useGrid ? mapGrid.GetCost(x, z) : 1f;
             }
         }
 
         _ready = true;
-        Debug.Log($"Pathfinder: сетка {_w}×{_d} построена (tileSize={_ts}).");
+        Debug.Log($"Pathfinder: сетка {_w}×{_d} (MapGrid={(useGrid ? "on" : "off")}, tileSize={_ts}).");
     }
 
     // ============ Поиск пути ============
@@ -274,7 +257,6 @@ public class Pathfinder : MonoBehaviour
     private float ResolveTileSize()
     {
         if (chunkedBuilder != null) return chunkedBuilder.tileSize;
-        if (seamlessBuilder != null) return seamlessBuilder.tileSize;
         return 4f;
     }
 

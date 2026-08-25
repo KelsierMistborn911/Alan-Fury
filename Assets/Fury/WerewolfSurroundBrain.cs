@@ -22,6 +22,7 @@ public class WerewolfSurroundBrain : MonoBehaviour
     public float preferredDistance = 32f;
     [Tooltip("Внутренний край полосы. Игрок ближе — волк отступает.")]
     public float minDistance = 20f;
+    [Tooltip("Только для Gizmo в редакторе. В логике не используется.")]
     public float noticeRange = 30f;
 
     [Header("Скорости (м/с)")]
@@ -84,17 +85,30 @@ public class WerewolfSurroundBrain : MonoBehaviour
 
         float dt = Time.deltaTime;
         float dist = perception.DistanceToPlayer;
+        var pack = WerewolfPackManager.Instance;
+        bool packScatter = pack != null && pack.IsPackScattering;
 
-        // Открытое окружение: на взгляд игрока не реагируем, отступаем только от сближения.
-        bool threatened = dist < minDistance;
+        // Срыв стаи — все жмут наружу; иначе отступаем только от сближения.
+        bool threatened = packScatter || dist < minDistance;
+
+        // Стойка: на месте / медленный hold → Biped (наблюдение);
+        // круг и отход/разбег → Quad (бег).
+        bool wantBiped = _state == State.Hold && !packScatter;
+        if (locomotion != null)
+        {
+            locomotion.SetStance(wantBiped
+                ? WerewolfLocomotion.Stance.Biped
+                : WerewolfLocomotion.Stance.Quad);
+            if (locomotion.IsChangingStance) return;
+        }
 
         switch (_state)
         {
             case State.Hold:
-                locomotion.FaceTowards(perception.PlayerPos, dt); // в паузе смотрим на игрока
+                if (packScatter) { EnterRetreat(); break; }
+                locomotion.FaceTowards(perception.PlayerPos, dt);
                 if (threatened) { EnterRetreat(); break; }
 
-                // Стоя на позиции волк всё равно отжимается от подошедших — иначе стая слипается.
                 Vector3 push = Separation();
                 if (push.sqrMagnitude > separationDeadzone * separationDeadzone)
                     locomotion.MoveTo(transform.position + push, circleSpeed, dt);
@@ -106,17 +120,25 @@ public class WerewolfSurroundBrain : MonoBehaviour
             case State.Circle:
                 if (threatened) { EnterRetreat(); break; }
                 bool arrived = locomotion.MoveTo(_target + Separation(), circleSpeed, dt);
-                locomotion.FaceTowards(_target, dt);              // смотрим по ходу
+                // Quad: морда по курсу; biped (на всякий) — можно на игрока.
+                if (locomotion.IsBiped) locomotion.FaceTowards(perception.PlayerPos, dt);
                 if (arrived) EnterHold();
                 break;
 
             case State.Retreat:
                 bool reached = locomotion.MoveTo(_target, fleeSpeed, dt);
-                locomotion.FaceTowards(_target, dt);              // смотрим куда бежим
-                if (!threatened) { EnterHold(); break; }
-                if (reached) _target = ComputeRetreatPoint();
+                if (!packScatter && !threatened) { EnterHold(); break; }
+                if (reached) _target = packScatter ? ComputeScatterPoint() : ComputeRetreatPoint();
                 break;
         }
+    }
+
+    // Дальняя точка разбега при срыве стаи (не просто +30% кольца).
+    private Vector3 ComputeScatterPoint()
+    {
+        Vector3 away = perception.DirFromPlayerFlat;
+        float radius = preferredDistance * Mathf.Max(retreatDistanceFactor, 1.6f);
+        return perception.PlayerPos + away * radius + Separation();
     }
 
     // ============ Переходы ============

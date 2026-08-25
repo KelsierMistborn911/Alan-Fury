@@ -12,21 +12,21 @@ AvatarMask:
   - m_Path: 
     m_Weight: 1
   - m_Path: AKER SWORD
-    m_Weight: 1
+    m_Weight: 0
   - m_Path: AKER_ARMOR
-    m_Weight: 1
+    m_Weight: 0
   - m_Path: AKER_BAG
-    m_Weight: 1
+    m_Weight: 0
   - m_Path: AKER_BASA
     m_Weight: 1
   - m_Path: AKER_BASA_ARMS
     m_Weight: 1
   - m_Path: AKER_BASA_CHEST
-    m_Weight: 1
+    m_Weight: 0
   - m_Path: AKER_BASA_FEET
     m_Weight: 1
   - m_Path: AKER_BASA_HEAD
-    m_Weight: 1
+    m_Weight: 0
   - m_Path: AKER_BASA_HipsL1
     m_Weight: 1
   - m_Path: AKER_BASA_HipsR5
@@ -34,15 +34,15 @@ AvatarMask:
   - m_Path: AKER_BASA_LEGS
     m_Weight: 1
   - m_Path: AKER_BASA_SHOULDERS
-    m_Weight: 1
+    m_Weight: 0
   - m_Path: AKER_BELT
     m_Weight: 1
   - m_Path: AKER_HELM
     m_Weight: 1
   - m_Path: AKER_HOOD
-    m_Weight: 1
+    m_Weight: 0
   - m_Path: AKER_SHIELD
-    m_Weight: 1
+    m_Weight: 0
   - m_Path: mixamorig:Hips
     m_Weight: 1
   - m_Path: mixamorig:Hips/mixamorig:LeftUpLeg

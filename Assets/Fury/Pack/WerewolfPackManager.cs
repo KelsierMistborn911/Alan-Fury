@@ -46,10 +46,12 @@ public class WerewolfPackManager : MonoBehaviour
     }
 
     [Header("Игрок (опорная цель стаи)")]
-    [Tooltip("Если пусто — nearest / primary из PlayerRegistry. Тег Player не используется.")]
+    [Tooltip("Если пусто — nearest / primary из PlayerRegistry.")]
     public Transform player;
-    [Tooltip("Устарело, не используется.")]
-    public string playerTag = "";
+
+    [Header("Навигация")]
+    [Tooltip("Общий Pathfinder карты. Раздаётся волкам и точкам призыва. Пусто — GetComponent на этом GO, иначе FindObjectOfType один раз.")]
+    public Pathfinder pathfinder;
 
     [Header("Спавн")]
     [Tooltip("Префаб волка (на нём WerewolfAttackBrain + WerewolfSurroundBrain + WerewolfCombat + локомоция/восприятие).")]
@@ -251,12 +253,24 @@ public class WerewolfPackManager : MonoBehaviour
         Instance = this;
 
         player = PlayerRegistry.ResolvePrimary();
+        ResolvePathfinder();
         _howlTimer = howlDelay; // отсчёт до воя стартует со сцены
+    }
+
+    private void ResolvePathfinder()
+    {
+        if (pathfinder != null) return;
+        pathfinder = GetComponent<Pathfinder>();
+        if (pathfinder == null) pathfinder = FindObjectOfType<Pathfinder>();
+        if (pathfinder == null)
+            Debug.LogWarning("WerewolfPackManager: Pathfinder не найден — волки без сетки путей.");
     }
 
     void OnDestroy()
     {
         if (Instance == this) Instance = null;
+        OnSlotGranted = null;
+        OnSlotRevoked = null;
     }
 
     // ===================== Регистрация (зовёт волк) =====================

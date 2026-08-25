@@ -1,7 +1,7 @@
 using UnityEngine;
 
 /// <summary>
-/// Триггер сбора растения (гриба). Создаётся SpriteVegetationPlacer'ом,
+/// Триггер сбора растения (гриба). Создаётся NaturePlacement / SpriteVegetationPlacer,
 /// вручную на сцену не вешается. Игрок в радиусе жмёт E — предмет уходит
 /// в Inventory, экземпляр убирается из инстансной отрисовки.
 /// </summary>
@@ -9,25 +9,50 @@ public class CollectablePlant : MonoBehaviour
 {
     public KeyCode collectKey = KeyCode.E;
 
-    private SpriteVegetationPlacer placer;
+    public interface IInstanceRemover
+    {
+        bool RemoveInstance(int typeIndex, Vector2Int sector, Vector3 worldPos);
+    }
+
+    private IInstanceRemover remover;
     private int typeIndex;
     private Vector2Int sector;
     private Vector3 worldPos;
     private ItemData itemData;
     private int itemCount;
 
-    private Inventory inventoryInRange; // инвентарь игрока, пока он в триггере
+    private Inventory inventoryInRange;
     private bool inventoryFull;
 
-    public void Init(SpriteVegetationPlacer placer, int typeIndex, Vector2Int sector,
+    public void Init(IInstanceRemover remover, int typeIndex, Vector2Int sector,
                      Vector3 worldPos, ItemData itemData, int itemCount)
     {
-        this.placer = placer;
+        this.remover = remover;
         this.typeIndex = typeIndex;
         this.sector = sector;
         this.worldPos = worldPos;
         this.itemData = itemData;
         this.itemCount = itemCount;
+    }
+
+    // Совместимость со старым SpriteVegetationPlacer
+    public void Init(SpriteVegetationPlacer placer, int typeIndex, Vector2Int sector,
+                     Vector3 worldPos, ItemData itemData, int itemCount)
+    {
+        this.remover = new SpriteRemoverAdapter(placer);
+        this.typeIndex = typeIndex;
+        this.sector = sector;
+        this.worldPos = worldPos;
+        this.itemData = itemData;
+        this.itemCount = itemCount;
+    }
+
+    private class SpriteRemoverAdapter : IInstanceRemover
+    {
+        private readonly SpriteVegetationPlacer _p;
+        public SpriteRemoverAdapter(SpriteVegetationPlacer p) { _p = p; }
+        public bool RemoveInstance(int typeIndex, Vector2Int sector, Vector3 worldPos)
+            => _p != null && _p.RemoveInstance(typeIndex, sector, worldPos);
     }
 
     void OnTriggerEnter(Collider other)
@@ -54,12 +79,12 @@ public class CollectablePlant : MonoBehaviour
             int left = inventoryInRange.Add(itemData, itemCount);
             if (left == 0)
             {
-                placer.RemoveInstance(typeIndex, sector, worldPos);
+                if (remover != null)
+                    remover.RemoveInstance(typeIndex, sector, worldPos);
                 Destroy(gameObject);
             }
             else
             {
-                // Не влезло целиком — откатываем то, что успело добавиться, и сообщаем
                 if (left < itemCount) inventoryInRange.Remove(itemData, itemCount - left);
                 inventoryFull = true;
             }

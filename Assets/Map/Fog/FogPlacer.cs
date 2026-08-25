@@ -2,9 +2,8 @@ using UnityEngine;
 using System.Collections.Generic;
 
 /// <summary>
-/// Раскидывает префабы очагов тумана по карте. Отдельно от ObjectPlacer,
-/// чтобы не конкурировать за слот «или ObjectPlacer / или InstancedObjectPlacer»
-/// в TerrainManager. Вызывается из TerrainManager рядом с остальной генерацией.
+/// Раскидывает префабы очагов тумана по карте. Отдельно от ObjectPlacer.
+/// Вызывается из TerrainManager рядом с остальной генерацией.
 ///
 /// Очаги садятся полосой вдоль дороги, с тягой к низинам и водоёмам.
 /// Если дорога не назначена — откат к случайному разбросу по всей карте.
@@ -17,17 +16,14 @@ public class FogPlacer : MonoBehaviour
 
     [Header("Зона без тумана у дороги")]
     public RoadGenerator roadGenerator;
-    public TerrainZoneSystem zoneSystem;
     [Tooltip("Радиус свободной от тумана зоны вокруг дороги (м). Очаги в эту полосу не ставятся.")]
     public float roadClearance = 8f;
 
-    [Header("Тяга к низинам и воде")]
-    [Tooltip("Высота над уровнем воды, до которой клетка ещё считается «низиной» (м). Внутри — туман охотно садится.")]
+    [Header("Тяга к низинам")]
+    [Tooltip("Высота (м), до которой клетка считается низиной — туман садится охотнее.")]
     public float lowBandHeight = 0.12f;
-    [Tooltip("Шанс поставить очаг на возвышенности («где-то между»). 0 — только низины и вода.")]
+    [Tooltip("Шанс поставить очаг выше низины.")]
     [Range(0f, 1f)] public float betweenChance = 0.15f;
-    [Tooltip("Подъём тумана над уровнем воды при посадке над водоёмом (м).")]
-    public float waterFogOffset = 0.05f;
 
     [Header("Префаб тумана (с FogVolume)")]
     public GameObject fogPrefab;
@@ -77,7 +73,6 @@ public class FogPlacer : MonoBehaviour
         }
 
         bool hasRoad = roadGenerator != null && roadGenerator.Path != null && roadGenerator.Path.Count > 0;
-        float waterLevel = (zoneSystem != null) ? zoneSystem.WaterLevel : float.MinValue;
 
         float minSqr = minDistanceBetween * minDistanceBetween;
         int placed = 0, attempts = 0, maxTotal = count * maxAttemptsPerObject;
@@ -86,7 +81,6 @@ public class FogPlacer : MonoBehaviour
         {
             attempts++;
 
-            // --- кандидат: по всей карте ---
             float x = Random.Range(minX, maxX);
             float z = Random.Range(minZ, maxZ);
             Vector3 pos = new Vector3(x, 0f, z);
@@ -96,26 +90,16 @@ public class FogPlacer : MonoBehaviour
                 if ((_placed[i] - pos).sqrMagnitude < minSqr) { tooClose = true; break; }
             if (tooClose) continue;
 
-            // --- зона без тумана у дороги ---
             if (hasRoad && IsNearRoad(pos, ts, origin, w, d, roadClearance)) continue;
 
-            // --- отбор по «низости»: вода всегда, низина охотно, выше — с шансом betweenChance ---
-            bool water = zoneSystem != null && zoneSystem.IsWaterAtWorldPosition(pos);
-            if (!water && zoneSystem != null)
-            {
-                float h = heightSource.GetHeightAtWorldPos(pos, ts, origin);
-                float t = Mathf.Clamp01(Mathf.InverseLerp(waterLevel, waterLevel + Mathf.Max(0.0001f, lowBandHeight), h));
-                float score = Mathf.Lerp(1f, betweenChance, t);
-                if (Random.value > score) continue;
-            }
+            // низина — охотнее, выше — с шансом betweenChance
+            float h = heightSource.GetHeightAtWorldPos(pos, ts, origin);
+            float t = Mathf.Clamp01(Mathf.InverseLerp(0f, Mathf.Max(0.0001f, lowBandHeight), h));
+            float score = Mathf.Lerp(1f, betweenChance, t);
+            if (Random.value > score) continue;
 
-            // --- высота посадки ---
             float y;
-            if (water)
-            {
-                y = waterLevel + waterFogOffset;
-            }
-            else if (raycastToGround &&
+            if (raycastToGround &&
                      Physics.Raycast(new Vector3(x, 1000f, z), Vector3.down, out RaycastHit hit,
                                      2000f, groundLayers, QueryTriggerInteraction.Ignore))
             {

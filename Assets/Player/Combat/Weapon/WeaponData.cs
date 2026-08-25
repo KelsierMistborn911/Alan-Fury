@@ -63,4 +63,16 @@ public class WeaponData : ScriptableObject
 
     [Header("Слои")]
     public LayerMask targetLayers;
+
+#if UNITY_EDITOR
+    void OnValidate()
+    {
+        if (attackRange <= 0f) attackRange = 2f;
+        if (attackRadius <= 0f) attackRadius = 1f;
+        if (attackHeight <= 0f) attackHeight = 1.5f;
+        if (staminaCost < 0f) staminaCost = 0f;
+        if (isRanged && projectilePrefab == null)
+            Debug.LogWarning($"{weaponName}: нет projectilePrefab для ranged оружия");
+    }
+#endif
 }

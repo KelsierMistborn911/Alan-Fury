@@ -14,7 +14,7 @@ AvatarMask:
   - m_Path: AKER SWORD
     m_Weight: 1
   - m_Path: AKER_ARMOR
-    m_Weight: 0
+    m_Weight: 1
   - m_Path: AKER_BAG
     m_Weight: 1
   - m_Path: AKER_BASA

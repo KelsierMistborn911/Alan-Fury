@@ -17,6 +17,7 @@ MonoBehaviour:
   icon: {fileID: 21300000, guid: 2d97c30e46a227d4a90e022f50a20a54, type: 3}
   damage: 15
   staggerForce: 5
+  penetration: 1
   attackRange: 4
   attackRadius: 3
   attackHeight: 1.5
@@ -31,8 +32,8 @@ MonoBehaviour:
   projectileLifetime: 3
   projectilesPerShot: 1
   spreadAngle: 0
-  windupDuration: 0.15
-  attackDuration: 0.2
+  windupDuration: 0.65
+  attackDuration: 0.1
   cooldownDuration: 0.3
   tickInterval: 0.1
   staminaCost: 15
@@ -43,6 +44,8 @@ MonoBehaviour:
   secondaryRadiusMult: 0.35
   secondaryConeHalfAngle: 15
   secondaryStaminaMult: 1
+  maxDurability: 100
+  blockWindowMult: 1.2
   targetLayers:
     serializedVersion: 2
     m_Bits: 512

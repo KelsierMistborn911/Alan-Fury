@@ -24,7 +24,7 @@ public class CameraFollow : MonoBehaviour
     [Tooltip("Минимальный размер (приближено).")]
     public float minZoom = 10f;
     [Tooltip("Максимальный размер (отдалено).")]
-    public float maxZoom = 22f;
+    public float maxZoom = 50f;
     [Tooltip("Чувствительность колеса.")]
     public float zoomSpeed = 4f;
     [Tooltip("Сглаживание зума (сек). 0 = мгновенно.")]
@@ -35,9 +35,22 @@ public class CameraFollow : MonoBehaviour
     public Bounds mapBounds;
     public bool clampToMap = false;
 
+    [Header("Peek (заглянуть дальше)")]
+    [Tooltip("Удержание клавиши — камера смещается к точке под мышью (ограничено maxPeekDistance)")]
+    public bool enablePeek = true;
+    public KeyCode peekKey = KeyCode.LeftControl;
+    [Tooltip("Макс. смещение камеры от игрока (м)")]
+    public float maxPeekDistance = 14f;
+    [Tooltip("Скорость сглаживания смещения")]
+    public float peekSmooth = 8f;
+
     private Camera cam;
     private float _targetSize;
     private float _zoomVel;
+    private Vector3 _peekOffset;
+
+    /// <summary>Текущее смещение peek (XZ). Используется ViewOcclusion для сдвига focus прорисовки.</summary>
+    public Vector3 CurrentPeekOffset => _peekOffset;
 
     void Start()
     {
@@ -117,7 +130,29 @@ public class CameraFollow : MonoBehaviour
                 : _targetSize;
         }
 
-        Vector3 desiredPosition = target.position + offset;
+        // 2) Peek: удержание Ctrl → смещение к точке под мышью (кламп по maxPeekDistance)
+        Vector3 peekTarget = Vector3.zero;
+        if (enablePeek && Input.GetKey(peekKey) && cam != null)
+        {
+            Ray ray = cam.ScreenPointToRay(Input.mousePosition);
+            var plane = new Plane(Vector3.up, target.position);
+            if (plane.Raycast(ray, out float dist))
+            {
+                Vector3 mouseWorld = ray.GetPoint(dist);
+                Vector3 delta = mouseWorld - target.position;
+                delta.y = 0f;
+                float len = delta.magnitude;
+                if (len > 0.05f)
+                {
+                    if (len > maxPeekDistance)
+                        delta *= maxPeekDistance / len;
+                    peekTarget = delta;
+                }
+            }
+        }
+        _peekOffset = Vector3.Lerp(_peekOffset, peekTarget, 1f - Mathf.Exp(-peekSmooth * Time.deltaTime));
+
+        Vector3 desiredPosition = target.position + offset + _peekOffset;
 
         if (clampToMap && mapBounds.size != Vector3.zero)
         {

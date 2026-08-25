@@ -1,6 +1,7 @@
-﻿// HeightMapGenerator v3.0 — абстрактная база
+﻿// HeightMapGenerator v3.1 — абстрактная база
 // Общее для всех генераторов рельефа: размеры, сид, массив высот, события, доступ к высоте,
 // хелперы пост-обработки (сглаживание, террасы, чистка рванины и мелких пятен).
+// Макро-клетки 5×5 + ступенчатые переходы между ними (ApplyMacroBlocksAndTransitions).
 // Конкретная генерация — в наследниках: SwampHeightMapGenerator, ForestHeightMapGenerator.
 using UnityEngine;
 using System.Collections.Generic;
@@ -11,7 +12,7 @@ using System.Collections.Generic;
 /// </summary>
 public abstract class HeightMapGenerator : MonoBehaviour
 {
-    public const string Version = "3.0";
+    public const string Version = "3.1";
 
     [Header("Размеры карты")]
     public int width = 60;
@@ -25,8 +26,16 @@ public abstract class HeightMapGenerator : MonoBehaviour
     public int seed;
 
     [Header("Верхняя граница высот")]
-    [Tooltip("Верх диапазона рельефа. Читается TerrainZoneSystem (пороги зон) и раскраской меша.")]
+    [Tooltip("Верх диапазона рельефа. Читается раскраской меша.")]
     public float maxHeight = 10f;
+
+    [Header("Макро-клетки")]
+    [Tooltip("Размер макро-клетки в мелких клетках. 1 = выключено (старое поведение).")]
+    public int macroSize = 5;
+    [Tooltip("С какой разницы в ступенях строим переходную полосу (меньше — обычная стыковка).")]
+    public int transitionThresholdSteps = 2;
+    [Tooltip("Ширина переходной полосы в мелких клетках.")]
+    public int transitionWidth = 2;
 
     [Header("Террасы и очистка")]
     public float terraceStep = 0.5f;          // шаг квантования высот = высота одной ступени
@@ -218,6 +227,138 @@ public abstract class HeightMapGenerator : MonoBehaviour
 
                 foreach (var c in region) heightMap[c.x, c.y] = best;
             }
+    }
+
+    // ==================== МАКРО-КЛЕТКИ И ПЕРЕХОДЫ ====================
+
+    /// <summary>
+    /// После заполнения heightMap (поклеточно или уже крупно):
+    /// 1) сжимает в макро-блоки macroSize×macroSize (мода высоты внутри блока),
+    /// 2) разворачивает обратно — большие плоские площадки,
+    /// 3) на швах с Δh ≥ transitionThresholdSteps строит ступенчатую полосу.
+    /// Под переходами всегда есть высота → провалиться нельзя.
+    /// </summary>
+    protected void ApplyMacroBlocksAndTransitions()
+    {
+        if (macroSize <= 1 || heightMap == null || terraceStep <= 0f) return;
+
+        int mw = Mathf.CeilToInt((float)width / macroSize);
+        int md = Mathf.CeilToInt((float)depth / macroSize);
+        float[,] macroH = new float[mw, md];
+
+        // 1. Высота макро = наиболее частая высота внутри блока (мода)
+        for (int mx = 0; mx < mw; mx++)
+        {
+            for (int mz = 0; mz < md; mz++)
+            {
+                int x0 = mx * macroSize;
+                int z0 = mz * macroSize;
+                int x1 = Mathf.Min(x0 + macroSize, width);
+                int z1 = Mathf.Min(z0 + macroSize, depth);
+
+                var freq = new Dictionary<float, int>();
+                float bestH = heightMap[x0, z0];
+                int bestC = 0;
+                for (int x = x0; x < x1; x++)
+                {
+                    for (int z = z0; z < z1; z++)
+                    {
+                        float h = heightMap[x, z];
+                        freq.TryGetValue(h, out int c);
+                        c++;
+                        freq[h] = c;
+                        if (c > bestC) { bestC = c; bestH = h; }
+                    }
+                }
+                macroH[mx, mz] = bestH;
+            }
+        }
+
+        // 2. Разворот: вся макро-клетка одной высоты
+        for (int x = 0; x < width; x++)
+        {
+            for (int z = 0; z < depth; z++)
+            {
+                int mx = Mathf.Min(x / macroSize, mw - 1);
+                int mz = Mathf.Min(z / macroSize, md - 1);
+                heightMap[x, z] = macroH[mx, mz];
+            }
+        }
+
+        // 3. Ступенчатые переходы на швах
+        ApplySeamTransitions(macroH, mw, md);
+    }
+
+    /// <summary>
+    /// Горизонтальные и вертикальные швы макро-сетки.
+    /// Если |Δh| в ступенях ≥ threshold — заполняем полосу transitionWidth
+    /// промежуточными террасами (Lerp + Round к terraceStep).
+    /// </summary>
+    private void ApplySeamTransitions(float[,] macroH, int mw, int md)
+    {
+        int tw = Mathf.Max(1, transitionWidth);
+        float step = terraceStep;
+
+        // --- Горизонтальные швы (между mx и mx+1) ---
+        for (int mx = 0; mx < mw - 1; mx++)
+        {
+            for (int mz = 0; mz < md; mz++)
+            {
+                float hA = macroH[mx, mz];
+                float hB = macroH[mx + 1, mz];
+                int sA = Mathf.RoundToInt(hA / step);
+                int sB = Mathf.RoundToInt(hB / step);
+                int d = Mathf.Abs(sA - sB);
+                if (d < transitionThresholdSteps) continue;
+
+                int boundary = (mx + 1) * macroSize;
+                int z0 = mz * macroSize;
+                int z1 = Mathf.Min(z0 + macroSize, depth);
+
+                // Полоса вокруг границы, сдвинутая так, чтобы не вылезать за макро
+                int start = Mathf.Clamp(boundary - tw / 2, 0, width - tw);
+                for (int i = 0; i < tw; i++)
+                {
+                    int x = start + i;
+                    if (x < 0 || x >= width) continue;
+                    float t = (i + 0.5f) / tw;
+                    float h = Mathf.Lerp(hA, hB, t);
+                    h = Mathf.Round(h / step) * step;
+                    for (int z = z0; z < z1; z++)
+                        heightMap[x, z] = h;
+                }
+            }
+        }
+
+        // --- Вертикальные швы (между mz и mz+1) ---
+        for (int mz = 0; mz < md - 1; mz++)
+        {
+            for (int mx = 0; mx < mw; mx++)
+            {
+                float hA = macroH[mx, mz];
+                float hB = macroH[mx, mz + 1];
+                int sA = Mathf.RoundToInt(hA / step);
+                int sB = Mathf.RoundToInt(hB / step);
+                int d = Mathf.Abs(sA - sB);
+                if (d < transitionThresholdSteps) continue;
+
+                int boundary = (mz + 1) * macroSize;
+                int x0 = mx * macroSize;
+                int x1 = Mathf.Min(x0 + macroSize, width);
+
+                int start = Mathf.Clamp(boundary - tw / 2, 0, depth - tw);
+                for (int i = 0; i < tw; i++)
+                {
+                    int z = start + i;
+                    if (z < 0 || z >= depth) continue;
+                    float t = (i + 0.5f) / tw;
+                    float h = Mathf.Lerp(hA, hB, t);
+                    h = Mathf.Round(h / step) * step;
+                    for (int x = x0; x < x1; x++)
+                        heightMap[x, z] = h;
+                }
+            }
+        }
     }
 
     // ==================== ДОСТУП К ВЫСОТАМ ====================

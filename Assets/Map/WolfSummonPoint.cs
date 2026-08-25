@@ -16,7 +16,7 @@ public class WolfSummonPoint : MonoBehaviour
     public float promptHeight = 2.2f;
     [Tooltip("Визуал (куб и т.п.). Если задан — Instantiate как дочерний после снапа на клетку. Если скрипт уже на самом визуале — оставь пустым.")]
     public GameObject visualPrefab;
-    [Tooltip("Pathfinder для снапа в центр клетки. Пусто — найдётся на сцене.")]
+    [Tooltip("Pathfinder для снапа в центр клетки. Пусто — из WerewolfPackManager.")]
     public Pathfinder pathfinder;
 
     private bool _playerInRange;
@@ -60,8 +60,8 @@ public class WolfSummonPoint : MonoBehaviour
 
     void SnapToNearestCell()
     {
-        if (pathfinder == null)
-            pathfinder = FindObjectOfType<Pathfinder>();
+        if (pathfinder == null && WerewolfPackManager.Instance != null)
+            pathfinder = WerewolfPackManager.Instance.pathfinder;
 
         if (pathfinder == null || !pathfinder.IsReady) return;
 
