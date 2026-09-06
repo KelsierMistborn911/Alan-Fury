@@ -1,0 +1,57 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7847921391c4c8948ba37566bce4b68a, type: 3}
+  m_Name: SwordDataSceleton
+  m_EditorClassIdentifier: 
+  type: 0
+  weaponName: "\u041E\u0440\u0443\u0436\u0438\u0435"
+  icon: {fileID: 21300000, guid: 2d97c30e46a227d4a90e022f50a20a54, type: 3}
+  damage: 15
+  staggerForce: 5
+  penetration: 1
+  attackRange: 4
+  attackRadius: 3
+  attackHeight: 1.5
+  hitboxOffset: {x: 0, y: 0, z: 1}
+  multPointBlank: 1
+  multClinch: 1
+  multClose: 1
+  multMid: 1
+  multFar: 1
+  multSpecial: 0
+  isRanged: 0
+  useCharge: 0
+  chargeDuration: 1
+  minChargePercent: 0.3
+  maxHoldTime: 3
+  projectilePrefab: {fileID: 0}
+  projectileSpeed: 20
+  projectileLifetime: 3
+  projectilesPerShot: 1
+  spreadAngle: 0
+  windupDuration: 0.65
+  attackDuration: 0.1
+  cooldownDuration: 0.3
+  tickInterval: 0.1
+  staminaCost: 15
+  hasSecondary: 1
+  secondaryTrigger: Thrust
+  secondaryDamageMult: 1
+  secondaryRangeMult: 1.3
+  secondaryRadiusMult: 0.35
+  secondaryConeHalfAngle: 15
+  secondaryStaminaMult: 1
+  maxDurability: 100
+  blockWindowMult: 1.2
+  targetLayers:
+    serializedVersion: 2
+    m_Bits: 576
