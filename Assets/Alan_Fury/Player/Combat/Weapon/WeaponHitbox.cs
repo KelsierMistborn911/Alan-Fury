@@ -108,6 +108,17 @@ public class WeaponHitbox : MonoBehaviour
             visual.ShowArc(direction, offset, duration, chargePercent, comboIndex);
 
         if (debugShowZone) ShowDebugZone();
+
+        DetectHits();
+        nextTickTime = Time.time + Mathf.Max(0.02f, tickInterval);
+    }
+
+    public void Deactivate()
+    {
+        isActive = false;
+        _hasHitInfo = false;
+        if (visual != null) visual.HideArc();
+        if (_debugZone != null) _debugZone.gameObject.SetActive(false);
     }
 
     void Update()
@@ -115,19 +126,19 @@ public class WeaponHitbox : MonoBehaviour
         if (!isActive) return;
 
         timer += Time.deltaTime;
-        if (timer >= duration)
+        bool expired = duration <= 0f || timer >= duration;
+        if (Time.time >= nextTickTime || expired)
+        {
+            DetectHits();
+            nextTickTime = Time.time + Mathf.Max(0.02f, tickInterval);
+        }
+        if (expired)
         {
             isActive = false;
             _hasHitInfo = false;
             if (visual != null) visual.HideArc();
             if (_debugZone != null) _debugZone.gameObject.SetActive(false);
             return;
-        }
-
-        if (Time.time >= nextTickTime)
-        {
-            DetectHits();
-            nextTickTime = Time.time + tickInterval;
         }
 
         if (debugShowZone && _debugZone != null && _debugZone.gameObject.activeSelf)
@@ -149,16 +160,11 @@ public class WeaponHitbox : MonoBehaviour
         if (colliders == null || colliders.Length == 0)
             colliders = QueryColliders(origin, Physics.AllLayers);
 
-        int applied = 0;
         foreach (Collider col in colliders)
         {
-            if (!InsideZone(origin, col.transform.position)) continue;
-
-            if (lastHitTime.TryGetValue(col.gameObject, out float lastHit))
-                if (Time.time - lastHit < tickInterval) continue;
-
             if (col.transform == transform || col.transform.IsChildOf(transform))
                 continue;
+            if (!InsideZone(origin, SamplePoint(col.transform))) continue;
 
             IDamageable damageable = col.GetComponentInParent<IDamageable>();
             if (damageable == null) continue;
@@ -166,13 +172,12 @@ public class WeaponHitbox : MonoBehaviour
             var host = damageable as Component;
             if (host != null && (host.transform == transform || transform.IsChildOf(host.transform)))
                 continue;
+            if (WasHit(host != null ? host.gameObject : col.gameObject)) continue;
 
             ApplyHit(damageable, col.transform);
-            applied++;
         }
 
-        if (applied == 0)
-            ProbeKnownTargets(origin);
+        ProbeKnownTargets(origin);
     }
 
     void ProbeKnownTargets(Vector3 origin)
@@ -204,19 +209,30 @@ public class WeaponHitbox : MonoBehaviour
         if (target == null) return;
         if (target == transform || target.IsChildOf(transform) || transform.IsChildOf(target))
             return;
-        if (!InsideZone(origin, target.position)) return;
-
-        if (lastHitTime.TryGetValue(target.gameObject, out float lastHit) &&
-            Time.time - lastHit < tickInterval)
-            return;
+        if (!InsideZone(origin, SamplePoint(target))) return;
 
         var damageable = target.GetComponentInParent<IDamageable>();
         if (damageable == null) return;
         var host = damageable as Component;
         if (host != null && (host.transform == transform || transform.IsChildOf(host.transform)))
             return;
+        if (WasHit(host != null ? host.gameObject : target.gameObject)) return;
 
         ApplyHit(damageable, target);
+    }
+
+    static Vector3 SamplePoint(Transform t)
+    {
+        if (t == null) return Vector3.zero;
+        var col = t.GetComponentInChildren<Collider>();
+        if (col != null) return col.bounds.center;
+        return t.position + Vector3.up * 0.9f;
+    }
+
+    bool WasHit(GameObject key)
+    {
+        if (key == null) return false;
+        return lastHitTime.ContainsKey(key);
     }
 
     void ApplyHit(IDamageable damageable, Transform target)
@@ -232,9 +248,16 @@ public class WeaponHitbox : MonoBehaviour
 
         Vector3 knockback = (target.position - transform.position).normalized;
         knockback.y = 0f;
-        damageable.ApplyKnockback(knockback * stagger);
+        float impulse = stagger;
+        bool closeHold = hit.isInfight || hit.band <= CombatRange.Clinch;
+        bool strongHit = hit.isHeavy && hit.chargePercent >= 0.55f;
+        bool strongImpulse = hit.stagger > 5.5f;
+        if (closeHold && !(strongHit && strongImpulse))
+            impulse *= 0.08f;
+        damageable.ApplyKnockback(knockback * impulse);
 
-        lastHitTime[target.gameObject] = Time.time;
+        var host = damageable as Component;
+        lastHitTime[host != null ? host.gameObject : target.gameObject] = Time.time;
         onHit?.Invoke();
     }
 
@@ -290,7 +313,7 @@ public class WeaponHitbox : MonoBehaviour
 
     bool InsideZone(Vector3 origin, Vector3 target)
     {
-        if (Mathf.Abs(target.y - origin.y) > Mathf.Max(height * 0.5f, 1.2f) + 0.6f)
+        if (Mathf.Abs(target.y - origin.y) > Mathf.Max(height, 2.2f) + 2f)
             return false;
 
         Vector3 flat = target - origin;

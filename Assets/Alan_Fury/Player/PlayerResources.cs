@@ -51,7 +51,8 @@ public class PlayerResources : MonoBehaviour, IDamageable
     private float manaRegenTimer;
     private float guardRegenTimer;
 
-    private CombatController3D _combat;
+    private HumanoidCombat _combat;
+    private HumanoidLocomotion _loco;
 
     // События
     public System.Action<float> onHealthChanged;
@@ -67,7 +68,8 @@ public class PlayerResources : MonoBehaviour, IDamageable
         CurrentStamina = maxStamina;
         CurrentMana = maxMana;
         CurrentGuard = maxGuard;
-        _combat = GetComponent<CombatController3D>();
+        _combat = GetComponent<HumanoidCombat>();
+        _loco = GetComponent<HumanoidLocomotion>();
     }
 
     void Update()
@@ -131,14 +133,28 @@ public class PlayerResources : MonoBehaviour, IDamageable
         return Vector3.Angle(transform.forward, to) <= blockArcAngle * 0.5f;
     }
 
-    // Требуется интерфейсом IDamageable. Отталкивания игрока нет — метод пуст.
-    public void ApplyKnockback(Vector3 force) { }
+    public void ApplyKnockback(Vector3 force)
+    {
+        bool blocked = _combat != null && _combat.IsBlocking;
+        if (blocked && force.sqrMagnitude > 0.0001f)
+        {
+            Vector3 incoming = -force;
+            incoming.y = 0f;
+            if (incoming.sqrMagnitude > 0.0001f
+                && Vector3.Angle(transform.forward, incoming) > blockArcAngle * 0.5f)
+                blocked = false;
+        }
+        if (_loco != null) _loco.ApplyHitRecoil(force, blocked);
+    }
 
     /// <summary>Полный хит (зоны пока только у волков). Игрок — обычный урон с учётом блока.</summary>
     public void TakeHit(HitInfo hit)
     {
         float dmg = hit.finalDamage > 0f ? hit.finalDamage : hit.rawDamage;
+        bool blocked = _combat != null && _combat.IsBlocking && IsInBlockArc(hit.sourcePosition);
         TakeDamage(dmg, hit.sourcePosition);
+        if (!blocked && _combat != null)
+            _combat.ReceiveHitShock(hit.isHeavy || hit.stagger >= 5.5f);
     }
 
     public void Heal(float amount)

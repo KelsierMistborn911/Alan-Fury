@@ -104,6 +104,9 @@ public class CombatController3D : HumanoidCombat
         if (resources != null && resources.IsDead) return;
         if (IsComposing()) return;
         if (_spells != null && _spells.BlocksMelee) return;
+        if (loadout != null && loadout.HasTwoHandWeapon()
+            && loadout.GetMainWeapon() != null && loadout.GetMainWeapon().isRanged)
+            return;
 
         if (IsArmed && Input.GetKeyDown(parryKey))
             TryParry();

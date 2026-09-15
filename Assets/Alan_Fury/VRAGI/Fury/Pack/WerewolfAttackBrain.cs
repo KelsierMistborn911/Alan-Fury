@@ -100,10 +100,14 @@ public class WerewolfAttackBrain : MonoBehaviour, WerewolfPackManager.IPackAgent
     public float waypointArrive = 1.2f;
 
     [Header("После атаки: отход и облёт")]
-    [Tooltip("Базовое время облёта перед новым заходом (сек); aggression сокращает его (см. EnterOrbit).")]
-    public float disengageTime = 1.5f;
-    [Tooltip("Угловая скорость облёта вокруг игрока (град/сек).")]
+    [Tooltip("Базовое время манёвра между сериями (сек); aggression только укорачивает паузу.")]
+    public float disengageTime = 5.5f;
+    [Tooltip("Угловая скорость облёта вокруг игрока (град/сек). Дуга между ударами серии.")]
     public float orbitAngularSpeed = 45f;
+    [Tooltip("Угол дуги между ударами серии (град).")]
+    public float arcDegrees = 48f;
+    public float maneuverHoldMin = 1.1f;
+    public float maneuverHoldMax = 2.6f;
 
     [Header("Безопасная дистанция")]
     [Tooltip("Ближнее кольцо (м): сюда заходит только на удар/серию. База даже в ярости.")]
@@ -168,7 +172,7 @@ public class WerewolfAttackBrain : MonoBehaviour, WerewolfPackManager.IPackAgent
     private float _repathTimer;
 
     // ---- фазы: Approach → Engage → Retreat → Orbit → снова Approach ----
-    private enum AttackPhase { Approach, Engage, Retreat, Orbit }
+    private enum AttackPhase { Approach, Engage, Arc, Retreat, Orbit }
     private AttackPhase _phase = AttackPhase.Approach;
     private float _phaseTimer;
     private int _orbitDir = 1;
@@ -185,6 +189,9 @@ public class WerewolfAttackBrain : MonoBehaviour, WerewolfPackManager.IPackAgent
     private float _sectorTimer;      // сколько волк держится в разрешённом секторе (ступени 1–2)
     private int _hitsLeft;           // сколько ударов осталось в текущей серии
     private bool _reserveDodge;      // держать ли запас стамины на уворот (все, кроме ярости)
+    private bool _wasClinging;
+    private float _maneuverHold;
+    private Vector3 _arcTarget;
 
     private WerewolfPackManager _manager;
 
@@ -194,23 +201,36 @@ public class WerewolfAttackBrain : MonoBehaviour, WerewolfPackManager.IPackAgent
     public float HealthPercent => stats != null ? stats.HealthPercent : 1f;
     public float Fear01 => stats != null ? stats.Fear01 : 0f;
 
+    public bool CanRotateRole =>
+        IsAlive
+        && (combat == null || !combat.IsClinging)
+        && (combat == null || !combat.IsBusy || _role == WerewolfPackManager.PackRole.Orbit);
+
     public void SetRole(WerewolfPackManager.PackRole role, bool avoidFront)
     {
         _role = role;
         _avoidFront = avoidFront;
 
-        if (role == WerewolfPackManager.PackRole.Attack)
+        if (role == WerewolfPackManager.PackRole.Attack
+            || role == WerewolfPackManager.PackRole.Orbit)
         {
             if (surroundBrain != null) surroundBrain.enabled = false;
-            _phase = AttackPhase.Approach;   // начинаем заход заново
             _sectorTimer = 0f;
-            enabled = true;                 // этот мозг работает
+            enabled = true;
+            if (role == WerewolfPackManager.PackRole.Orbit)
+            {
+                _phase = AttackPhase.Orbit;
+                _phaseTimer = 999f;
+                PickManeuverPoint();
+            }
+            else
+                _phase = AttackPhase.Approach;
         }
-        else // Surround
+        else
         {
             if (surroundBrain != null) surroundBrain.enabled = true;
             _path.Clear();
-            enabled = false;                // отдаём управление WerewolfSurroundBrain
+            enabled = false;
         }
     }
 
@@ -332,6 +352,22 @@ public class WerewolfAttackBrain : MonoBehaviour, WerewolfPackManager.IPackAgent
         _playerWasAttacking = playerAttacking;
         if (attackEnded) _opportunityUntil = Time.time + opportunityWindow;
 
+        if (_role == WerewolfPackManager.PackRole.Orbit)
+        {
+            bool orbitBiped = !InTerror && perception.DistanceToPlayer <= ManeuverDistance * 0.9f;
+            locomotion.SetStance(orbitBiped
+                ? WerewolfLocomotion.Stance.Biped
+                : WerewolfLocomotion.Stance.Quad);
+            if (locomotion.IsChangingStance) return;
+            if (!combat.IsBusy && Time.time >= _postAttackLockUntil &&
+                (perception.PlayerThreatActive || attackStarted))
+                TryDodge();
+            if (combat.IsBusy) return;
+            _phaseTimer = 999f;
+            TickOrbit(dt);
+            return;
+        }
+
         // Стойка по роли движения (аниматор: Stance bool, StandUp/DropDown, Gait):
         //   Biped — боевой контакт: стрейф вокруг игрока, взгляд на него.
         //   Quad  — дальние перебежки (подход/длинный отход): быстрее, только вперёд по курсу.
@@ -354,6 +390,18 @@ public class WerewolfAttackBrain : MonoBehaviour, WerewolfPackManager.IPackAgent
             (perception.PlayerThreatActive || attackStarted))
             TryDodge();
 
+        if (combat != null && combat.IsClinging)
+        {
+            _wasClinging = true;
+            return;
+        }
+        if (_wasClinging)
+        {
+            _wasClinging = false;
+            EnterRetreat();
+            return;
+        }
+
         // Идёт своя атака — движение/мозг ждут, фазу ведёт Combat/локомоция.
         if (busy) return;
 
@@ -361,6 +409,7 @@ public class WerewolfAttackBrain : MonoBehaviour, WerewolfPackManager.IPackAgent
         {
             case AttackPhase.Approach: TickApproach(dt); break;
             case AttackPhase.Engage: TickEngage(dt); break;
+            case AttackPhase.Arc: TickArc(dt); break;
             case AttackPhase.Retreat: TickRetreat(dt); break;
             case AttackPhase.Orbit: TickOrbit(dt); break;
         }
@@ -377,8 +426,10 @@ public class WerewolfAttackBrain : MonoBehaviour, WerewolfPackManager.IPackAgent
         switch (_phase)
         {
             case AttackPhase.Engage:
+            case AttackPhase.Arc:
+                return true;
             case AttackPhase.Orbit:
-                return true; // у цели — всегда close-combat
+                return perception.DistanceToPlayer <= ManeuverDistance * 0.9f;
             case AttackPhase.Retreat:
                 // Короткий шаг у кольца — biped; длинный отход — quad (бег).
                 return perception.DistanceToPlayer <= ManeuverDistance * 0.85f;
@@ -443,6 +494,7 @@ public class WerewolfAttackBrain : MonoBehaviour, WerewolfPackManager.IPackAgent
                 _sectorTimer = 0f;
                 if (_hitsLeft != int.MaxValue) _hitsLeft--;
                 if (_hitsLeft <= 0) EnterRetreat();
+                else EnterArc();
                 return;
             }
             CloseInForAttack(dt);
@@ -530,16 +582,8 @@ public class WerewolfAttackBrain : MonoBehaviour, WerewolfPackManager.IPackAgent
         if (locomotion.IsLeaping) return;
 
         Vector3 p = perception.PlayerPos;
-        Vector3 land = CommitLandingPoint();
-        float dist = perception.DistanceToPlayer;
-
-        // С дальнего кольца — скачок к игроку, затем серия.
-        if (dist > NearDistance + 0.75f && locomotion.IsGrounded)
-        {
-            locomotion.Leap(land, commitLeapArc);
-            return;
-        }
-
+        bool grab = perception.DistanceToPlayer > MeleeRange;
+        Vector3 land = grab ? p : CommitLandingPoint();
         locomotion.MoveTo(land + SeparationOffset(), runSpeed, dt);
         if (locomotion.IsBiped) locomotion.FaceTowards(p, dt);
     }
@@ -591,6 +635,27 @@ public class WerewolfAttackBrain : MonoBehaviour, WerewolfPackManager.IPackAgent
         locomotion.MoveTo(target, walkSpeed, dt);
         // Боевой контакт — всегда смотрим на игрока (стрейф на двух лапах).
         if (locomotion.IsBiped) locomotion.FaceTowards(p, dt);
+    }
+
+    private void EnterArc()
+    {
+        _phase = AttackPhase.Arc;
+        Vector3 p = perception.PlayerPos;
+        Vector3 outward = transform.position - p; outward.y = 0f;
+        if (outward.sqrMagnitude < 1e-4f) outward = -perception.PlayerForwardFlat;
+        outward.Normalize();
+        float sign = Random.value > 0.5f ? 1f : -1f;
+        Quaternion rot = Quaternion.AngleAxis(arcDegrees * sign, Vector3.up);
+        _arcTarget = p + rot * outward * MeleeRange + SeparationOffset();
+    }
+
+    private void TickArc(float dt)
+    {
+        locomotion.MoveTo(_arcTarget, walkSpeed, dt);
+        if (locomotion.IsBiped) locomotion.FaceTowards(perception.PlayerPos, dt);
+        Vector3 d = _arcTarget - transform.position; d.y = 0f;
+        if (d.magnitude <= waypointArrive)
+            _phase = AttackPhase.Engage;
     }
 
     private bool TryAttackByDistance(float dist)
@@ -722,27 +787,46 @@ public class WerewolfAttackBrain : MonoBehaviour, WerewolfPackManager.IPackAgent
     {
         _phase = AttackPhase.Orbit;
         _orbitDir = Random.value > 0.5f ? 1 : -1;
-        // Aggression сокращает время облёта: борзый почти сразу снова идёт в атаку.
-        _phaseTimer = Mathf.Lerp(disengageTime, disengageTime * 0.3f, Aggression);
+        _phaseTimer = Mathf.Lerp(disengageTime, disengageTime * 0.45f, Aggression);
+        PickManeuverPoint();
+    }
+
+    private void PickManeuverPoint()
+    {
+        Vector3 p = perception.PlayerPos;
+        Vector3 away = perception.DirFromPlayerFlat;
+        Vector3 side = Vector3.Cross(Vector3.up, away);
+        if (side.sqrMagnitude < 1e-4f) side = transform.right;
+        side.Normalize();
+        float sideSign = Random.value > 0.5f ? 1f : -1f;
+        float r = Random.Range(ManeuverDistance, ManeuverDistance + 6f);
+        Vector3 dir = (away * Random.Range(0.25f, 0.9f) + side * sideSign).normalized;
+        _arcTarget = p + dir * r + SeparationOffset();
+        _maneuverHold = Random.Range(maneuverHoldMin, maneuverHoldMax);
+        RebuildPath(_arcTarget);
     }
 
     private void TickOrbit(float dt)
     {
         _phaseTimer -= dt;
+        if (_phaseTimer <= 0f) { _phase = AttackPhase.Approach; return; }
 
-        Vector3 toSelf = transform.position - perception.PlayerPos; toSelf.y = 0f;
+        Vector3 wp = NextWaypoint(_arcTarget) + SeparationOffset();
+        float distGoal = Flat(_arcTarget);
+        float spd = perception.DistanceToPlayer > ManeuverDistance ? runSpeed : walkSpeed;
+        bool arrived = locomotion.MoveTo(wp, spd, dt) || distGoal <= waypointArrive + 0.4f;
+        if (locomotion.IsBiped) locomotion.FaceTowards(perception.PlayerPos, dt);
 
-        // Радиус зависит от агрессии: борзый жмётся к дистанции удара, пуганый маневрирует поодаль.
-        // Шум радиуса, чтобы волки не липли к идеальной окружности.
-        if (Time.time >= _nextJitterTime)
-        {
-            _nextJitterTime = Time.time + jitterInterval;
-            _radiusJitter = Random.Range(-orbitRadiusJitter, orbitRadiusJitter);
-        }
-        // Orbit тоже рыхлый: без жёсткой окружности, с separation и лёгким обходом.
-        LooseFlank(dt);
+        if (!arrived) return;
+        locomotion.FaceTowards(perception.PlayerPos, dt);
+        _maneuverHold -= dt;
+        if (_maneuverHold <= 0f) PickManeuverPoint();
+    }
 
-        if (_phaseTimer <= 0f) _phase = AttackPhase.Approach;
+    private float Flat(Vector3 p)
+    {
+        Vector3 d = p - transform.position; d.y = 0f;
+        return d.magnitude;
     }
 
     // ===================== Расталкивание (не бежать кучей) =====================
@@ -776,20 +860,13 @@ public class WerewolfAttackBrain : MonoBehaviour, WerewolfPackManager.IPackAgent
     private Vector3 ApproachTarget()
     {
         Vector3 p = perception.PlayerPos;
-        if (_avoidFront) return p - perception.PlayerForwardFlat * behindDistance;
-
-        // Фронт: держимся со стороны альфы (между игроком и альфой), сила — frontLineBias.
-        Transform alpha = _manager != null ? _manager.alphaTransform : null;
-        if (alpha != null && frontLineBias > 0f)
-        {
-            Vector3 toAlpha = alpha.position - p; toAlpha.y = 0f;
-            if (toAlpha.sqrMagnitude > 1e-4f)
-            {
-                Vector3 frontPoint = p + toAlpha.normalized * MeleeRange; // точка на стороне альфы
-                return Vector3.Lerp(p, frontPoint, frontLineBias);
-            }
-        }
-        return p;
+        Vector3 side = Vector3.Cross(Vector3.up, perception.PlayerForwardFlat);
+        if (side.sqrMagnitude < 1e-4f) side = transform.right;
+        side.Normalize();
+        float sideSign = Vector3.Dot(transform.position - p, side) >= 0f ? 1f : -1f;
+        if (_avoidFront) sideSign = Random.value > 0.35f ? -sideSign : sideSign;
+        return p + side * sideSign * (MeleeRange * 0.85f)
+             - perception.PlayerForwardFlat * (_avoidFront ? behindDistance * 0.4f : 0.2f);
     }
 
     private void RebuildPath(Vector3 target)

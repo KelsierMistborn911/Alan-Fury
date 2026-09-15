@@ -17,6 +17,13 @@ public class PlayerLoadout : MonoBehaviour
     public WeaponData GetMainWeapon() => rightHandWeapon;
     public WeaponData GetOffhandWeapon() => leftHandWeapon;
 
+    public bool HasTwoHandWeapon()
+    {
+        var w = rightHandWeapon != null ? rightHandWeapon : leftHandWeapon;
+        return w != null && w.OccupiesBothHands
+            && rightHandWeapon == leftHandWeapon;
+    }
+
     public bool HasShield()
     {
         return !leftHandMagic

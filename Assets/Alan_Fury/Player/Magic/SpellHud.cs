@@ -8,6 +8,7 @@ public class SpellHud : MonoBehaviour
 {
     public SpellSlots slots;
     public SpellComposer composer;
+    public SpellController caster;
 
     public bool visible = true;
     public int right = 10;
@@ -31,6 +32,7 @@ public class SpellHud : MonoBehaviour
     {
         if (slots == null) slots = GetComponent<SpellSlots>();
         if (composer == null) composer = GetComponent<SpellComposer>();
+        if (caster == null) caster = GetComponent<SpellController>();
     }
 
     void OnGUI()
@@ -62,6 +64,12 @@ public class SpellHud : MonoBehaviour
         DrawKnown(ref y, pillarIcon, "↓←→  столб");
         DrawKnown(ref y, flashIcon, "↑↑↑  вспышка");
         y += 8;
+        if (caster != null && caster.IsAiming)
+        {
+            GUI.Label(new Rect(_x + 8, y, width - 16, 20),
+                "прицел столба — ЛКМ поставить, ПКМ снять", _title);
+            y += 22;
+        }
 
         if (composing)
         {

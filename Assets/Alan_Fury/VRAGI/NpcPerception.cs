@@ -84,6 +84,8 @@ public class NpcPerception : MonoBehaviour
     public bool PlayerIsCharging => _playerCombat != null && _playerCombat.IsCharging;
     public bool PlayerIsAttacking => _playerCombat != null && _playerCombat.IsAttacking;
     public bool PlayerIsWindingUp => _playerCombat != null && _playerCombat.IsWindingUp;
+    public bool PlayerIsBlocking => _playerCombat != null && _playerCombat.IsBlocking;
+    public bool PlayerIsDodging => _playerLoco != null && _playerLoco.IsDodging;
     public bool PlayerThreatActive =>
         _playerCombat != null && _playerCombat.IsInAttackPipeline;
 
@@ -155,6 +157,7 @@ public class NpcPerception : MonoBehaviour
 
     private WerewolfAlphaStalker _stalker;
     private HumanoidCombat _playerCombat;
+    private HumanoidLocomotion _playerLoco;
     private PlayerLoadout _playerLoadout;
     private WeaponHitbox _playerHitbox;
 
@@ -293,11 +296,13 @@ public class NpcPerception : MonoBehaviour
         if (!trackPlayerCombat)
         {
             _playerCombat = null;
+            _playerLoco = null;
             _playerLoadout = null;
             _playerHitbox = null;
             return;
         }
         _playerCombat = t != null ? t.GetComponent<HumanoidCombat>() : null;
+        _playerLoco = t != null ? t.GetComponent<HumanoidLocomotion>() : null;
         _playerLoadout = t != null ? t.GetComponent<PlayerLoadout>() : null;
         _playerHitbox = t != null ? t.GetComponentInChildren<WeaponHitbox>() : null;
     }

@@ -113,6 +113,12 @@ public class PlayerTargeting : MonoBehaviour
 
     void MaintainLockTarget()
     {
+        Transform latched = FindClingingWolf();
+        if (latched != null)
+        {
+            CurrentTarget = latched;
+            return;
+        }
         if (!IsValidEnemy(CurrentTarget))
         {
             CurrentTarget = FindNearestInRadius(targetLockRange);
@@ -127,6 +133,12 @@ public class PlayerTargeting : MonoBehaviour
 
     void TryAcquireCombatTarget()
     {
+        Transform latched = FindClingingWolf();
+        if (latched != null)
+        {
+            CurrentTarget = latched;
+            return;
+        }
         if (NearTarget != null) return;
         Transform near = FindPreferredTarget(combatFaceRange);
         if (near != null) CurrentTarget = near;
@@ -262,6 +274,13 @@ public class PlayerTargeting : MonoBehaviour
             if (dist < minDist) { minDist = dist; closest = col.transform; }
         }
         return closest;
+    }
+
+    Transform FindClingingWolf()
+    {
+        var cling = WerewolfCombat.FindClingingTo(transform);
+        if (cling == null) return null;
+        return IsValidEnemy(cling.transform) ? cling.transform : null;
     }
 
     /// <summary>∆ивой враг на enemyLayers (труп / мЄртвый WerewolfStats не берЄм).</summary>

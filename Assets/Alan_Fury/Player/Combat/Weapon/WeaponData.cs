@@ -3,7 +3,7 @@
 [CreateAssetMenu(fileName = "NewWeapon", menuName = "Combat/Weapon Data")]
 public class WeaponData : ScriptableObject
 {
-    public enum WeaponType { Sword, Shield, Spear, Axe, Dagger, Bow, Staff }
+    public enum WeaponType { Sword, Shield, Spear, Axe, Dagger, Bow, Staff, Crossbow }
 
     [Header("Основное")]
     public WeaponType type;
@@ -24,7 +24,7 @@ public class WeaponData : ScriptableObject
     public Vector3 hitboxOffset = Vector3.forward;
 
     [Header("Множители поясов (0 = этим поясом не бьёт)")]
-    [Tooltip("Grab/clinch ещё нет — 1, иначе в упор урон становился нулём.")]
+    [Tooltip("Клинч / упор: локоть, рукоять, плечо. 0 = пояс не бьёт.")]
     public float multPointBlank = 1f;
     public float multClinch = 1f;
     public float multClose = 1f;
@@ -81,6 +81,13 @@ public class WeaponData : ScriptableObject
     public float projectileLifetime = 3f;
     public int projectilesPerShot = 1;
     public float spreadAngle = 0f;
+    [Tooltip("Стрелы/болты. Пусто — выстрел без расхода.")]
+    public ItemData ammoItem;
+    public int ammoPerShot = 1;
+    public float reloadDuration = 0f;
+
+    public bool OccupiesBothHands =>
+        type == WeaponType.Bow || type == WeaponType.Crossbow;
 
     [Header("Тайминги")]
     [Tooltip("База. CombatController множит на WindupScale (сейчас −30%).")]

@@ -349,12 +349,12 @@ MonoBehaviour:
     stepFrequency: 4
     stepHop: 0
   combatWalk:
-    speed: 5
-    acceleration: 25
-    deceleration: 30
-    stepDistance: 0.8
+    speed: 7
+    acceleration: 15
+    deceleration: 22
+    stepDistance: 1
     stepDuration: 0.2
-    stepFrequency: 3.5
+    stepFrequency: 1
     stepHop: 0
   combatRun:
     speed: 8
@@ -460,7 +460,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   invincible: 0
-  maxHealth: 100
+  maxHealth: 10000
   healthRegenPerSecond: 50
   healthRegenDelay: 1
   maxStamina: 1000
@@ -530,8 +530,21 @@ MonoBehaviour:
   spacingDeadzone: 0.28
   spacingMaxStep: 1.15
   spacingDuration: 0.18
+  spacingHeavyDuration: 0.12
   targetMagnetRange: 3
   targetMagnetSpeed: 5.5
+  infightHoldFraction: 0.92
+  infightElbowWindup: 0.55
+  infightPommelWindup: 0.48
+  infightShoulderWindup: 0.82
+  infightElbowDuration: 0.68
+  infightPommelDuration: 0.58
+  infightShoulderDuration: 0.88
+  shieldRamInterval: 0.55
+  shieldRamDamage: 3
+  shieldRamStagger: 7
+  shieldRamForce: 5.5
+  shieldRamAssist: 3.4
   weaponStuckDuration: 1.6
   stuckSpeedMult: 0.45
   stuckForwardExtraMult: 0.25
@@ -542,6 +555,8 @@ MonoBehaviour:
   EnemyLayers:
     serializedVersion: 2
     m_Bits: 512
+  shockLight: 0.22
+  shockHeavy: 0.26
   targeting: {fileID: 0}
   blockKey: 324
   parryKey: 102
@@ -849,6 +864,9 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   loadout: {fileID: 1000637426486226446}
   slotCount: 20
+  grantRangedKit: 1
+  startingArrows: 30
+  startingBolts: 20
 --- !u!114 &4824334992243338443
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -892,7 +910,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d5a57f767e5e46a458fc5d3c628d0cbb, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  GlobalObjectIdHash: 532751515
+  GlobalObjectIdHash: 1352778639
   InScenePlacedSourceGlobalObjectIdHash: 0
   AlwaysReplicateAsRoot: 0
   SynchronizeTransform: 1

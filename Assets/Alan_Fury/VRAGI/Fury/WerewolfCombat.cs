@@ -74,13 +74,19 @@ public class WerewolfCombat : MonoBehaviour
     [Tooltip("Тик урона внутри окна active (сек). Меньше — может задеть несколько раз за окно.")]
     public float hitTickInterval = 0.2f;
 
-    [Header("Прыжковая атака")]
+    [Header("Прыжковая атака → хватка")]
     [Tooltip("Высота дуги прыжка (передаётся в locomotion.Leap).")]
     public float jumpArc = 2.2f;
-    [Tooltip("Сколько секунд хитбокс прыжка активен с момента отрыва (должно покрывать весь полёт).")]
-    public float jumpHitDuration = 1.5f;
-    [Tooltip("Максимальная дистанция наскока (м): с этого расстояния мозг решается прыгнуть. Не путать с range хитбокса ниже.")]
+    [Tooltip("Максимальная дистанция наскока (м).")]
     public float jumpLeapDistance = 8f;
+    public float clingHoldDistance = 1.05f;
+    public float clingStaminaPerSecond = 8f;
+    public float clingGnawInterval = 0.55f;
+    public float clingGnawDamage = 8f;
+    public float clingGnawStamina = 6f;
+    public float clingPeelStamina = 14f;
+    public float clingVictimSpeed = 0.42f;
+    public float clingPull = 3.2f;
     public AttackDef jump = new AttackDef
     {
         windup = 0.45f,
@@ -92,8 +98,8 @@ public class WerewolfCombat : MonoBehaviour
         radius = 1.2f,
         height = 2f,
         offset = new Vector3(0f, 1f, 0f),
-        damage = 20f,
-        stagger = 6f
+        damage = 12f,
+        stagger = 7f
     };
 
     [Header("Обычный удар / серия")]
@@ -115,7 +121,7 @@ public class WerewolfCombat : MonoBehaviour
         height = 2f,
         offset = new Vector3(0f, 1f, 0f),
         damage = 10f,
-        stagger = 3f
+        stagger = 6f
     };
 
     [Header("Особый удар (подлый, сзади)")]
@@ -152,9 +158,30 @@ public class WerewolfCombat : MonoBehaviour
 
     private int _combo;
     private float _comboExpire;
+    private float _shockUntil;
+    private Transform _clingVictim;
+    private IDamageable _clingDamageable;
+    private HumanoidLocomotion _clingLoco;
+    private HumanoidCombat _clingCombat;
+    private float _nextGnawTime;
+    private static readonly System.Collections.Generic.List<WerewolfCombat> Live
+        = new System.Collections.Generic.List<WerewolfCombat>(8);
 
     // ===================== Публичное для мозга =====================
-    public bool IsBusy => _phase != Phase.Idle;
+    public bool IsBusy => _phase != Phase.Idle || IsClinging;
+    public bool IsClinging => _clingVictim != null;
+    public Transform ClingVictim => _clingVictim;
+
+    public static WerewolfCombat FindClingingTo(Transform victim)
+    {
+        if (victim == null) return null;
+        for (int i = 0; i < Live.Count; i++)
+        {
+            var c = Live[i];
+            if (c != null && c._clingVictim == victim) return c;
+        }
+        return null;
+    }
     /// <summary>Идёт замах. Под индикатор замаха волка (микроспрайт у головы).</summary>
     public bool IsWindingUp => _phase == Phase.Windup;
 
@@ -164,11 +191,37 @@ public class WerewolfCombat : MonoBehaviour
     /// <summary>Хватает ли стамины и вышел ли кулдаун на конкретную атаку (для решений мозга).</summary>
     public bool CanStart(AttackKind kind)
     {
-        if (_phase != Phase.Idle) return false;
+        if (_phase != Phase.Idle || IsClinging) return false;
+        if (Time.time < _shockUntil) return false;
         // Волк встаёт на две ноги / опускается на четыре — руки заняты, ударить нечем.
         if (locomotion != null && locomotion.IsChangingStance) return false;
         if (Time.time < _cooldownUntil[(int)kind]) return false;
         return stats != null && stats.HasEnough(DefOf(kind).staminaCost);
+    }
+
+    public void InterruptFromHit(bool heavy, HitInfo hit = default)
+    {
+        _shockUntil = Time.time + (heavy ? 0.26f : 0.22f);
+        if (locomotion != null) locomotion.LockFace(heavy ? 0.36f : 0.32f);
+        if (IsClinging && (hit.isInfight || hit.band <= CombatRange.Clinch))
+            Peel(clingPeelStamina);
+        if (IsClinging) return;
+        if (_phase == Phase.Idle) return;
+        if (_kind == AttackKind.Jump && locomotion != null && locomotion.IsLeaping)
+            return;
+        if (melee != null) melee.Stop();
+        if (hitbox != null) hitbox.Deactivate();
+        _phase = Phase.Recover;
+        _phaseTimer = 0.12f;
+        _combo = 0;
+    }
+
+    public void Peel(float stamina)
+    {
+        if (!IsClinging) return;
+        if (stats != null) stats.Spend(Mathf.Max(0f, stamina));
+        if (stats == null || !stats.HasEnough(clingGnawStamina))
+            EndCling();
     }
 
     public bool TryJump() => TryStart(AttackKind.Jump, jump);
@@ -176,6 +229,17 @@ public class WerewolfCombat : MonoBehaviour
     public bool TrySpecial() => TryStart(AttackKind.Special, special);
 
     // ===================== Жизненный цикл =====================
+
+    void OnEnable()
+    {
+        if (!Live.Contains(this)) Live.Add(this);
+    }
+
+    void OnDisable()
+    {
+        Live.Remove(this);
+        EndCling();
+    }
 
     void Start()
     {
@@ -216,6 +280,11 @@ public class WerewolfCombat : MonoBehaviour
     void Update()
     {
         float dt = Time.deltaTime;
+        if (IsClinging)
+        {
+            TickCling(dt);
+            return;
+        }
         if (_combo > 0 && Time.time > _comboExpire) _combo = 0;
 
         switch (_phase)
@@ -298,24 +367,17 @@ public class WerewolfCombat : MonoBehaviour
 
         if (_kind == AttackKind.Jump)
         {
-            // Прыгаем в игрока; хитбокс активен весь полёт и летит с волком.
-            if (perception.HasPlayer && locomotion.IsGrounded)
-            {
+            if (perception != null && perception.HasPlayer && locomotion != null && locomotion.IsGrounded)
                 locomotion.Leap(perception.PlayerPos, jumpArc);
-                FireHitbox(_def, jumpHitDuration);
-            }
             else
-            {
-                // Прыгнуть не смогли (не на земле / нет игрока) — бьём на месте.
-                FireHitbox(_def);
-            }
+                TryLatch();
         }
         else
         {
             // Свип: небольшой рывок в игрока — удар «на ходу» (каждый свип серии — новый рывок).
             if (_kind == AttackKind.Swipe && swipeLungeImpulse > 0f)
             {
-                Vector3 lungeDir = perception.HasPlayer
+                Vector3 lungeDir = perception != null && perception.HasPlayer
                     ? Flat(perception.PlayerPos - transform.position)
                     : transform.forward;
                 locomotion.AddImpulse(lungeDir * swipeLungeImpulse);
@@ -323,7 +385,7 @@ public class WerewolfCombat : MonoBehaviour
             // Special: подскок вперёд в момент удара.
             else if (_kind == AttackKind.Special && specialHopImpulse > 0f)
             {
-                Vector3 hopDir = perception.HasPlayer
+                Vector3 hopDir = perception != null && perception.HasPlayer
                     ? Flat(perception.PlayerPos - transform.position)
                     : transform.forward;
                 locomotion.AddImpulse(hopDir * specialHopImpulse);
@@ -338,11 +400,12 @@ public class WerewolfCombat : MonoBehaviour
     // после него — короткое окно active и recover.
     private void TickJumpActive(float dt)
     {
-        if (locomotion.IsLeaping) { _jumpAirborne = true; return; } // в полёте — ждём
+        if (locomotion.IsLeaping) { _jumpAirborne = true; return; }
         if (_jumpAirborne)
         {
             _jumpAirborne = false;
-            _phaseTimer = _def.active; // приземлился — короткое окно перед recover
+            if (TryLatch()) return;
+            _phaseTimer = _def.active;
         }
 
         _phaseTimer -= dt;
@@ -364,6 +427,113 @@ public class WerewolfCombat : MonoBehaviour
         }
     }
 
+    bool TryLatch()
+    {
+        if (perception == null || !perception.HasPlayer) return false;
+        if (perception.PlayerIsDodging) return false;
+        if (perception.PlayerIsBlocking && perception.AngleFromPlayerGaze < 100f)
+        {
+            if (locomotion != null)
+                locomotion.AddImpulse(perception.DirFromPlayerFlat * 6f);
+            return false;
+        }
+
+        BeginCling(perception.player);
+        return true;
+    }
+
+    void BeginCling(Transform victim)
+    {
+        if (victim == null) return;
+        EndCling();
+        _clingVictim = victim;
+        _clingDamageable = victim.GetComponent<IDamageable>();
+        _clingLoco = victim.GetComponent<HumanoidLocomotion>();
+        _clingCombat = victim.GetComponent<HumanoidCombat>();
+        _nextGnawTime = Time.time + clingGnawInterval * 0.35f;
+        _phase = Phase.Idle;
+        if (melee != null) melee.Stop();
+        if (hitbox != null) hitbox.Deactivate();
+        if (locomotion != null) locomotion.SetClingPartner(victim, clingHoldDistance);
+        if (_clingLoco != null) _clingLoco.SetClingPartner(transform, clingVictimSpeed, clingPull);
+        PlayClingAnim(true);
+    }
+
+    void EndCling()
+    {
+        if (_clingLoco != null) _clingLoco.ClearClingPartner();
+        if (locomotion != null) locomotion.ClearClingPartner();
+        PlayClingAnim(false);
+        _clingVictim = null;
+        _clingDamageable = null;
+        _clingLoco = null;
+        _clingCombat = null;
+    }
+
+    void TickCling(float dt)
+    {
+        if (_clingVictim == null || (_clingDamageable != null && !_clingDamageable.IsAlive))
+        {
+            EndCling();
+            return;
+        }
+        if (perception != null && perception.PlayerIsDodging)
+        {
+            EndCling();
+            return;
+        }
+        if (stats != null)
+        {
+            stats.Spend(clingStaminaPerSecond * dt);
+            if (!stats.HasEnough(0.05f))
+            {
+                EndCling();
+                return;
+            }
+        }
+        if (locomotion != null)
+            locomotion.FaceTowards(_clingVictim.position, dt);
+
+        if (Time.time >= _nextGnawTime)
+        {
+            _nextGnawTime = Time.time + clingGnawInterval;
+            Gnaw();
+        }
+    }
+
+    void Gnaw()
+    {
+        if (stats != null)
+        {
+            if (!stats.HasEnough(clingGnawStamina))
+            {
+                EndCling();
+                return;
+            }
+            stats.Spend(clingGnawStamina);
+        }
+
+        if (_clingDamageable == null) return;
+        Vector3 src = transform.position;
+        HitInfo info = HitInfo.Basic(clingGnawDamage, src);
+        info.zone = BiteLegZone();
+        info.band = CombatRange.PointBlank;
+        info.stagger = 4f;
+        info.hitDirection = perception != null
+            ? Flat(_clingVictim.position - transform.position)
+            : transform.forward;
+        _clingDamageable.TakeHit(info);
+        _clingDamageable.ApplyKnockback(info.hitDirection * info.stagger);
+        OnHitLanded?.Invoke();
+        if (locomotion != null) locomotion.PlayAttack("Special");
+    }
+
+    void PlayClingAnim(bool on)
+    {
+        if (locomotion == null) return;
+        if (on) locomotion.PlayAttack("Special");
+    }
+
     // ===================== Урон =====================
 
     private void FireHitbox(AttackDef def, float durationOverride = 0f)
@@ -373,7 +543,7 @@ public class WerewolfCombat : MonoBehaviour
         // Бьём туда, куда СМОТРИМ. Раньше удар летел в игрока независимо от разворота —
         // волк попадал спиной, и обойти его было нельзя. Теперь обход = промах.
         // Наскок — исключение: там направление задаёт сам прыжок.
-        Vector3 dir = _kind == AttackKind.Jump && perception.HasPlayer
+        Vector3 dir = _kind == AttackKind.Jump && perception != null && perception.HasPlayer
             ? Flat(perception.PlayerPos - transform.position)
             : transform.forward;
 

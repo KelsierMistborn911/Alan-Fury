@@ -62,6 +62,10 @@ public class WerewolfStats : MonoBehaviour, IDamageable
     [Tooltip("Как часто считается дрейф страха (сек). Урон действует мгновенно, мимо этого тика.")]
     public float slowTickInterval = 1f;
 
+    [Header("Масса")]
+    [Tooltip("Тяжелее — меньше отброс. Игрок = 80.")]
+    public float mass = 100f;
+
     [Header("Цель")]
     [Tooltip("Своя цель. Задаёт кольцо с мин. и макс. дистанцией. Пусто — волк вне драки.")]
     public Transform target;
@@ -70,85 +74,94 @@ public class WerewolfStats : MonoBehaviour, IDamageable
     private float _regenTimer;
     private float _healthRegenTimer;
     private float _health;
-    private float _aggression; // накопленная агрессия 0..100, старт 0
-    private float _fear;       // личный страх 0..100, старт 0
+    private float _aggression;
+    private float _fear;
     private float _slowTimer;
     private ApexHolder _apex = ApexHolder.None;
     private WerewolfLocomotion _locomotion;
+    private WerewolfCombat _combat;
+    private WoundTracker _wounds;
 
     public float Stamina => _stamina;
     public float StaminaPercent => maxStamina > 0f ? _stamina / maxStamina : 0f;
     public float Health => _health;
     public float HealthPercent => maxHealth > 0f ? _health / maxHealth : 0f;
     public bool IsAlive => _health > 0f;
-
-    /// <summary>Текущая агрессия 0..100 (для HUD).</summary>
     public float Aggression => _aggression;
-    /// <summary>Текущая агрессия, нормированная 0..1 (для мозга).</summary>
-    public float Aggression01 => _aggression / 100f;
+    public float Aggression01 => Mathf.Clamp01(_aggression / 100f);
+    public float Fear01 => Mathf.Clamp01(_fear / 100f);
 
-    /// <summary>Текущий страх 0..100 (для HUD).</summary>
-    public float Fear => _fear;
-    /// <summary>Текущий страх, нормированный 0..1 (для мозга).</summary>
-    public float Fear01 => _fear / 100f;
-    /// <summary>Ступень страха: 0..24 спокоен, 25..49 насторожен, 50..74 напуган, 75+ ужас.
-    /// Если вершину уже держит агрессия — упирается в «напуган».</summary>
-    public FearTier Tier => (FearTier)TierIndex(_fear, _apex == ApexHolder.Aggression);
+    public FearTier Tier
+    {
+        get
+        {
+            if (_fear >= ApexThreshold) return FearTier.Terror;
+            if (_fear >= FearTierStep * 2f) return FearTier.Afraid;
+            if (_fear >= FearTierStep) return FearTier.Wary;
+            return FearTier.Calm;
+        }
+    }
 
-    /// <summary>Ступень агрессии. Если вершину держит страх — упирается в «злой».</summary>
-    public AggressionTier AggroTier => (AggressionTier)TierIndex(_aggression, _apex == ApexHolder.Fear);
+    public AggressionTier AggroTier
+    {
+        get
+        {
+            if (_aggression >= ApexThreshold) return AggressionTier.Rage;
+            if (_aggression >= FearTierStep * 2f) return AggressionTier.Fierce;
+            if (_aggression >= FearTierStep) return AggressionTier.Mid;
+            return AggressionTier.Cautious;
+        }
+    }
 
-    /// <summary>Кто сейчас держит вершину (лог, HUD).</summary>
-    public ApexHolder Apex => _apex;
-
-    /// <summary>
-    /// Настроение 1–5 из двух шкал. Afraid+ (Tier ≥ Afraid) → Fleeish.
-    /// Иначе по разнице Aggro01−Fear01 и уровню.
-    /// </summary>
     public CombatMood Mood
     {
         get
         {
-            if (Tier >= FearTier.Afraid) return CombatMood.Fleeish;
-            float d = Aggression01 - Fear01; // −1..+1
-            float peak = Mathf.Max(Aggression01, Fear01);
-            if (d > 0.35f && Aggression01 >= 0.55f) return CombatMood.Rage;
-            if (d > 0.12f) return CombatMood.Aggressive;
-            if (d < -0.12f || Fear01 > 0.4f) return CombatMood.Skittish;
-            if (peak < 0.2f) return CombatMood.Aggressive; // оба низкие — спокойный пресс
-            return CombatMood.Tense;
+            if (Tier == FearTier.Terror && _apex == ApexHolder.Fear)
+                return CombatMood.Fleeish;
+            if (AggroTier == AggressionTier.Rage && _apex == ApexHolder.Aggression)
+                return CombatMood.Rage;
+            if (Tier >= FearTier.Afraid && AggroTier <= AggressionTier.Mid)
+                return CombatMood.Skittish;
+            if (Tier >= FearTier.Wary && AggroTier <= AggressionTier.Fierce)
+                return CombatMood.Tense;
+            if (AggroTier >= AggressionTier.Fierce)
+                return CombatMood.Aggressive;
+            return CombatMood.Aggressive;
         }
     }
 
-    private static int TierIndex(float value, bool capped)
-        => Mathf.Clamp(Mathf.FloorToInt(value / FearTierStep), 0, capped ? 2 : 3);
-
-    /// <summary>Есть ли своя цель — по этому же признаку страх тянется к боевому уровню.</summary>
-    public bool InCombat => target != null;
-    /// <summary>К какому уровню страх сейчас возвращается.</summary>
-    public float BaseFear => InCombat ? baseFearCombat : baseFearIdle;
-
-    /// <summary>Срабатывает один раз при смерти (мозг гасит компоненты, тело остаётся).</summary>
     public System.Action OnDeath;
 
-    // ===================== Агрессия и страх =====================
+    public bool HasEnough(float cost) => _stamina >= cost;
 
-    /// <summary>Изменить агрессию (накопление, свои попадания, чужая рана рядом). Зажимается 0..100.</summary>
+    public void Spend(float cost)
+    {
+        if (cost <= 0f) return;
+        _stamina = Mathf.Max(0f, _stamina - cost);
+        _regenTimer = staminaRegenDelay;
+    }
+
+    public void AddFear(float amount)
+    {
+        if (amount == 0f) return;
+        _fear = Mathf.Clamp(_fear + amount, 0f, 100f);
+        RefreshApex();
+        if (_apex == ApexHolder.Aggression)
+            _fear = Mathf.Min(_fear, ApexThreshold - 0.01f);
+    }
+
+    public void AddFearTiers(int tiers) => AddFear(FearTierStep * tiers);
+
     public void AddAggression(float delta)
     {
+        if (delta == 0f) return;
         _aggression = Mathf.Clamp(_aggression + delta, 0f, 100f);
         RefreshApex();
+        if (_apex == ApexHolder.Fear)
+            _aggression = Mathf.Min(_aggression, ApexThreshold - 0.01f);
     }
 
-    /// <summary>Изменить страх напрямую. Зажимается 0..100.</summary>
-    public void AddFear(float delta)
-    {
-        _fear = Mathf.Clamp(_fear + delta, 0f, 100f);
-        RefreshApex();
-    }
-
-    /// <summary>Кто первым перевалил 75, тот держит вершину, пока сам не упадёт ниже.
-    /// Если обе шкалы перескочили порог в один кадр — вершину берёт большая, при равенстве страх.</summary>
     private void RefreshApex()
     {
         bool fearApex = _fear >= ApexThreshold;
@@ -163,30 +176,19 @@ public class WerewolfStats : MonoBehaviour, IDamageable
         else if (aggroApex) _apex = ApexHolder.Aggression;
     }
 
-    /// <summary>
-    /// Поднять страх на N ступеней (по 25 единиц). Позиция внутри ступени сохраняется:
-    /// волк с 20 после +2 окажется на 70. Этим бьёт срыв стаи.
-    /// </summary>
-    public void AddFearTiers(int tiers) => AddFear(FearTierStep * tiers);
-
     void Awake()
     {
         _stamina = maxStamina;
         _health = maxHealth;
         _fear = baseFearIdle;
         _locomotion = GetComponent<WerewolfLocomotion>();
-        // Фаза тика разъезжается по волкам, чтобы вся стая не пересчитывалась в один кадр.
+        _combat = GetComponent<WerewolfCombat>();
         _slowTimer = Random.value * slowTickInterval;
 
-        // Раны v1: если компонента нет — добавим, чтобы лог и bleed работали без ручной настройки.
         _wounds = GetComponent<WoundTracker>();
         if (_wounds == null)
             _wounds = gameObject.AddComponent<WoundTracker>();
     }
-
-    // ===================== IDamageable (урон от меча игрока через WeaponHitbox) =====================
-
-    private WoundTracker _wounds;
 
     public void TakeDamage(float amount)
     {
@@ -198,13 +200,11 @@ public class WerewolfStats : MonoBehaviour, IDamageable
         TakeDamage(amount);
     }
 
-    /// <summary>
-    /// Полный хит: если есть WoundTracker — зона/пробитие/ступень/bleed + лог.
-    /// Иначе обычный урон.
-    /// </summary>
     public void TakeHit(HitInfo hit)
     {
         if (!IsAlive) return;
+        if (_combat != null)
+            _combat.InterruptFromHit(hit.isHeavy || hit.stagger >= 5.5f, hit);
         if (_wounds == null) _wounds = GetComponent<WoundTracker>();
         if (_wounds != null)
         {
@@ -214,9 +214,6 @@ public class WerewolfStats : MonoBehaviour, IDamageable
         ApplyHealthDamage(hit.rawDamage > 0f ? hit.rawDamage : hit.finalDamage, hit, reportFear: true, showPopup: true);
     }
 
-    /// <summary>
-    /// Прямое списание HP. reportFear=false для тиков кровотечения (без спама страха стаи).
-    /// </summary>
     public void ApplyHealthDamage(float amount, HitInfo hit = default, bool reportFear = true, bool showPopup = true)
     {
         if (!IsAlive || amount <= 0f) return;
@@ -238,14 +235,14 @@ public class WerewolfStats : MonoBehaviour, IDamageable
 
     public void ApplyKnockback(Vector3 force)
     {
-        if (_locomotion != null) _locomotion.AddImpulse(force);
+        if (_locomotion == null) return;
+        _locomotion.ApplyHitRecoil(force, mass);
     }
 
     void Update()
     {
         float dt = Time.deltaTime;
 
-        // --- Стамина: как было, каждый кадр ---
         if (_regenTimer > 0f) _regenTimer -= dt;
         else if (_stamina < maxStamina)
             _stamina = Mathf.Min(maxStamina, _stamina + staminaRegenPerSecond * dt);
@@ -256,27 +253,16 @@ public class WerewolfStats : MonoBehaviour, IDamageable
             else _health = Mathf.Min(maxHealth, _health + healthRegenPerSecond * dt);
         }
 
-        // --- Дрейф страха: редким тиком ---
         _slowTimer -= dt;
         if (_slowTimer <= 0f)
         {
-            float step = slowTickInterval;
-            _slowTimer += slowTickInterval;
-            SlowTick(step);
+            _slowTimer = Mathf.Max(0.2f, slowTickInterval);
+            float targetFear = target != null ? baseFearCombat : baseFearIdle;
+            if (!Mathf.Approximately(_fear, targetFear))
+            {
+                _fear = Mathf.MoveTowards(_fear, targetFear, fearRegenPerSecond * Mathf.Max(0.2f, slowTickInterval));
+                RefreshApex();
+            }
         }
-    }
-
-    /// <summary>Медленные изменения. Зовётся раз в slowTickInterval, а не каждый кадр.</summary>
-    private void SlowTick(float step)
-    {
-        _fear = Mathf.MoveTowards(_fear, BaseFear, fearRegenPerSecond * step);
-    }
-
-    public bool HasEnough(float amount) => _stamina >= amount;
-
-    public void Spend(float amount)
-    {
-        _stamina = Mathf.Max(0f, _stamina - amount);
-        _regenTimer = staminaRegenDelay;
     }
 }

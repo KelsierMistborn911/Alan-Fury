@@ -64,6 +64,8 @@ public struct HitInfo
 
     public HitIntent intent;
     public bool isHeavy;
+    public bool isInfight;           // локоть / рукоять / плечо / таран щитом
+    public CombatRange band;
     public bool stepBoost;           // два согласованных шага
     public float chargePercent;
     public float penetrationScore;   // сырой скор до сравнения с сопротивлением

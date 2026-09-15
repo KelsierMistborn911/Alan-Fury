@@ -197,6 +197,7 @@ public class HumanoidLocomotion : MonoBehaviour
     protected PlayerResources Resources;
 
     private Vector3 _velocity;
+    private float _lungeLeft;
     private float _verticalVelocity;
     private GaitConfig _currentGait;
     private int _currentGaitLevel = 2;
@@ -224,11 +225,16 @@ public class HumanoidLocomotion : MonoBehaviour
     public float TimeSinceDodgeEnd => Time.time - _lastDodgeEndTime;
     public float DodgeSpeedValue => dodgeSpeed;
     public float CurrentSpeed => _velocity.magnitude;
+    public Vector3 RecoilDir => _recoilDir;
     public bool IsSneaking { get; private set; }
     public int CurrentGaitLevel => _currentGaitLevel;
     public bool IsDead { get; private set; }
 
-    public void StopHorizontalVelocity() => _velocity = Vector3.zero;
+    public void StopHorizontalVelocity()
+    {
+        _velocity = Vector3.zero;
+        _lungeLeft = 0f;
+    }
 
     private float _stuckTimer;
     private Vector3 _stuckDir;
@@ -238,6 +244,25 @@ public class HumanoidLocomotion : MonoBehaviour
     private float _stuckPullFreeTime = 0.22f;
 
     public bool IsWeaponStuck => _stuckTimer > 0f;
+    public bool IsClung { get; private set; }
+
+    private Transform _clingPartner;
+    private float _clingSpeedMult = 0.42f;
+    private float _clingPull = 3.2f;
+
+    public void SetClingPartner(Transform partner, float speedMult = 0.42f, float pull = 3.2f)
+    {
+        _clingPartner = partner;
+        IsClung = partner != null;
+        _clingSpeedMult = Mathf.Clamp(speedMult, 0.15f, 1f);
+        _clingPull = Mathf.Max(0f, pull);
+    }
+
+    public void ClearClingPartner()
+    {
+        _clingPartner = null;
+        IsClung = false;
+    }
 
     public void EnterWeaponStuck(float duration, Vector3 embedDir,
         float speedMult = 0.45f, float forwardExtraMult = 0.25f, float pullFreeTime = 0.22f)
@@ -258,20 +283,41 @@ public class HumanoidLocomotion : MonoBehaviour
         _stuckPullAccum = 0f;
     }
 
-    public void AddLungeSpeed(Vector3 dir, float speed)
+    public void AddLungeSpeed(Vector3 dir, float speed, float hold = 0.18f)
     {
         dir.y = 0f;
         if (dir.sqrMagnitude < 0.01f || speed <= 0f) return;
         _velocity = dir.normalized * speed;
+        _lungeLeft = Mathf.Max(0.05f, hold);
     }
 
     private Vector3 _planarAssist;
+    private Vector3 _recoilVel;
+    private Vector3 _recoilDir;
+    private float _recoilDecel = 26f;
 
     public void AddPlanarAssist(Vector3 velocity)
     {
         velocity.y = 0f;
         if (velocity.sqrMagnitude < 0.0001f) return;
         _planarAssist += velocity;
+    }
+
+    public void ApplyHitRecoil(Vector3 force, bool blocked)
+    {
+        force.y = 0f;
+        if (force.sqrMagnitude < 0.0001f) return;
+        if (_isDodging || _isRolling) return;
+
+        float mass = Resources != null ? Mathf.Max(40f, Resources.mass) : 80f;
+        float raw = force.magnitude * (80f / mass);
+        bool heavy = raw >= 5.5f;
+        float travel = heavy ? 0.85f : 0.45f;
+        if (blocked) travel *= 0.4f;
+        _recoilDecel = blocked ? 18f : 26f;
+        float speed = Mathf.Sqrt(Mathf.Max(0.05f, 2f * _recoilDecel * travel));
+        _recoilDir = force.normalized;
+        _recoilVel = _recoilDir * speed;
     }
 
     /// <summary>Последняя команда движения (мир, горизонталь). Ноль — стоим.</summary>
@@ -438,6 +484,8 @@ public class HumanoidLocomotion : MonoBehaviour
         ApplyGait();
         TickWeaponStuck();
         TickMovement();
+        TickClingPull();
+        TickRecoil();
         ApplyGravity();
 
         if (!_cmdSet)
@@ -451,6 +499,30 @@ public class HumanoidLocomotion : MonoBehaviour
         _stuckTimer -= Time.deltaTime;
         if (_stuckTimer <= 0f)
             ClearWeaponStuck();
+    }
+
+    void TickClingPull()
+    {
+        if (!IsClung || _clingPartner == null || _clingPull <= 0f) return;
+        if (_isDodging || _isRolling) return;
+
+        Vector3 to = _clingPartner.position - transform.position;
+        to.y = 0f;
+        float dist = to.magnitude;
+        if (dist < 0.05f) return;
+        Vector3 inward = to / dist;
+
+        Vector3 input = DesiredMoveDir;
+        bool backing = input.sqrMagnitude > 0.04f && Vector3.Dot(input.normalized, inward) < -0.2f;
+        bool striking = Combat != null && Combat.IsInAttackPipeline;
+        if (backing) return;
+        if (!striking && input.sqrMagnitude > 0.04f)
+        {
+            // не в ту сторону — режем уже через speedMult; тянем только если бьёт или стоит
+            if (Vector3.Dot(input.normalized, inward) < 0.2f) return;
+        }
+
+        AddPlanarAssist(inward * _clingPull);
     }
 
     protected void MoveHorizontal(Vector3 delta)
@@ -702,6 +774,13 @@ public class HumanoidLocomotion : MonoBehaviour
     void TickMovement()
     {
         Vector3 targetDir = DesiredMoveDir;
+        if (Combat != null && Combat.IsInShock && targetDir.sqrMagnitude > 0.01f && _recoilDir.sqrMagnitude > 0.01f)
+        {
+            Vector3 towardAttacker = -_recoilDir;
+            float into = Vector3.Dot(targetDir, towardAttacker);
+            if (into > 0f)
+                targetDir = (targetDir - towardAttacker * into).normalized * 0.55f;
+        }
         bool hasInput = targetDir.sqrMagnitude > 0.01f;
         bool isSprinting = _currentGaitLevel == 3;
         bool wantMove = hasInput || isSprinting;
@@ -724,6 +803,15 @@ public class HumanoidLocomotion : MonoBehaviour
             _walkStartTimer -= Time.deltaTime;
 
         _hadMoveInput = wantMove;
+
+        if (_lungeLeft > 0f)
+        {
+            _lungeLeft -= Time.deltaTime;
+            MoveHorizontal(_velocity * Time.deltaTime);
+            HandleRotation(_velocity.sqrMagnitude > 0.01f ? _velocity : default);
+            ConsumePlanarAssist();
+            return;
+        }
 
         if (wantMove)
         {
@@ -767,6 +855,8 @@ public class HumanoidLocomotion : MonoBehaviour
             float speedMult = DirectionSpeedMultiplier(targetDir);
             if (_walkStartTimer > 0f)
                 speedMult *= walkStartSpeedFactor;
+            if (IsClung)
+                speedMult *= _clingSpeedMult;
 
             if (_stuckTimer > 0f)
             {
@@ -876,6 +966,13 @@ public class HumanoidLocomotion : MonoBehaviour
         if (_planarAssist.sqrMagnitude < 0.0001f) return;
         MoveHorizontal(_planarAssist * Time.deltaTime);
         _planarAssist = Vector3.zero;
+    }
+
+    void TickRecoil()
+    {
+        if (_recoilVel.sqrMagnitude < 0.0001f) return;
+        MoveHorizontal(_recoilVel * Time.deltaTime);
+        _recoilVel = Vector3.MoveTowards(_recoilVel, Vector3.zero, _recoilDecel * Time.deltaTime);
     }
 
     void BeginStep(Vector3 dir)

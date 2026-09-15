@@ -10,7 +10,7 @@ using UnityEngine;
 ///   • Раздаёт СЛОТЫ атаки по требованиям (здоровье, страх): держатель остаётся в слоте,
 ///     пока проходит требования — периодической пересборки ролей нет. Ранен или напуган →
 ///     слот уходит целому. Никто не годится → слот остаётся ПУСТЫМ, стая давит меньшим числом.
-///   • Слот 1 получает признак avoidFront ("заходи не спереди").
+///   • Последний слот при maxAttackers≥3 — Orbit: только обход, роль ротируется.
 ///   • Держит ОДИН токен фронт-атаки: фронтовики бьют по очереди, чтобы не попасть друг в друга.
 ///   • Считает расталкивание для всей стаи одним проходом (SeparationFor) — волкам не нужен
 ///     свой Physics.OverlapSphere каждый кадр.
@@ -25,7 +25,7 @@ public class WerewolfPackManager : MonoBehaviour
 {
     public static WerewolfPackManager Instance { get; private set; }
 
-    public enum PackRole { Surround, Attack }
+    public enum PackRole { Surround, Attack, Orbit }
 
     /// <summary>Что менеджер требует от мозга волка. Реализует WerewolfAttackBrain.</summary>
     public interface IPackAgent
@@ -37,7 +37,9 @@ public class WerewolfPackManager : MonoBehaviour
         /// <summary>Страх 0..1 — напуганный не годится в атакующие.</summary>
         float Fear01 { get; }
         void SetRole(PackRole role, bool avoidFront);
-        /// <summary>Разрешение бить в этот момент (токен фронта). Второй (сзади) всегда true.</summary>
+        /// <summary>Можно сменить слот: не в хватке и не в середине удара.</summary>
+        bool CanRotateRole { get; }
+        /// <summary>Разрешение бить в этот момент (токен фронта). Орбита токен не берёт.</summary>
         void SetAttackToken(bool hasToken);
         /// <summary>Сбить или поднять кураж извне (рана своего рядом).</summary>
         void AddAggression(float delta);
@@ -88,6 +90,8 @@ public class WerewolfPackManager : MonoBehaviour
     public float slotStealMargin = 2f;
     [Tooltip("Сколько секунд слот залочен после смены держателя.")]
     public float slotLockTime = 3f;
+    [Tooltip("Как долго один волк держит роль обхода (третий слот), прежде чем она уйдёт другому.")]
+    public float orbitRoleDuration = 8f;
 
     [Header("Кольцо окружения")]
     [Tooltip("Доля окружающих, встающих в переднюю дугу со стороны альфы. Остальные — фланги и спина.")]
@@ -131,6 +135,7 @@ public class WerewolfPackManager : MonoBehaviour
     [Tooltip("Сколько агрессии снимается за единицу урона. Делится поровну между соседями в радиусе.")]
     public float woundAggroPerDamage = 1f;
 
+    private float _orbitUntil;
     private float _nextJumpAllowed;
     private float _packFear;
     private bool _packScattering;
@@ -385,6 +390,65 @@ public class WerewolfPackManager : MonoBehaviour
         }
 
         UpdateFrontToken();
+        TickOrbitRotation();
+    }
+
+    int OrbitSlotIndex => maxAttackers >= 3 ? maxAttackers - 1 : -1;
+
+    bool IsOrbitSlot(int slot) => slot >= 0 && slot == OrbitSlotIndex;
+
+    void TickOrbitRotation()
+    {
+        int orbit = OrbitSlotIndex;
+        if (orbit < 0 || _attackSlots.Count <= orbit) return;
+        if (_packScattering) return;
+        if (Time.time < _orbitUntil) return;
+
+        var holder = _attackSlots[orbit];
+        if (holder != null && !holder.CanRotateRole)
+            return;
+
+        var next = PickOrbitSuccessor(holder);
+        if (next == null || next == holder)
+        {
+            _orbitUntil = Time.time + Mathf.Max(1.5f, orbitRoleDuration * 0.4f);
+            return;
+        }
+
+        int nextSlot = _attackSlots.IndexOf(next);
+        if (nextSlot >= 0)
+        {
+            _attackSlots[nextSlot] = holder;
+            _attackSlots[orbit] = next;
+            if (holder != null) Assign(holder, nextSlot);
+            Assign(next, orbit);
+        }
+        else
+        {
+            if (holder != null)
+            {
+                Demote(holder);
+                _attackSlots[orbit] = null;
+            }
+            Assign(next, orbit);
+        }
+
+        _orbitUntil = Time.time + Mathf.Max(2f, orbitRoleDuration);
+        Log($"Орбита: {Name(holder)} → {Name(next)}");
+    }
+
+    IPackAgent PickOrbitSuccessor(IPackAgent current)
+    {
+        for (int i = 0; i < _attackSlots.Count; i++)
+        {
+            if (IsOrbitSlot(i)) continue;
+            var w = _attackSlots[i];
+            if (w == null || w == current || !w.IsAlive) continue;
+            if (!w.CanRotateRole) continue;
+            if (!Qualifies(w, out _)) continue;
+            return w;
+        }
+        return PickBestFree();
     }
 
     /// <summary>Годится ли волк в атакующие. Причина отказа возвращается для лога.</summary>
@@ -447,6 +511,7 @@ public class WerewolfPackManager : MonoBehaviour
         // Запас slotStealMargin и лок slotLockTime не дают слоту прыгать между равными.
         for (int i = 0; i < _attackSlots.Count; i++)
         {
+            if (IsOrbitSlot(i)) continue; // орбита крутится своим таймером, не крадётся по дистанции
             var holder = _attackSlots[i];
             if (holder == null || Time.time < _slotLockedUntil[i]) continue;
 
@@ -626,7 +691,8 @@ public class WerewolfPackManager : MonoBehaviour
         _attackSlots[slot] = w;
         _slotLockedUntil[slot] = Time.time + slotLockTime;
         // Слот 1 (второй атакующий) заходит не спереди — как было в старых ролях.
-        w.SetRole(PackRole.Attack, slot == 1);
+        bool orbit = IsOrbitSlot(slot);
+        w.SetRole(orbit ? PackRole.Orbit : PackRole.Attack, orbit);
         OnSlotGranted?.Invoke(w, slot);
     }
 
@@ -736,7 +802,9 @@ public class WerewolfPackManager : MonoBehaviour
         {
             int idx = ((startIdx + step) % n + n) % n;
             var cand = _attackSlots[idx];
-            if (cand != null && cand.IsAlive) return cand;
+            if (cand == null || !cand.IsAlive) continue;
+            if (IsOrbitSlot(idx)) continue;
+            return cand;
         }
         return null;
     }

@@ -3,8 +3,9 @@ using System.Collections.Generic;
 
 /// <summary>
 /// Отрисовка + hybrid live + стриминг.
-/// Fade: если ветка/крона заслоняет видимую клетку — прозрачно от этой высоты и выше по тому же дереву.
-/// Низ keepBottomFraction плотный. Live-префаб — только коллайдер; картинка и fade всегда инстансом.
+/// Fade: коридор от персонажа через курсор. Полупрозрачная крона только
+/// если она заслоняет видимую клетку внутри этого коридора.
+/// Live — коллайдер; картинка всегда инстанс.
 /// </summary>
 public class NatureRenderer : MonoBehaviour
 {
@@ -25,24 +26,12 @@ public class NatureRenderer : MonoBehaviour
 
     [Header("Fade (заслон камеры)")]
     public bool useVisionFade = true;
-    [Tooltip("Прозрачность кроны на маске. 0 = плотная, 1 = не видна.")]
-    [Range(0f, 1f)] public float fadeTransparency = 0.95f;
     [Tooltip("Насколько обесцветить крону в fade.")]
     [Range(0f, 1f)] public float fadePale = 0.45f;
-    [Tooltip("Нижняя доля высоты дерева остаётся непрозрачной.")]
-    [Range(0f, 0.5f)] public float keepBottomFraction = 0.2f;
-    [Tooltip("Минимум непрозрачного низа, метры.")]
-    public float keepBottomHeight = 0f;
     [Tooltip("Радиус луча угол контура → камера (м).")]
     public float occlusionRayRadius = 1.8f;
     [Tooltip("Сколько углов золотого контура (4–12).")]
     [Range(4, 12)] public int fadeCornerCount = 8;
-    [Tooltip("Под игроком низ не режется (м по земле). Крона рядом — наоборот полностью прозрачная.")]
-    public float playerKeepRadius = 2.2f;
-    [Tooltip("Внутри этого радиуса крона на маске полностью прозрачна.")]
-    public float fadeNearRadius = 8f;
-    [Tooltip("За fadeNearRadius ещё столько метров до значения со шкалы.")]
-    public float fadeNearFalloff = 6f;
     [Tooltip("Разгон / спад прозрачности, сек.")]
     public float fadeSeconds = 0.18f;
     [Tooltip("После того как дерево больше не заслоняет зрение — столько секунд ещё прозрачное, потом отрастает.")]
@@ -50,17 +39,21 @@ public class NatureRenderer : MonoBehaviour
     public Material fadeMaterial;
 
     [Header("Live")]
-    public int liveCheckEveryNFrames = 8;
+    public int liveCheckEveryNFrames = 12;
     public Transform liveRoot;
 
     [Header("Стриминг")]
-    public int streamCheckEveryNFrames = 15;
+    public int streamCheckEveryNFrames = 20;
+
+    [Header("Темп проверок")]
+    [Tooltip("Раз в сколько кадров пересчитывать видимость и коридор fade.")]
+    public int fadeCheckEveryNFrames = 5;
 
     [Header("Gizmo")]
-    public bool drawFadeGizmos = true;
+    public bool drawFadeGizmos = false;
     public Color fadeGizmoColor = new Color(0.2f, 0.95f, 0.35f, 0.7f);
     [Tooltip("Буква T на клетках с деревом. Жёлтая — крона сейчас режется.")]
-    public bool drawTreeLetters = true;
+    public bool drawTreeLetters = false;
     public Color treeLetterColor = new Color(0.2f, 0.85f, 0.25f, 1f);
     public Color treeLetterFadedColor = new Color(1f, 0.82f, 0.12f, 1f);
 
@@ -95,8 +88,24 @@ public class NatureRenderer : MonoBehaviour
     private int _maskOx, _maskOz;
     private bool _maskOk;
     private const int MaskDim = 64;
+    private Vector3 _cursorWorld;
+    private bool _cursorOnVisible;
+    private readonly HashSet<Vector2Int> _corridorSet = new HashSet<Vector2Int>();
+    private Vector2 _corridorOrigin;
+    private Vector2 _corridorDir;
+    private bool _corridorOk;
+    private readonly Dictionary<long, float> _fadeWant = new Dictionary<long, float>(256);
+    private Vector3 _fadePlayerXZ;
+    private Vector3 _fadeCursorXZ;
+    private int _lastFadeEval = -999;
+    private bool _evalFadeThisFrame;
+    private bool _fadeShaderChecked;
+    private bool _fadeShaderOkCache;
+    private float _drawLocalH;
 
     private MaterialPropertyBlock _fadeBlock;
+    private Matrix4x4[] _drawSlice = new Matrix4x4[1023];
+    private bool _fadeDebugLines;
     private static readonly int ColorId = Shader.PropertyToID("_Color");
     private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
     private static readonly int MainTexId = Shader.PropertyToID("_MainTex");
@@ -168,16 +177,26 @@ public class NatureRenderer : MonoBehaviour
         if (Time.frameCount % Mathf.Max(1, streamCheckEveryNFrames) == 0)
             placement.UpdateStreaming(player.position);
 
+        _evalFadeThisFrame = false;
         if (useVisionFade)
         {
-            BuildVisibleMask();
-            PushFadeGlobals();
+            if (ShouldEvalFade())
+            {
+                BuildVisibleMask();
+                ResolveCursorFocus();
+                PushFadeGlobals();
+                _lastFadeEval = Time.frameCount;
+                _fadePlayerXZ = player.position;
+                _fadeCursorXZ = _cursorWorld;
+                _evalFadeThisFrame = true;
+            }
         }
         else
         {
             _fieldOk = false;
             _planeCount = 0;
             _maskOk = false;
+            _corridorOk = false;
         }
 
         DrawInstanced();
@@ -188,7 +207,6 @@ public class NatureRenderer : MonoBehaviour
         if (drawFadeGizmos)
             DrawFadeVolume(debugLines: true);
     }
-
 
     private void ResolveRefs()
     {
@@ -230,11 +248,32 @@ public class NatureRenderer : MonoBehaviour
         }
     }
 
+    private bool ShouldEvalFade()
+    {
+        int n = Mathf.Max(1, fadeCheckEveryNFrames);
+        if (Time.frameCount - _lastFadeEval >= n) return true;
+        if (player == null) return false;
+        float dx = player.position.x - _fadePlayerXZ.x;
+        float dz = player.position.z - _fadePlayerXZ.z;
+        if (dx * dx + dz * dz > 1.21f) return true;
+        if (cam != null)
+        {
+            Ray ray = cam.ScreenPointToRay(Input.mousePosition);
+            var plane = new Plane(Vector3.up, new Vector3(0f, player.position.y, 0f));
+            if (plane.Raycast(ray, out float dist))
+            {
+                Vector3 c = ray.GetPoint(dist);
+                float cx = c.x - _fadeCursorXZ.x;
+                float cz = c.z - _fadeCursorXZ.z;
+                if (cx * cx + cz * cz > 1.21f) return true;
+            }
+        }
+        return false;
+    }
+
     private void EnsureFadeMaterial()
     {
-#if UNITY_EDITOR
-        SyncFadeShaderAsset();
-#endif
+        if (fadeMaterial != null && fadeMaterial.shader != null) return;
         Shader sh = Shader.Find("Nature/VisionFade");
         if (sh == null) return;
         if (fadeMaterial == null) fadeMaterial = new Material(sh);
@@ -243,172 +282,11 @@ public class NatureRenderer : MonoBehaviour
         fadeMaterial.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
     }
 
-#if UNITY_EDITOR
-    private static void SyncFadeShaderAsset()
-    {
-        string path = System.IO.Path.Combine(Application.dataPath, "NatureVisionFade.shader");
-        string code = FadeShaderCode;
-        if (!System.IO.File.Exists(path) || System.IO.File.ReadAllText(path) != code)
-        {
-            System.IO.File.WriteAllText(path, code);
-            UnityEditor.AssetDatabase.ImportAsset("Assets/NatureVisionFade.shader");
-        }
-    }
-
-    const string FadeShaderCode = @"Shader ""Nature/VisionFade""
-{
-    Properties
-    {
-        _Color (""Color"", Color) = (1,1,1,1)
-        _MainTex (""Texture"", 2D) = ""white"" {}
-    }
-    SubShader
-    {
-        Tags
-        {
-            ""RenderPipeline"" = ""UniversalPipeline""
-            ""Queue"" = ""Transparent""
-            ""RenderType"" = ""Transparent""
-            ""IgnoreProjector"" = ""True""
-        }
-        Cull Off
-        ZWrite Off
-        ZTest LEqual
-        Blend SrcAlpha OneMinusSrcAlpha
-
-        Pass
-        {
-            Name ""Fade""
-            Tags { ""LightMode"" = ""SRPDefaultUnlit"" }
-            HLSLPROGRAM
-#pragma vertex vert
-#pragma fragment frag
-#pragma multi_compile_instancing
-# include ""Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl""
-
-            TEXTURE2D(_MainTex);
-            SAMPLER(sampler_MainTex);
-            TEXTURE2D(_VisionCellMaskTex);
-            SAMPLER(sampler_PointClamp);
-
-            CBUFFER_START(UnityPerMaterial)
-                float4 _MainTex_ST;
-                float4 _Color;
-            CBUFFER_END
-
-            float _VisionFadeAlpha;
-            float _VisionFadeSoft;
-            float _VisionKeepBottom;
-            float _VisionKeepFraction;
-            float _VisionTreeLocalHeight;
-            float4x4 _VisionPartInv;
-            float4 _VisionMapOrigin;
-            float _VisionTileSize;
-            float4 _VisionMaskOrigin;
-            float _VisionMaskDim;
-            float _VisionMaskOn;
-            float4 _VisionPlayerXZ;
-            float4 _VisionCamFwd;
-            float _VisionGroundY;
-            float _VisionKeepRadius;
-            float _VisionNearFade;
-            float _VisionNearFalloff;
-            float _VisionFadeWeight;
-            float _VisionFadePale;
-            float _VisionFadeFromFrac;
-
-            float3 ViewGround(float3 wp)
-            {
-                float3 dir = _VisionCamFwd.xyz;
-                float gy = _VisionGroundY;
-                if (abs(dir.y) < 1e-4)
-                    return float3(wp.x, gy, wp.z);
-                float t = (gy - wp.y) / dir.y;
-                return wp + dir * t;
-            }
-
-            bool OnVisibleCell(float3 wp)
-            {
-                if (_VisionMaskOn < 0.5 || _VisionTileSize < 0.001) return false;
-                float cx = floor((wp.x - _VisionMapOrigin.x) / _VisionTileSize);
-                float cz = floor((wp.z - _VisionMapOrigin.y) / _VisionTileSize);
-                float dim = max(_VisionMaskDim, 1.0);
-                float u = (cx - _VisionMaskOrigin.x + 0.5) / dim;
-                float v = (cz - _VisionMaskOrigin.y + 0.5) / dim;
-                if (u < 0.0 || u > 1.0 || v < 0.0 || v > 1.0) return false;
-                return SAMPLE_TEXTURE2D(_VisionCellMaskTex, sampler_PointClamp, float2(u, v)).r > 0.5;
-            }
-
-            struct Attributes
-            {
-                float4 positionOS : POSITION;
-                float2 uv : TEXCOORD0;
-                UNITY_VERTEX_INPUT_INSTANCE_ID
-            };
-
-            struct Varyings
-            {
-                float4 positionCS : SV_POSITION;
-                float2 uv : TEXCOORD0;
-                float3 worldPos : TEXCOORD1;
-                UNITY_VERTEX_INPUT_INSTANCE_ID
-            };
-
-            Varyings vert(Attributes v)
-            {
-                Varyings o;
-                UNITY_SETUP_INSTANCE_ID(v);
-                UNITY_TRANSFER_INSTANCE_ID(v, o);
-                float3 ws = TransformObjectToWorld(v.positionOS.xyz);
-                o.positionCS = TransformWorldToHClip(ws);
-                o.uv = v.uv * _MainTex_ST.xy + _MainTex_ST.zw;
-                o.worldPos = ws;
-                return o;
-            }
-
-            half4 frag(Varyings i) : SV_Target
-            {
-                UNITY_SETUP_INSTANCE_ID(i);
-                half4 col = SAMPLE_TEXTURE2D(_MainTex, sampler_MainTex, i.uv) * (half4)_Color;
-                if (col.a < 0.02)
-                    discard;
-
-                float4x4 root = mul(unity_ObjectToWorld, _VisionPartInv);
-                float3 basePos = float3(root._m03, root._m13, root._m23);
-                float scaleY = length(float3(root._m01, root._m11, root._m21));
-                float h = max(_VisionTreeLocalHeight * scaleY, 0.001);
-                float keepH = max(h * saturate(_VisionKeepFraction), max(_VisionKeepBottom, 0.0));
-                float cutH = max(keepH, h * saturate(_VisionFadeFromFrac));
-                if (i.worldPos.y < basePos.y + cutH)
-                    return col;
-
-                float w = saturate(_VisionFadeWeight);
-                float targetA = lerp(1.0, saturate(_VisionFadeAlpha), saturate(_VisionFadeSoft));
-                float2 dp = i.worldPos.xz - _VisionPlayerXZ.xy;
-                float dist = length(dp);
-                float inner = max(_VisionNearFade, 0.0);
-                float outer = inner + max(_VisionNearFalloff, 0.01);
-                float nearT = saturate((dist - inner) / (outer - inner));
-                targetA *= nearT;
-                float aMul = lerp(1.0, targetA, w);
-                col.a *= aMul;
-                float seeThrough = saturate((1.0 - aMul) / max(1.0 - targetA, 0.001));
-                col.rgb = lerp(col.rgb, col.rgb * (1.0 - _VisionFadePale) + _VisionFadePale, seeThrough);
-                return col;
-            }
-            ENDHLSL
-        }
-    }
-    FallBack Off
-}
-";
-#endif
-
     private void PushFadeGlobals()
     {
-        Shader.SetGlobalFloat(VisionFadeAlphaId, 1f - Mathf.Clamp01(fadeTransparency));
-        Shader.SetGlobalFloat(VisionKeepBottomId, Mathf.Max(0f, keepBottomHeight));
-        Shader.SetGlobalFloat(VisionKeepFractionId, Mathf.Clamp01(keepBottomFraction));
+        Shader.SetGlobalFloat(VisionFadeAlphaId, 0f);
+        Shader.SetGlobalFloat(VisionKeepBottomId, 0f);
+        Shader.SetGlobalFloat(VisionKeepFractionId, 0.2f);
         Shader.SetGlobalFloat(VisionFadePaleId, Mathf.Clamp01(fadePale));
         Shader.SetGlobalFloat(VisionFadeSoftId, 1f);
         Shader.SetGlobalFloat(VisionGroundYId, player != null ? player.position.y : 0f);
@@ -430,10 +308,66 @@ public class NatureRenderer : MonoBehaviour
             Vector3 cf = cam.transform.forward;
             Shader.SetGlobalVector(VisionCamFwdId, new Vector4(cf.x, cf.y, cf.z, 0f));
         }
-        Shader.SetGlobalFloat(VisionKeepRadiusId, Mathf.Max(0f, playerKeepRadius));
-        Shader.SetGlobalFloat(VisionNearFadeId, Mathf.Max(0f, fadeNearRadius));
-        Shader.SetGlobalFloat(VisionNearFalloffId, Mathf.Max(0.01f, fadeNearFalloff));
+        Shader.SetGlobalFloat(VisionKeepRadiusId, 1.6f);
+        Shader.SetGlobalFloat(VisionNearFadeId, 0f);
+        Shader.SetGlobalFloat(VisionNearFalloffId, 0.01f);
         Shader.SetGlobalFloat(VisionFadeFromFracId, 0f);
+    }
+
+    private void ResolveCursorFocus()
+    {
+        _cursorOnVisible = false;
+        _cursorWorld = player != null ? player.position : Vector3.zero;
+        if (cam == null || player == null) return;
+
+        Ray ray = cam.ScreenPointToRay(Input.mousePosition);
+        var plane = new Plane(Vector3.up, new Vector3(0f, player.position.y, 0f));
+        if (!plane.Raycast(ray, out float dist)) return;
+        _cursorWorld = ray.GetPoint(dist);
+
+        MapGrid grid = playerVision != null ? playerVision.mapGrid : null;
+        if (grid == null || !grid.IsReady) return;
+        grid.WorldToCell(_cursorWorld, out int cx, out int cz);
+        _cursorOnVisible = _visibleSet.Contains(new Vector2Int(cx, cz));
+        BuildCorridorCells(grid);
+    }
+
+    private const float CorridorHalf = 2f;
+
+    private void BuildCorridorCells(MapGrid grid)
+    {
+        _corridorSet.Clear();
+        _corridorOk = false;
+        if (player == null || grid == null || !grid.IsReady) return;
+
+        _corridorOrigin = new Vector2(player.position.x, player.position.z);
+        Vector2 toCursor = new Vector2(_cursorWorld.x, _cursorWorld.z) - _corridorOrigin;
+        if (toCursor.sqrMagnitude < 0.36f)
+        {
+            Vector3 f = player.forward;
+            toCursor = new Vector2(f.x, f.z);
+        }
+        if (toCursor.sqrMagnitude < 1e-6f) return;
+        _corridorDir = toCursor.normalized;
+        _corridorOk = true;
+
+        float half = CorridorHalf + grid.TileSize * 0.5f;
+        for (int i = 0; i < _visibleCells.Count; i++)
+        {
+            var cell = _visibleCells[i];
+            if (CellInCorridor(grid, cell.x, cell.y, half))
+                _corridorSet.Add(cell);
+        }
+    }
+
+    private bool CellInCorridor(MapGrid grid, int cx, int cz, float half)
+    {
+        Vector3 w = grid.CellCenterWorld(cx, cz);
+        Vector2 q = new Vector2(w.x, w.z) - _corridorOrigin;
+        float t = q.x * _corridorDir.x + q.y * _corridorDir.y;
+        if (t < -grid.TileSize * 0.5f) return false;
+        float perp = Mathf.Abs(q.x * _corridorDir.y - q.y * _corridorDir.x);
+        return perp <= half;
     }
 
     private void EnsureCellMask()
@@ -549,10 +483,18 @@ public class NatureRenderer : MonoBehaviour
         return CameraFollow.ProjectToFrame(cam, fieldPt);
     }
 
-    private bool TryFadeFrom(Bounds b, Matrix4x4 root, float localH, int footprint, out float fromFrac)
+    private const float SemiFadeAmt = 0.9f;
+
+    private float EvaluateFade(Bounds b, Matrix4x4 root, float localH, int footprint, out float fromFrac)
     {
         fromFrac = 0f;
-        if (!_maskOk || _visibleSet.Count == 0) return false;
+        if (!_corridorOk || _corridorSet.Count == 0) return 0f;
+        return HitsCorridorCrown(b, root, localH, footprint, out fromFrac) ? SemiFadeAmt : 0f;
+    }
+
+    private bool HitsCorridorCrown(Bounds b, Matrix4x4 root, float localH, int footprint, out float fromFrac)
+    {
+        fromFrac = 0f;
         MapGrid grid = playerVision != null ? playerVision.mapGrid : null;
         if (grid == null || !grid.IsReady) return false;
 
@@ -589,7 +531,7 @@ public class NatureRenderer : MonoBehaviour
                 grid.WorldToCell(g, out int cx, out int cz);
                 if (cx >= x0 && cx <= x1 && cz >= z0 && cz <= z1)
                     continue;
-                if (!_visibleSet.Contains(new Vector2Int(cx, cz)))
+                if (!_corridorSet.Contains(new Vector2Int(cx, cz)))
                     continue;
                 bandHit = true;
                 break;
@@ -608,11 +550,11 @@ public class NatureRenderer : MonoBehaviour
         return wp + dir * t;
     }
 
-    private float StepFade(long key, bool want)
+    private float StepFade(long key, float target)
     {
         _fadeSeen.Add(key);
         _fadeAmt.TryGetValue(key, out float w);
-        if (want)
+        if (target > 0.01f)
         {
             _fadeReturnAt.Remove(key);
         }
@@ -620,7 +562,7 @@ public class NatureRenderer : MonoBehaviour
         {
             if (!_fadeReturnAt.TryGetValue(key, out float at))
             {
-                at = Time.time + Mathf.Max(0f, fadeReturnDelay);
+                at = Time.time + Mathf.Max(0.01f, fadeReturnDelay);
                 _fadeReturnAt[key] = at;
             }
             if (Time.time < at)
@@ -630,12 +572,13 @@ public class NatureRenderer : MonoBehaviour
             }
         }
         float step = Time.deltaTime / Mathf.Max(0.05f, fadeSeconds);
-        w = Mathf.MoveTowards(w, want ? 1f : 0f, step);
+        w = Mathf.MoveTowards(w, Mathf.Clamp01(target), step);
         if (w <= 0.001f)
         {
             _fadeAmt.Remove(key);
             _fadeFromFrac.Remove(key);
             _fadeReturnAt.Remove(key);
+            _fadeWant.Remove(key);
             return 0f;
         }
         _fadeAmt[key] = w;
@@ -644,17 +587,7 @@ public class NatureRenderer : MonoBehaviour
 
     public bool IsCellFading(int cx, int cz)
     {
-        if (!useVisionFade) return false;
-        MapGrid grid = playerVision != null ? playerVision.mapGrid : null;
-        if (grid != null && grid.IsReady && player != null)
-        {
-            Vector3 c = grid.CellCenterWorld(cx, cz);
-            float dx = c.x - player.position.x;
-            float dz = c.z - player.position.z;
-            float kr = playerKeepRadius;
-            if (dx * dx + dz * dz <= kr * kr) return false;
-        }
-        return _visibleSet.Contains(new Vector2Int(cx, cz));
+        return useVisionFade && _corridorSet.Contains(new Vector2Int(cx, cz));
     }
 
     private void PruneFadeWeights()
@@ -670,9 +603,9 @@ public class NatureRenderer : MonoBehaviour
             _fadeAmt.Remove(_fadeDead[i]);
             _fadeFromFrac.Remove(_fadeDead[i]);
             _fadeReturnAt.Remove(_fadeDead[i]);
+            _fadeWant.Remove(_fadeDead[i]);
         }
     }
-
 
     private static Bounds TransformBounds(Bounds local, Matrix4x4 m)
     {
@@ -867,6 +800,7 @@ public class NatureRenderer : MonoBehaviour
                 ? _variantBounds[vi]
                 : EncapsulateParts(v);
             float localH = localBounds.size.y;
+            _drawLocalH = localH;
 
             for (int sx = pcx - r; sx <= pcx + r; sx++)
             {
@@ -878,12 +812,22 @@ public class NatureRenderer : MonoBehaviour
                         if (batch == null) continue;
                         for (int i = 0; i < batch.Length; i++)
                         {
-                            Bounds wb = TransformBounds(localBounds, batch[i]);
-                            float fromFrac = 0f;
-                            bool want = treeFade && TryFadeFrom(wb, batch[i], localH, layerFp, out fromFrac);
                             long key = PosHash(batch[i].GetColumn(3));
-                            if (want)
-                                _fadeFromFrac[key] = fromFrac;
+                            float fromFrac = 0f;
+                            float want = 0f;
+                            if (treeFade)
+                            {
+                                if (_evalFadeThisFrame)
+                                {
+                                    Bounds wb = TransformBounds(localBounds, batch[i]);
+                                    want = EvaluateFade(wb, batch[i], localH, layerFp, out fromFrac);
+                                    _fadeWant[key] = want;
+                                    if (want > 0.01f)
+                                        _fadeFromFrac[key] = fromFrac;
+                                }
+                                else
+                                    _fadeWant.TryGetValue(key, out want);
+                            }
                             float fadeW = treeFade ? StepFade(key, want) : 0f;
                             if (fadeW > 0.01f)
                             {
@@ -908,11 +852,16 @@ public class NatureRenderer : MonoBehaviour
 
     private bool FadeShaderOk()
     {
+        if (_fadeShaderChecked) return _fadeShaderOkCache;
         Shader s = Shader.Find("Nature/VisionFade");
-        if (s == null) return false;
-        if (s.name.IndexOf("Error", System.StringComparison.OrdinalIgnoreCase) >= 0)
+        _fadeShaderChecked = true;
+        if (s == null || s.name.IndexOf("Error", System.StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            _fadeShaderOkCache = false;
             return false;
-        return s.isSupported;
+        }
+        _fadeShaderOkCache = s.isSupported;
+        return _fadeShaderOkCache;
     }
 
     private Material GetFadeMaterial(Material src)
@@ -966,7 +915,6 @@ public class NatureRenderer : MonoBehaviour
         }
     }
 
-
     private void DrawParts(NaturePlacement.NatureVariant v, List<Matrix4x4> roots,
         MaterialPropertyBlock block, UnityEngine.Rendering.ShadowCastingMode shadows, bool fade)
     {
@@ -1007,7 +955,7 @@ public class NatureRenderer : MonoBehaviour
         const int hBuckets = 8;
         bool ident = part.localToRoot.isIdentity;
         Matrix4x4 partInv = ident ? Matrix4x4.identity : part.localToRoot.inverse;
-        float localH = EncapsulateParts(v).size.y;
+        float localH = _drawLocalH;
         if (localH < 0.01f && part.mesh != null) localH = part.mesh.bounds.size.y;
         for (int b = 1; b <= wBuckets; b++)
         {
@@ -1037,8 +985,8 @@ public class NatureRenderer : MonoBehaviour
                 _fadeBlock.Clear();
                 CopyAlbedo(part.material, _fadeBlock);
                 _fadeBlock.SetFloat(VisionFadeWeightId, hi);
-                _fadeBlock.SetFloat(VisionKeepFractionId, keepBottomFraction);
-                _fadeBlock.SetFloat(VisionKeepBottomId, keepBottomHeight);
+                _fadeBlock.SetFloat(VisionKeepFractionId, 0.2f);
+                _fadeBlock.SetFloat(VisionKeepBottomId, 0f);
                 _fadeBlock.SetFloat(VisionTreeLocalHeightId, localH);
                 _fadeBlock.SetMatrix(VisionPartInvId, partInv);
                 _fadeBlock.SetFloat(VisionFadePaleId, fadePale);
@@ -1055,11 +1003,14 @@ public class NatureRenderer : MonoBehaviour
         if (submesh < 0 || submesh >= mesh.subMeshCount) submesh = 0;
         mat.enableInstancing = true;
         const int BS = 1023;
+        if (_drawSlice == null || _drawSlice.Length < BS)
+            _drawSlice = new Matrix4x4[BS];
         for (int start = 0; start < list.Count; start += BS)
         {
             int len = Mathf.Min(BS, list.Count - start);
-            var slice = list.GetRange(start, len).ToArray();
-            Graphics.DrawMeshInstanced(mesh, submesh, mat, slice, len, block, shadows, false);
+            for (int i = 0; i < len; i++)
+                _drawSlice[i] = list[start + i];
+            Graphics.DrawMeshInstanced(mesh, submesh, mat, _drawSlice, len, block, shadows, false);
         }
     }
 
@@ -1202,8 +1153,6 @@ public class NatureRenderer : MonoBehaviour
         _liveKeys.Clear();
     }
 
-    private bool _fadeDebugLines;
-
     void OnGUI()
     {
         if (!drawTreeLetters || !Application.isPlaying) return;
@@ -1296,6 +1245,7 @@ public class NatureRenderer : MonoBehaviour
 
     private void FadeDrawLine(Vector3 a, Vector3 b, Color c)
     {
+        if (!IsFinite(a) || !IsFinite(b)) return;
         if (_fadeDebugLines)
             Debug.DrawLine(a, b, c);
         else
@@ -1303,5 +1253,11 @@ public class NatureRenderer : MonoBehaviour
             Gizmos.color = c;
             Gizmos.DrawLine(a, b);
         }
+    }
+
+    private static bool IsFinite(Vector3 v)
+    {
+        return !(float.IsNaN(v.x) || float.IsNaN(v.y) || float.IsNaN(v.z)
+            || float.IsInfinity(v.x) || float.IsInfinity(v.y) || float.IsInfinity(v.z));
     }
 }

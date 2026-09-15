@@ -28,6 +28,11 @@ public class Inventory : MonoBehaviour
     [Tooltip("Число слотов сумки.")]
     public int slotCount = 20;
 
+    [Header("Стартовый дальний набор")]
+    public bool grantRangedKit = true;
+    public int startingArrows = 30;
+    public int startingBolts = 20;
+
     public List<Slot> Slots { get; private set; } = new List<Slot>();
 
     // Что сейчас экипировано (для UI и снятия).
@@ -41,6 +46,22 @@ public class Inventory : MonoBehaviour
     {
         if (loadout == null) loadout = GetComponent<PlayerLoadout>();
         for (int i = 0; i < slotCount; i++) Slots.Add(new Slot());
+    }
+
+    void Start()
+    {
+        if (GetComponent<RangedController>() == null)
+            gameObject.AddComponent<RangedController>();
+        if (grantRangedKit)
+            RangedKit.Grant(this, startingArrows, startingBolts);
+    }
+
+    public bool HasTwoHandEquipped()
+    {
+        return EquippedRight != null
+            && EquippedLeft == EquippedRight
+            && EquippedRight.weapon != null
+            && EquippedRight.weapon.OccupiesBothHands;
     }
 
     // ==================== Добавление / удаление ====================
@@ -118,19 +139,29 @@ public class Inventory : MonoBehaviour
             return false;
         if (loadout == null) return false;
 
-        bool toLeft = slot.item.weapon.type == WeaponData.WeaponType.Shield;
+        var weapon = slot.item.weapon;
+        bool twoHand = weapon.OccupiesBothHands;
+        bool toLeft = !twoHand && weapon.type == WeaponData.WeaponType.Shield;
 
-        // Снимаем текущее в инвентарь
-        if (toLeft) UnequipLeft(); else UnequipRight();
+        if (twoHand || HasTwoHandEquipped()) UnequipTwoHand();
+        else if (toLeft) UnequipLeft();
+        else UnequipRight();
 
-        if (toLeft)
+        if (twoHand)
         {
-            loadout.leftHandWeapon = slot.item.weapon;
+            loadout.rightHandWeapon = weapon;
+            loadout.leftHandWeapon = weapon;
+            EquippedRight = slot.item;
+            EquippedLeft = slot.item;
+        }
+        else if (toLeft)
+        {
+            loadout.leftHandWeapon = weapon;
             EquippedLeft = slot.item;
         }
         else
         {
-            loadout.rightHandWeapon = slot.item.weapon;
+            loadout.rightHandWeapon = weapon;
             EquippedRight = slot.item;
         }
 
@@ -144,6 +175,11 @@ public class Inventory : MonoBehaviour
 
     public void UnequipRight()
     {
+        if (HasTwoHandEquipped())
+        {
+            UnequipTwoHand();
+            return;
+        }
         if (EquippedRight == null) return;
         Add(EquippedRight, 1);
         EquippedRight = null;
@@ -153,10 +189,30 @@ public class Inventory : MonoBehaviour
 
     public void UnequipLeft()
     {
+        if (HasTwoHandEquipped())
+        {
+            UnequipTwoHand();
+            return;
+        }
         if (EquippedLeft == null) return;
         Add(EquippedLeft, 1);
         EquippedLeft = null;
         if (loadout != null) loadout.leftHandWeapon = null;
+        onChanged?.Invoke();
+    }
+
+    public void UnequipTwoHand()
+    {
+        if (!HasTwoHandEquipped()) return;
+        var item = EquippedRight;
+        EquippedRight = null;
+        EquippedLeft = null;
+        if (loadout != null)
+        {
+            loadout.rightHandWeapon = null;
+            loadout.leftHandWeapon = null;
+        }
+        if (item != null) Add(item, 1);
         onChanged?.Invoke();
     }
 }

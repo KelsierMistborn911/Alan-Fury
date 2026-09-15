@@ -1,23 +1,18 @@
-﻿/// <summary>
-/// Текст шейдера Nature/VisionFade. В Editor NatureRenderer пишет его в Assets/NatureVisionFade.shader.
-/// </summary>
-public static class NatureVisionFadeSrc
-{
-    public const string Code = @"Shader ""Nature/VisionFade""
+﻿Shader "Nature/VisionFade"
 {
     Properties
     {
-        _Color (""Color"", Color) = (1,1,1,1)
-        _MainTex (""Texture"", 2D) = ""white"" {}
+        _Color ("Color", Color) = (1,1,1,1)
+        _MainTex ("Texture", 2D) = "white" {}
     }
     SubShader
     {
         Tags
         {
-            ""RenderPipeline"" = ""UniversalPipeline""
-            ""Queue"" = ""Transparent""
-            ""RenderType"" = ""Transparent""
-            ""IgnoreProjector"" = ""True""
+            "RenderPipeline" = "UniversalPipeline"
+            "Queue" = "Transparent"
+            "RenderType" = "Transparent"
+            "IgnoreProjector" = "True"
         }
         Cull Off
         ZWrite Off
@@ -26,13 +21,13 @@ public static class NatureVisionFadeSrc
 
         Pass
         {
-            Name ""Fade""
-            Tags { ""LightMode"" = ""SRPDefaultUnlit"" }
+            Name "Fade"
+            Tags { "LightMode" = "SRPDefaultUnlit" }
             HLSLPROGRAM
             #pragma vertex vert
             #pragma fragment frag
             #pragma multi_compile_instancing
-            #include ""Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl""
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
 
             TEXTURE2D(_MainTex);
             SAMPLER(sampler_MainTex);
@@ -132,12 +127,6 @@ public static class NatureVisionFadeSrc
 
                 float w = saturate(_VisionFadeWeight);
                 float targetA = lerp(1.0, saturate(_VisionFadeAlpha), saturate(_VisionFadeSoft));
-                float2 dp = i.worldPos.xz - _VisionPlayerXZ.xy;
-                float dist = length(dp);
-                float inner = max(_VisionNearFade, 0.0);
-                float outer = inner + max(_VisionNearFalloff, 0.01);
-                float nearT = saturate((dist - inner) / (outer - inner));
-                targetA *= nearT;
                 float aMul = lerp(1.0, targetA, w);
                 col.a *= aMul;
                 float seeThrough = saturate((1.0 - aMul) / max(1.0 - targetA, 0.001));
@@ -148,6 +137,4 @@ public static class NatureVisionFadeSrc
         }
     }
     FallBack Off
-}
-";
 }

@@ -135,6 +135,10 @@ MonoBehaviour:
   gravity: -20
   rotationSpeed: 6
   bipedRotationSpeed: 13
+  bipedTurnStandDeg: 250
+  bipedTurnMoveDeg: 180
+  faceLockAfterHit: 0.32
+  faceLockAfterLeap: 0.28
   arriveThreshold: 1.5
   groundLayers:
     serializedVersion: 2
@@ -197,7 +201,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 2f602ab20e829d04faf43a6f75c7fd39, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  perception: {fileID: 0}
+  perception: {fileID: 5199196247303915364}
   locomotion: {fileID: 5952714522296563151}
   hitbox: {fileID: -4529822592582529304}
   melee: {fileID: 0}
@@ -207,8 +211,15 @@ MonoBehaviour:
     m_Bits: 64
   hitTickInterval: 0.3
   jumpArc: 2.2
-  jumpHitDuration: 1.5
   jumpLeapDistance: 8
+  clingHoldDistance: 1.05
+  clingStaminaPerSecond: 8
+  clingGnawInterval: 0.55
+  clingGnawDamage: 8
+  clingGnawStamina: 6
+  clingPeelStamina: 14
+  clingVictimSpeed: 0.42
+  clingPull: 3.2
   jump:
     windup: 1
     active: 0.2
@@ -284,6 +295,9 @@ MonoBehaviour:
   waypointArrive: 1.2
   disengageTime: 1.5
   orbitAngularSpeed: 45
+  arcDegrees: 48
+  maneuverHoldMin: 1.1
+  maneuverHoldMax: 2.6
   minHoldDistance: 7
   safetyMargin: 5
   outerDistanceMult: 1.33
@@ -365,9 +379,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: e7f9977242760834194f0befd248bdad, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  maxHealth: 30
-  healthRegenPerSecond: 1.5
-  healthRegenDelay: 6
+  maxHealth: 60
+  healthRegenPerSecond: 7
+  healthRegenDelay: 1
   maxStamina: 60
   staminaRegenPerSecond: 12
   staminaRegenDelay: 1
@@ -376,6 +390,7 @@ MonoBehaviour:
   baseFearCombat: 25
   fearRegenPerSecond: 3
   slowTickInterval: 1
+  mass: 100
   target: {fileID: 0}
 --- !u!114 &5920791607548002130
 MonoBehaviour:
@@ -474,8 +489,6 @@ MonoBehaviour:
   hearUncertainty: 7
   sightUncertainty: 1.2
   drawGizmos: 1
-  drawAlways: 0
-  drawVisionCells: 1
   gizmoSegments: 48
   gizmoY: 0.12
   fieldColor: {r: 0.45, g: 0.85, b: 1, a: 0.22}

@@ -102,6 +102,14 @@ public class WerewolfLocomotion : MonoBehaviour
     public float rotationSpeed = 6f;
     [Tooltip("Скорость поворота на двух ногах. Выше, чтобы волк успевал доворачиваться к цели в ближнем бою.")]
     public float bipedRotationSpeed = 13f;
+    [Tooltip("Biped стоя, deg/s. Quad не трогаем.")]
+    public float bipedTurnStandDeg = 250f;
+    [Tooltip("Biped в шаге, deg/s.")]
+    public float bipedTurnMoveDeg = 180f;
+    [Tooltip("После попадания морда не доворачивается (сек).")]
+    public float faceLockAfterHit = 0.32f;
+    [Tooltip("После приземления с прыжка/уворота (сек).")]
+    public float faceLockAfterLeap = 0.28f;
 
     /// <summary>Скорость поворота для текущей стойки.</summary>
     private float TurnSpeed => _stance == Stance.Biped ? bipedRotationSpeed : rotationSpeed;
@@ -123,6 +131,8 @@ public class WerewolfLocomotion : MonoBehaviour
     private Vector3 _horizVel;
     private float _vertVel;
     private bool _leaping;        // сейчас в воздухе (боевой Leap/Jump)
+    private bool _lockFaceOnLand;
+    private float _faceLockUntil;
     private float _stepImpulse;   // импульс шага в этом кадре (наземная походка)
     private bool _placed;
 
@@ -170,6 +180,12 @@ public class WerewolfLocomotion : MonoBehaviour
 
     public bool IsGrounded => _cc != null && _cc.isGrounded;
     public bool IsLeaping => _leaping;
+    public bool IsClinging { get; private set; }
+
+    private Transform _clingPartner;
+    private float _clingHold = 1.05f;
+    private CharacterController _ignoredPlayerCc;
+    private float _nextIgnoreRefresh;
 
     /// <summary>Текущая стойка. Меняется через SetStance, во время перехода остаётся прежней.</summary>
     public Stance CurrentStance => _stance;
@@ -200,7 +216,11 @@ public class WerewolfLocomotion : MonoBehaviour
         _cc = GetComponent<CharacterController>();
         CacheAnimParams();
     }
-    void Start() { if (boundary == null) boundary = GetComponent<MapBoundary>(); }
+    void Start()
+    {
+        if (boundary == null) boundary = GetComponent<MapBoundary>();
+        IgnorePlayerCollision(true);
+    }
 
     // =================== Намерение от мозга ===================
 
@@ -226,8 +246,46 @@ public class WerewolfLocomotion : MonoBehaviour
         _horizVel = dir * (airTime > 0.0001f ? dist / airTime : 0f);
         _vertVel = vUp;
         _leaping = true;
+        _lockFaceOnLand = true;
         _step.Cancel();
         SetTrig("Leap");
+    }
+
+    public void LockFace(float seconds)
+    {
+        if (seconds <= 0f) return;
+        _faceLockUntil = Mathf.Max(_faceLockUntil, Time.time + seconds);
+    }
+
+    public void SetClingPartner(Transform partner, float holdDistance = 1.05f)
+    {
+        _clingPartner = partner;
+        IsClinging = partner != null;
+        _clingHold = Mathf.Max(0.6f, holdDistance);
+        IgnorePlayerCollision(true);
+    }
+
+    public void ClearClingPartner()
+    {
+        _clingPartner = null;
+        IsClinging = false;
+    }
+
+    public void IgnorePlayerCollision(bool ignore)
+    {
+        if (_cc == null) return;
+        if (PlayerRegistry.Instance == null) return;
+        var list = PlayerRegistry.Instance.Players;
+        for (int i = 0; i < list.Count; i++)
+        {
+            var t = list[i];
+            if (t == null) continue;
+            var other = t.GetComponent<CharacterController>();
+            if (other == null || other == _cc) continue;
+            Physics.IgnoreCollision(_cc, other, ignore);
+            _ignoredPlayerCc = other;
+        }
+        _nextIgnoreRefresh = Time.time + 1.5f;
     }
 
     /// <summary>Мгновенный горизонтальный импульс (отброс от удара). Затухает обычным торможением.</summary>
@@ -237,19 +295,42 @@ public class WerewolfLocomotion : MonoBehaviour
         _horizVel += force;
     }
 
+    public void ApplyHitRecoil(Vector3 force, float mass = 100f)
+    {
+        force.y = 0f;
+        if (force.sqrMagnitude < 0.0001f) return;
+        float raw = force.magnitude * (80f / Mathf.Max(40f, mass));
+        bool heavy = raw >= 5.5f;
+        float travel = heavy ? 0.85f : 0.45f;
+        float decel = Mathf.Max(8f, deceleration);
+        float speed = Mathf.Sqrt(Mathf.Max(0.05f, 2f * decel * travel));
+        Vector3 dir = force.normalized;
+        _horizVel += dir * speed;
+        LockFace(faceLockAfterHit);
+    }
+
     /// <summary>Повернуться к точке. На четвереньках работает только СТОЯ: в движении
     /// волк смотрит туда, куда бежит, иначе он полз бы боком (старая беда).
     /// На двух ногах — всегда, это и есть смысл стойки.</summary>
     public void FaceTowards(Vector3 worldPoint, float dt)
     {
+        if (_leaping || _vaulting) return;
+        if (Time.time < _faceLockUntil) return;
         // В Quad в момент активного движения ориентацию задаёт направление бега.
         if (_stance == Stance.Quad && _moveFrame == Time.frameCount && _horizVel.sqrMagnitude > 0.04f)
             return;
 
         Vector3 look = worldPoint - transform.position; look.y = 0f;
         if (look.sqrMagnitude < 0.0001f) return;
-        transform.rotation = Quaternion.Slerp(transform.rotation,
-            Quaternion.LookRotation(look.normalized, Vector3.up), TurnSpeed * dt);
+        Quaternion want = Quaternion.LookRotation(look.normalized, Vector3.up);
+        if (_stance == Stance.Biped)
+        {
+            bool moving = _horizVel.sqrMagnitude > 0.25f;
+            float rate = moving ? bipedTurnMoveDeg : bipedTurnStandDeg;
+            transform.rotation = Quaternion.RotateTowards(transform.rotation, want, rate * dt);
+            return;
+        }
+        transform.rotation = Quaternion.Slerp(transform.rotation, want, TurnSpeed * dt);
     }
 
     // =================== Физика (после мозга) ===================
@@ -270,8 +351,18 @@ public class WerewolfLocomotion : MonoBehaviour
             if (_stanceTimer <= 0f) _stance = _stanceTarget;
         }
 
-        bool active = _moveFrame == Time.frameCount && _stanceTimer <= 0f;
+        if (Time.time >= _nextIgnoreRefresh)
+            IgnorePlayerCollision(true);
+
+        bool active = _moveFrame == Time.frameCount && _stanceTimer <= 0f && !IsClinging;
         Vector3 pos = transform.position;
+
+        if (IsClinging && _clingPartner != null)
+        {
+            TickClingHold(dt);
+            CurrentGait = 0;
+            return;
+        }
 
         _stepImpulse = 0f;
 
@@ -341,7 +432,15 @@ public class WerewolfLocomotion : MonoBehaviour
         // --- Гравитация ---
         if (_cc.isGrounded && _vertVel <= 0f)
         {
-            if (_leaping) _leaping = false; // приземлились, импульс сохраняем
+            if (_leaping)
+            {
+                _leaping = false;
+                if (_lockFaceOnLand)
+                {
+                    _lockFaceOnLand = false;
+                    LockFace(faceLockAfterLeap);
+                }
+            }
             _vertVel = -2f;
         }
         else _vertVel += gravity * dt;
@@ -467,6 +566,22 @@ public class WerewolfLocomotion : MonoBehaviour
         }
         _cc.enabled = true;
         return found;
+    }
+
+    private void TickClingHold(float dt)
+    {
+        if (_clingPartner == null) return;
+        Vector3 to = _clingPartner.position - transform.position;
+        to.y = 0f;
+        float dist = to.magnitude;
+        Vector3 dir = dist > 0.001f ? to / dist : transform.forward;
+        float err = dist - _clingHold;
+        Vector3 horiz = dir * (err * 8f * dt);
+        if (boundary != null && boundary.IsReady)
+            horiz = boundary.Constrain(transform.position, horiz);
+        if (_cc != null) _cc.Move(horiz);
+        FaceTowards(_clingPartner.position, dt);
+        _horizVel = Vector3.zero;
     }
 
     private float FlatDistance(Vector3 p)

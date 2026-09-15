@@ -7,7 +7,7 @@ using UnityEngine;
 /// </summary>
 public class HumanoidCombat : MonoBehaviour
 {
-    public enum AttackForm { SlashLeft, SlashRight, Thrust }
+    public enum AttackForm { SlashLeft, SlashRight, Thrust, Elbow, Pommel, Shoulder, CloseHit }
 
     [Header("Ссылки")]
     public PlayerResources resources;
@@ -48,10 +48,26 @@ public class HumanoidCombat : MonoBehaviour
     [Range(0.4f, 1f)] public float spacingIdealFraction = 0.72f;
     [Range(0.5f, 1.2f)] public float spacingThrustFraction = 0.95f;
     public float spacingDeadzone = 0.28f;
-    public float spacingMaxStep = 1.15f;
+    public float spacingMaxStep = 0.86f;
+    public float spacingHeavyStep = 1.73f;
     public float spacingDuration = 0.18f;
-    public float targetMagnetRange = 3f;
+    public float targetMagnetRange = 4.2f;
     public float targetMagnetSpeed = 5.5f;
+
+    [Header("Клинч")]
+    [Tooltip("Держать это расстояние, пока нет умышленного входа.")]
+    [Range(0.7f, 1.2f)] public float infightHoldFraction = 0.92f;
+    [Range(0.35f, 0.9f)] public float infightElbowWindup = 0.55f;
+    [Range(0.35f, 0.9f)] public float infightPommelWindup = 0.48f;
+    [Range(0.5f, 1f)] public float infightShoulderWindup = 0.82f;
+    [Range(0.4f, 1f)] public float infightElbowDuration = 0.68f;
+    [Range(0.4f, 1f)] public float infightPommelDuration = 0.58f;
+    [Range(0.5f, 1.1f)] public float infightShoulderDuration = 0.88f;
+    public float shieldRamInterval = 0.55f;
+    public float shieldRamDamage = 3f;
+    public float shieldRamStagger = 7f;
+    public float shieldRamForce = 5.5f;
+    public float shieldRamAssist = 3.4f;
 
     [Header("Застревание оружия")]
     public float weaponStuckDuration = 1.6f;
@@ -76,6 +92,7 @@ public class HumanoidCombat : MonoBehaviour
     public bool IsInCombat { get; protected set; }
     public float ChargePercent { get; protected set; }
     public bool IsHeavyReady => IsCharging && ChargePercent >= heavyChargeThreshold;
+    public bool IsInfighting { get; protected set; }
 
     public CombatStance CurrentStance => stance != null ? stance.Current : CombatStance.Neutral;
 
@@ -137,7 +154,6 @@ public class HumanoidCombat : MonoBehaviour
 
     protected struct PreparedAttack
     {
-        public bool isRanged;
         public float range, radius, height, damage, stagger;
         public float cone, dur, tick, charge;
         public Vector3 offset, dir;
@@ -155,6 +171,15 @@ public class HumanoidCombat : MonoBehaviour
     protected AttackMoveMode _attackMoveMode;
 
     protected float _combatLingerUntil;
+    protected float _nextShieldRamTime;
+    protected float _noRadialPushUntil;
+    protected float _shockUntil;
+
+    [Header("Шок от удара")]
+    public float shockLight = 0.22f;
+    public float shockHeavy = 0.26f;
+
+    public bool IsInShock => Time.time < _shockUntil;
 
     protected struct StepSample
     {
@@ -197,6 +222,14 @@ public class HumanoidCombat : MonoBehaviour
 
         if (AimDirection.sqrMagnitude < 0.01f)
             AimDirection = transform.forward;
+
+        if (Mathf.Abs(targetMagnetRange - 3f) < 0.02f)
+            targetMagnetRange = 4.2f;
+        if (Mathf.Abs(spacingMaxStep - 1.15f) < 0.02f
+            || Mathf.Abs(spacingMaxStep - 3.45f) < 0.02f)
+            spacingMaxStep = 0.86f;
+        if (spacingHeavyStep <= 0.01f || Mathf.Abs(spacingHeavyStep - 3.45f) < 0.02f)
+            spacingHeavyStep = 1.73f;
     }
 
     void OnDestroy()
@@ -252,6 +285,7 @@ public class HumanoidCombat : MonoBehaviour
             IsParrying = false;
             isHoldingAttack = false;
             _hitPrepared = false;
+            IsInfighting = false;
             return;
         }
 
@@ -263,6 +297,7 @@ public class HumanoidCombat : MonoBehaviour
         if (IsParrying && Time.time >= _parryEndTime) IsParrying = false;
 
         TickTargetMagnet();
+        TickShieldRam();
 
         if (IsAttacking)
         {
@@ -373,6 +408,7 @@ public class HumanoidCombat : MonoBehaviour
 
     public bool TryHoldAttack()
     {
+        if (IsInShock) return false;
         if (IsAttacking || IsCharging) return false;
         if (!IsArmed)
         {
@@ -381,6 +417,7 @@ public class HumanoidCombat : MonoBehaviour
         }
         currentWeapon = loadout != null ? loadout.GetMainWeapon() : null;
         if (currentWeapon == null) return false;
+        if (currentWeapon.isRanged) return false;
         if (resources != null && !resources.HasStamina(currentWeapon.staminaCost * 0.5f))
             return false;
         StartHoldAttack();
@@ -406,6 +443,7 @@ public class HumanoidCombat : MonoBehaviour
 
     public bool TryThrust()
     {
+        if (IsInShock) return false;
         if (IsAttacking || IsCharging) return false;
         if (!IsArmed)
         {
@@ -414,6 +452,7 @@ public class HumanoidCombat : MonoBehaviour
         }
         currentWeapon = loadout != null ? loadout.GetMainWeapon() : null;
         if (currentWeapon == null) return false;
+        if (currentWeapon.isRanged) return false;
         if (!TrySpendStamina(currentWeapon.staminaCost * 0.5f)) return false;
 
         ChargePercent = currentWeapon.minChargePercent;
@@ -426,6 +465,7 @@ public class HumanoidCombat : MonoBehaviour
 
     public bool TryBlockAttack()
     {
+        if (IsInShock) return false;
         currentWeapon = loadout != null ? loadout.GetMainWeapon() : null;
         if (currentWeapon == null) return false;
         if (!TrySpendStamina(currentWeapon.staminaCost * 0.5f * blockAttackStaminaMult)) return false;
@@ -436,6 +476,7 @@ public class HumanoidCombat : MonoBehaviour
 
     public bool TryDodgeAttack()
     {
+        if (IsInShock) return false;
         currentWeapon = loadout != null ? loadout.GetMainWeapon() : null;
         if (currentWeapon == null) return false;
         if (!TrySpendStamina(currentWeapon.staminaCost)) return false;
@@ -498,6 +539,12 @@ public class HumanoidCombat : MonoBehaviour
             if (stanceMatch) windup *= stanceSpeedBonus;
         }
         windup *= WeaponData.WindupScale;
+        AttackForm preview = PreviewInfightForm(forcedForm);
+        if (preview == AttackForm.CloseHit) windup *= infightElbowWindup * 0.9f;
+        else if (preview == AttackForm.Elbow) windup *= infightElbowWindup;
+        else if (preview == AttackForm.Pommel) windup *= infightPommelWindup;
+        else if (preview == AttackForm.Shoulder) windup *= infightShoulderWindup;
+        windup *= RangeTempo();
 
         CommitSwing(fromBlock, forcedForm);
         _comboExpire = Time.time + windup + _prep.dur + comboWindow;
@@ -694,6 +741,7 @@ public class HumanoidCombat : MonoBehaviour
     void CommitSwing(bool fromBlock, AttackForm? forcedForm = null)
     {
         IsAttacking = true;
+        _noRadialPushUntil = Time.time + 0.45f;
 
         float dur = currentWeapon != null ? currentWeapon.attackDuration : 0.2f;
         bool stanceMatch = (CurrentStance == CombatStance.High && !_isHeavyAttack)
@@ -719,11 +767,24 @@ public class HumanoidCombat : MonoBehaviour
             form = side >= 0f ? AttackForm.SlashRight : AttackForm.SlashLeft;
         }
 
+        if (!fromBlock)
+            form = RemapInfightForm(form);
+
+        if (form == AttackForm.CloseHit) dur *= infightElbowDuration * 0.9f;
+        else if (form == AttackForm.Elbow) dur *= infightElbowDuration;
+        else if (form == AttackForm.Pommel) dur *= infightPommelDuration;
+        else if (form == AttackForm.Shoulder) dur *= infightShoulderDuration;
+
         _lastForm = form;
+        IsInfighting = IsInfightForm(form);
+        SetB("Infight", IsInfighting);
         string trig = form switch
         {
             AttackForm.Thrust => "Thrust",
+            AttackForm.Pommel => "Thrust",
             AttackForm.SlashLeft => "AttackLeft",
+            AttackForm.Elbow => "AttackLeft",
+            AttackForm.CloseHit => "AttackLeft",
             _ => "AttackRight"
         };
         SetTrig(trig);
@@ -735,12 +796,11 @@ public class HumanoidCombat : MonoBehaviour
         {
             dur = dur,
             charge = ChargePercent,
-            combo = _combo,
-            isRanged = currentWeapon != null && currentWeapon.isRanged
+            combo = _combo
         };
         _hitPrepared = true;
 
-        if (!_prep.isRanged && currentWeapon != null)
+        if (currentWeapon != null)
         {
             float damageMult;
             float staggerMult;
@@ -777,25 +837,54 @@ public class HumanoidCombat : MonoBehaviour
                 shape = HitZoneShape.Capsule;
                 inner = 0f;
             }
-            else if (_isHeavyAttack)
+            else if (form == AttackForm.Pommel)
             {
-                cone = 80f;
-                inner = range * 0.18f;
-                if (_pendingIntent == HitIntent.Bypass)
-                {
-                    range *= 1.2f;
-                    radius *= 1.15f;
-                    inner = range * 0.18f;
-                }
+                range = Mathf.Min(range, CombatRangeTable.Default.Outer(CombatRange.Clinch));
+                radius *= 0.35f;
+                cone = 16f;
+                shape = HitZoneShape.Capsule;
+                inner = 0f;
+            }
+            else if (form == AttackForm.CloseHit)
+            {
+                range = Mathf.Min(range, CombatRangeTable.Default.Outer(CombatRange.PointBlank) + 0.35f);
+                radius *= 0.85f;
+                cone = 55f;
+                shape = HitZoneShape.Sector;
+                inner = 0f;
+                yaw = 0f;
+            }
+            else if (form == AttackForm.Elbow)
+            {
+                range = Mathf.Min(range, CombatRangeTable.Default.Outer(CombatRange.Clinch));
+                radius *= 0.7f;
+                cone = 40f;
+                shape = HitZoneShape.Sector;
+                inner = 0f;
+                yaw = 0f;
+            }
+            else if (form == AttackForm.Shoulder)
+            {
+                range = Mathf.Min(range, CombatRangeTable.Default.Outer(CombatRange.Clinch) + 0.15f);
+                radius *= 0.9f;
+                cone = 70f;
+                shape = HitZoneShape.Sector;
+                inner = 0f;
             }
             else
             {
                 cone = 48f;
+                inner = range * 0.28f;
                 yaw = form == AttackForm.SlashLeft ? -42f : 42f;
             }
 
             if (fromBlock)
                 range *= blockAttackRangeMult;
+
+            if (form == AttackForm.CloseHit) { damageMult *= 0.88f; staggerMult *= 1.15f; }
+            else if (form == AttackForm.Elbow) { damageMult *= 0.78f; staggerMult *= 0.85f; }
+            else if (form == AttackForm.Pommel) { damageMult *= 0.7f; staggerMult *= 1.05f; }
+            else if (form == AttackForm.Shoulder) { damageMult *= 0.9f; staggerMult *= 1.35f; }
 
             float damage = currentWeapon.damage * damageMult;
             damage += ComputeMomentumBonus();
@@ -803,18 +892,20 @@ public class HumanoidCombat : MonoBehaviour
                 damage += movement.CurrentSpeed * (resources != null ? resources.mass : 80f) * movementDamageCoefficient * (_pendingStepBoost ? 1.5f : 1f);
 
             ApplyAttackMoveMode();
-            ApplyFootworkStep(form);
+            bool stepped = ApplyFootworkStep(form);
 
-            if (_isHeavyAttack && !fromBlock)
+            if (_isHeavyAttack && !fromBlock && !stepped)
                 TryLunge();
 
             BodyZone zone = _pendingZone;
             if (!_isHeavyAttack)
             {
                 zone = BodyZone.Torso;
-                if (form == AttackForm.SlashLeft) zone = BodyZone.LeftArm;
+                if (form == AttackForm.CloseHit) zone = BodyZone.Torso;
+                else if (form == AttackForm.SlashLeft || form == AttackForm.Elbow) zone = BodyZone.LeftArm;
                 else if (form == AttackForm.SlashRight) zone = BodyZone.RightArm;
-                else if (form == AttackForm.Thrust) zone = BodyZone.Torso;
+                else if (form == AttackForm.Thrust || form == AttackForm.Pommel) zone = BodyZone.Torso;
+                else if (form == AttackForm.Shoulder) zone = BodyZone.Torso;
             }
 
             float pen = currentWeapon.penetration;
@@ -839,6 +930,7 @@ public class HumanoidCombat : MonoBehaviour
             _prep.innerRadius = inner;
             _prep.yawOffset = yaw;
 
+            CombatRange hitBand = ResolveBandToFocus();
             _prep.info = new HitInfo
             {
                 rawDamage = damage,
@@ -849,6 +941,8 @@ public class HumanoidCombat : MonoBehaviour
                 zone = zone,
                 intent = _isHeavyAttack ? _pendingIntent : HitIntent.Neutral,
                 isHeavy = _isHeavyAttack,
+                isInfight = IsInfightForm(form),
+                band = IsInfightForm(form) && hitBand > CombatRange.Clinch ? CombatRange.Clinch : hitBand,
                 stepBoost = _pendingStepBoost,
                 chargePercent = ChargePercent,
                 penetrationScore = penScore,
@@ -879,21 +973,27 @@ public class HumanoidCombat : MonoBehaviour
         if (hitbox != null && hitbox.visual != null)
             hitbox.visual.HideWindup();
 
-        if (_prep.isRanged)
-        {
-            ExecuteRangedAttack(_prep.charge > 0f ? _prep.charge : 1f);
-            return;
-        }
-
         if (currentWeapon == null) return;
 
         _prep.dir = GetAttackDirection();
         _prep.info.sourcePosition = transform.position;
         _prep.info.hitDirection = _prep.dir;
 
-        CombatRange band = _lastForm == AttackForm.Thrust ? CombatRange.Close : CombatRange.Mid;
+        CombatRange band = _prep.info.band;
+        if (band == CombatRange.PointBlank && !IsInfighting)
+            band = _lastForm == AttackForm.Thrust ? CombatRange.Close : CombatRange.Mid;
         Transform aim = NearTarget != null ? NearTarget
             : (IsUsableTarget(AutoTarget) ? AutoTarget : CommandTarget);
+        if (aim != null)
+        {
+            Vector3 d = aim.position - transform.position;
+            d.y = 0f;
+            CombatRange live = CombatRangeTable.Default.Band(d.magnitude);
+            if (IsInfighting && live > CombatRange.Clinch) live = CombatRange.Clinch;
+            band = live;
+            _prep.info.band = live;
+            _prep.info.isInfight = IsInfighting;
+        }
 
         if (melee == null)
         {
@@ -988,23 +1088,79 @@ public class HumanoidCombat : MonoBehaviour
         float dist = to.magnitude;
         if (dist < 0.05f || dist > targetMagnetRange) return;
 
+        Vector3 radial = to / dist;
         Vector3 input = movement.DesiredMoveDir;
-        if (input.sqrMagnitude > 0.04f && Vector3.Dot(input.normalized, to / dist) < -0.25f)
+        if (input.sqrMagnitude > 0.04f && Vector3.Dot(input.normalized, radial) < -0.25f)
             return;
 
-        WeaponData weapon = currentWeapon != null ? currentWeapon
-            : (loadout != null ? loadout.GetMainWeapon() : null);
-        float reach = weapon != null ? weapon.ScaledRange : 2f * WeaponData.RangeScale;
-        float ideal = reach * spacingIdealFraction;
-        float error = dist - ideal;
-        if (error <= spacingDeadzone) return;
+        float ideal = CurrentIdealDistance();
+        bool closeIn = WantsCloseIn(marked);
+        float desired = closeIn
+            ? CombatRangeTable.Default.Outer(CombatRange.Clinch) * infightHoldFraction
+            : ideal;
+        float error = dist - desired;
+        if (Mathf.Abs(error) <= spacingDeadzone) return;
+        if (error < 0f && (IsAttacking || Time.time < _noRadialPushUntil))
+            return;
 
-        float t = Mathf.Clamp01(error / Mathf.Max(0.2f, targetMagnetRange - ideal));
-        movement.AddPlanarAssist(to / dist * (targetMagnetSpeed * t));
+        float span = Mathf.Max(0.25f, targetMagnetRange - desired);
+        float t = Mathf.Clamp01(Mathf.Abs(error) / span);
+        Vector3 dir = error > 0f ? radial : -radial;
+        movement.AddPlanarAssist(dir * (targetMagnetSpeed * t));
+    }
+
+    void TickShieldRam()
+    {
+        if (movement == null || !IsBlocking || !IsShieldArmed) return;
+        if (ForcePeace || movement.IsDodging || movement.IsWeaponStuck) return;
+        if (IsAttacking) return;
+
+        Transform focus = ResolveAttackFocus();
+        if (focus == null || !WantsCloseIn(focus)) return;
+
+        Vector3 to = focus.position - transform.position;
+        to.y = 0f;
+        float dist = to.magnitude;
+        if (dist < 0.05f) return;
+
+        float clinch = CombatRangeTable.Default.Outer(CombatRange.Clinch);
+        if (dist > CurrentIdealDistance() + 0.2f) return;
+
+        Vector3 radial = to / dist;
+        movement.AddPlanarAssist(radial * shieldRamAssist);
+
+        if (dist > clinch + 0.2f) return;
+        if (Time.time < _nextShieldRamTime) return;
+        _nextShieldRamTime = Time.time + Mathf.Max(0.2f, shieldRamInterval);
+
+        var dmg = focus.GetComponent<IDamageable>();
+        if (dmg == null || !dmg.IsAlive) return;
+
+        HitInfo ram = new HitInfo
+        {
+            rawDamage = shieldRamDamage,
+            finalDamage = shieldRamDamage,
+            stagger = shieldRamStagger,
+            sourcePosition = transform.position,
+            hitDirection = radial,
+            zone = BodyZone.Torso,
+            intent = HitIntent.ThrustLine,
+            isInfight = true,
+            band = CombatRangeTable.Default.Band(dist),
+            weaponPenetration = 0.4f,
+            penetrationScore = 0.4f
+        };
+        dmg.TakeHit(ram);
+        dmg.ApplyKnockback(radial * shieldRamForce);
+        SetTrig("ShieldBash");
     }
 
     Transform ResolveAttackFocus()
     {
+        var latched = WerewolfCombat.FindClingingTo(transform);
+        if (latched != null && IsUsableTarget(latched.transform))
+            return latched.transform;
+
         float face = combatFaceRange;
         Transform marked = CommandTarget;
         if (IsUsableTarget(marked))
@@ -1017,11 +1173,9 @@ public class HumanoidCombat : MonoBehaviour
         return FindNearestInRadius(face);
     }
 
-    void ApplyFootworkStep(AttackForm form)
+    bool ApplyFootworkStep(AttackForm form)
     {
-        if (movement == null) return;
-        if (_isHeavyAttack) return;
-        if (HasManualMoveInput()) return;
+        if (movement == null) return false;
 
         Transform focus = ResolveAttackFocus();
         if (focus != null)
@@ -1032,53 +1186,156 @@ public class HumanoidCombat : MonoBehaviour
             Vector3 to = focus.position - transform.position;
             to.y = 0f;
             float dist = to.magnitude;
-            if (dist < 0.05f) return;
+            if (dist < 0.05f) return false;
+
+            bool closeIn = WantsCloseIn(focus);
+            if (!_isHeavyAttack && HasManualMoveInput() && !closeIn) return false;
 
             float reach = currentWeapon != null
                 ? currentWeapon.ScaledRange
                 : 2f * WeaponData.RangeScale;
-            float ideal = reach * (form == AttackForm.Thrust ? spacingThrustFraction : spacingIdealFraction);
-            float error = dist - ideal;
-            if (Mathf.Abs(error) <= spacingDeadzone) return;
-
-            float travel = Mathf.Clamp(error, -spacingMaxStep, spacingMaxStep);
+            float ideal = reach * (form == AttackForm.Thrust || form == AttackForm.Pommel
+                ? spacingThrustFraction
+                : spacingIdealFraction);
+            float desired = closeIn
+                ? CombatRangeTable.Default.Outer(CombatRange.Clinch) * infightHoldFraction
+                : ideal;
+            float error = dist - desired;
             Vector3 dir = to / dist;
-            if (travel < 0f) dir = -dir;
             float dur = spacingDuration > 0.05f ? spacingDuration : 0.18f;
-            movement.AddLungeSpeed(dir, Mathf.Abs(travel) / dur);
-            return;
+            float cap = FootworkCap();
+            if (error <= spacingDeadzone)
+            {
+                if (!_isHeavyAttack) return false;
+                float hop = cap * 0.35f;
+                movement.AddLungeSpeed(dir, hop / dur, dur);
+                return true;
+            }
+
+            float travel = Mathf.Min(error, cap);
+            movement.AddLungeSpeed(dir, travel / dur, dur);
+            return true;
         }
 
+        if (!_isHeavyAttack && HasManualMoveInput()) return false;
         Vector3 attackDir = GetAttackDirection();
-        if (attackDir.sqrMagnitude < 0.01f) return;
-        movement.AddLungeSpeed(attackDir, 2.5f);
+        if (attackDir.sqrMagnitude < 0.01f) return false;
+        float emptyDur = spacingDuration > 0.05f ? spacingDuration : 0.18f;
+        float emptyCap = FootworkCap();
+        movement.AddLungeSpeed(attackDir, emptyCap / emptyDur, emptyDur);
+        return true;
     }
 
-    void ExecuteRangedAttack(float chargePercent)
+    float FootworkCap()
     {
-        Vector3 spawnPos = transform.position + Vector3.up * 1.5f + GetAttackDirection() * 0.5f;
-        Quaternion baseRotation = Quaternion.LookRotation(GetAttackDirection());
-        float dmgMult = Mathf.Lerp(0.5f, 1f, chargePercent);
-        float spdMult = Mathf.Lerp(0.5f, 1f, chargePercent);
+        return _isHeavyAttack ? spacingHeavyStep : spacingMaxStep;
+    }
 
-        for (int i = 0; i < currentWeapon.projectilesPerShot; i++)
+    float CurrentIdealDistance()
+    {
+        WeaponData weapon = currentWeapon != null ? currentWeapon
+            : (loadout != null ? loadout.GetMainWeapon() : null);
+        float reach = weapon != null ? weapon.ScaledRange : 2f * WeaponData.RangeScale;
+        return reach * spacingIdealFraction;
+    }
+
+    bool WantsCloseIn(Transform focus)
+    {
+        var latched = WerewolfCombat.FindClingingTo(transform);
+        if (latched != null && focus == latched.transform) return true;
+        if (focus == null || !HasManualMoveInput()) return false;
+        Vector3 to = focus.position - transform.position;
+        to.y = 0f;
+        if (to.sqrMagnitude < 0.01f) return false;
+        Vector3 input = movement != null ? movement.DesiredMoveDir : Vector3.zero;
+        if (input.sqrMagnitude < 0.04f) return false;
+        if (Vector3.Dot(input.normalized, to.normalized) < 0.35f) return false;
+        return IsCharging || IsInAttackPipeline || IsBlocking;
+    }
+
+    float RangeTempo()
+    {
+        Transform focus = ResolveAttackFocus();
+        if (focus == null) return 1f;
+        Vector3 to = focus.position - transform.position;
+        to.y = 0f;
+        float dist = to.magnitude;
+        float reach = currentWeapon != null
+            ? currentWeapon.ScaledRange
+            : 2f * WeaponData.RangeScale;
+        if (dist > reach + 0.2f) return 1.25f;
+        if (InInfightRange(focus) || dist <= CombatRangeTable.Default.Outer(CombatRange.Clinch))
+            return 0.85f;
+        if (dist <= reach) return 0.72f;
+        return 1f;
+    }
+
+    bool InInfightRange(Transform focus)
+    {
+        if (focus == null) return false;
+        Vector3 to = focus.position - transform.position;
+        to.y = 0f;
+        float dist = to.magnitude;
+        return dist < CurrentIdealDistance() - spacingDeadzone * 0.35f;
+    }
+
+    static bool IsInfightForm(AttackForm form)
+    {
+        return form == AttackForm.CloseHit
+            || form == AttackForm.Elbow
+            || form == AttackForm.Pommel
+            || form == AttackForm.Shoulder;
+    }
+
+    AttackForm PreviewInfightForm(AttackForm? forcedForm)
+    {
+        AttackForm form;
+        if (forcedForm.HasValue) form = forcedForm.Value;
+        else if (_isHeavyAttack && _pendingIntent == HitIntent.ThrustLine) form = AttackForm.Thrust;
+        else form = ChooseAttackForm(Time.time <= _comboExpire);
+        return RemapInfightForm(form);
+    }
+
+    AttackForm RemapInfightForm(AttackForm form)
+    {
+        Transform focus = ResolveAttackFocus();
+        var latched = WerewolfCombat.FindClingingTo(transform);
+        if (latched != null && focus == latched.transform)
+            return AttackForm.CloseHit;
+        if (!InInfightRange(focus)) return form;
+        if (form == AttackForm.CloseHit || IsInfightForm(form)) return form;
+        if (_isHeavyAttack || form == AttackForm.Shoulder) return AttackForm.Shoulder;
+        if (form == AttackForm.Thrust || form == AttackForm.Pommel) return AttackForm.Pommel;
+        return AttackForm.Elbow;
+    }
+
+    CombatRange ResolveBandToFocus()
+    {
+        Transform focus = ResolveAttackFocus();
+        if (focus == null) return CombatRange.Mid;
+        Vector3 to = focus.position - transform.position;
+        to.y = 0f;
+        return CombatRangeTable.Default.Band(to.magnitude);
+    }
+
+    public void ReceiveHitShock(bool heavy)
+    {
+        if (IsBlocking || IsParrying) return;
+
+        if (IsCharging) CancelCharge();
+        if (IsAttacking)
         {
-            float spread = currentWeapon.projectilesPerShot > 1
-                ? Random.Range(-currentWeapon.spreadAngle, currentWeapon.spreadAngle) : 0f;
-            Quaternion rot = baseRotation * Quaternion.Euler(0, spread, 0);
-            GameObject proj = Instantiate(currentWeapon.projectilePrefab, spawnPos, rot);
-            Projectile projScript = proj.GetComponent<Projectile>();
-            if (projScript != null)
+            if (melee != null) melee.Stop();
+            if (hitbox != null)
             {
-                projScript.Initialize(
-                    currentWeapon.damage * dmgMult,
-                    currentWeapon.staggerForce * dmgMult,
-                    currentWeapon.projectileSpeed * spdMult,
-                    currentWeapon.projectileLifetime,
-                    currentWeapon.targetLayers
-                );
+                if (hitbox.visual != null) hitbox.visual.HideWindup();
+                hitbox.Deactivate();
             }
+            EndAttack();
         }
+
+        _shockUntil = Time.time + (heavy ? shockHeavy : shockLight);
+        SetTrig("HitReact");
     }
 
     void EndAttack()
@@ -1086,6 +1343,8 @@ public class HumanoidCombat : MonoBehaviour
         IsAttacking = false;
         IsWindingUp = false;
         _hitPrepared = false;
+        IsInfighting = false;
+        SetB("Infight", false);
         AutoTarget = null;
         _canStickThisAttack = false;
         if (hitbox != null && hitbox.visual != null) hitbox.visual.HideWindup();

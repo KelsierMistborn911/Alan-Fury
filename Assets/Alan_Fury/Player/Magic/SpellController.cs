@@ -39,6 +39,13 @@ public class SpellController : MonoBehaviour
     Vector2Int[] _preview = new Vector2Int[0];
     static Mesh _quad;
     readonly List<Transform> _marks = new List<Transform>();
+    Transform _aimGhost;
+    LineRenderer _ring;
+    Mesh _aimMesh;
+    Material _aimMat;
+    readonly List<Vector3> _aimVerts = new List<Vector3>(64);
+    readonly List<int> _aimTris = new List<int>(96);
+    readonly HashSet<Vector2Int> _aimSet = new HashSet<Vector2Int>();
 
     void Awake()
     {
@@ -87,6 +94,15 @@ public class SpellController : MonoBehaviour
     {
         IsAiming = false;
         _preview = new Vector2Int[0];
+        if (_aimGhost != null) _aimGhost.gameObject.SetActive(false);
+    }
+
+    void TryAutoAim(SpellChannel ch)
+    {
+        if (IsAiming || slots == null || !slots.IsDrawn(ch)) return;
+        var id = SpellBook.Resolve(slots.Get(ch).signs);
+        if (SpellBook.NeedsGroundAim(id))
+            BeginUse(ch);
     }
 
     void Update()
@@ -96,7 +112,10 @@ public class SpellController : MonoBehaviour
             CancelAim();
             return;
         }
-        if (composer != null && composer.IsComposing)
+        // Набор знаков — не кастуем. Фокус в руке после записи формулы — кастуем.
+        if (composer != null && composer.IsComposing
+            && composer.Signs != null && composer.Signs.Count > 0
+            && !composer.FormulaComplete)
         {
             CancelAim();
             return;
@@ -116,16 +135,13 @@ public class SpellController : MonoBehaviour
                 return;
             }
             if (Input.GetMouseButtonDown(0))
-            {
-                if (_preview == null || _preview.Length == 0)
-                    UpdatePreview();
-                if (_preview != null && _preview.Length > 0)
-                    CastFromSlot(AimChannel);
-            }
+                CastFromSlot(AimChannel);
             return;
         }
 
         if (slots == null) return;
+        TryAutoAim(SpellChannel.Hand1);
+        TryAutoAim(SpellChannel.Hand2);
 
         if (slots.IsDrawn(SpellChannel.Hand1) || slots.IsDrawn(SpellChannel.Hand2))
         {
@@ -149,37 +165,88 @@ public class SpellController : MonoBehaviour
 
     void LateUpdate()
     {
-        SyncMarks();
+        HideOldAimActors();
+        DrawAimFrames();
     }
 
-    void SyncMarks()
+    void HideOldAimActors()
     {
-        int need = (IsAiming && _preview != null) ? _preview.Length : 0;
-        while (_marks.Count < need) _marks.Add(MakeMark());
         for (int i = 0; i < _marks.Count; i++)
-        {
-            bool on = i < need && mapGrid != null;
-            _marks[i].gameObject.SetActive(on);
-            if (!on) continue;
-            Vector3 p = mapGrid.CellCenterWorld(_preview[i].x, _preview[i].y);
-            p.y += 0.07f;
-            float ts = mapGrid.TileSize * 0.9f;
-            _marks[i].position = p;
-            _marks[i].rotation = Quaternion.Euler(90f, 0f, 0f);
-            _marks[i].localScale = new Vector3(ts, ts, 1f);
-        }
+            if (_marks[i] != null) _marks[i].gameObject.SetActive(false);
+        if (_aimGhost != null) _aimGhost.gameObject.SetActive(false);
+        if (_ring != null) _ring.enabled = false;
     }
 
-    Transform MakeMark()
+    void DrawAimFrames()
     {
-        var go = GameObject.CreatePrimitive(PrimitiveType.Quad);
-        go.name = "SpellCellMark";
-        Object.Destroy(go.GetComponent<Collider>());
-        var r = go.GetComponent<MeshRenderer>();
-        EnsureMarkMat();
-        if (CellMarkMaterial != null) r.sharedMaterial = CellMarkMaterial;
-        go.SetActive(false);
-        return go.transform;
+        if (!IsAiming || mapGrid == null || _preview == null || _preview.Length == 0)
+            return;
+        EnsureAimMat();
+        if (_aimMesh == null || _aimMat == null) return;
+
+        _aimSet.Clear();
+        for (int i = 0; i < _preview.Length; i++)
+            _aimSet.Add(_preview[i]);
+
+        _aimVerts.Clear();
+        _aimTris.Clear();
+        float half = mapGrid.TileSize * 0.5f;
+        float w = Mathf.Clamp(0.05f, 0.01f, half * 0.35f);
+        var col = new Color(0.80f, 0.66f, 0.30f, 0.32f);
+        _aimMat.SetColor("_Color", col);
+        if (_aimMat.HasProperty("_BaseColor")) _aimMat.SetColor("_BaseColor", col);
+        if (_aimMat.HasProperty("_Color")) _aimMat.SetColor("_Color", col);
+
+        for (int i = 0; i < _preview.Length; i++)
+        {
+            var cell = _preview[i];
+            Vector3 p = mapGrid.CellCenterWorld(cell.x, cell.y);
+            float y = p.y + 0.06f;
+            float x0 = p.x - half, x1 = p.x + half;
+            float z0 = p.z - half, z1 = p.z + half;
+            if (!_aimSet.Contains(new Vector2Int(cell.x, cell.y - 1)))
+                AddAimQuad(x0, z0, x1, z0 + w, y);
+            if (!_aimSet.Contains(new Vector2Int(cell.x, cell.y + 1)))
+                AddAimQuad(x0, z1 - w, x1, z1, y);
+            if (!_aimSet.Contains(new Vector2Int(cell.x - 1, cell.y)))
+                AddAimQuad(x0, z0 + w, x0 + w, z1 - w, y);
+            if (!_aimSet.Contains(new Vector2Int(cell.x + 1, cell.y)))
+                AddAimQuad(x1 - w, z0 + w, x1, z1 - w, y);
+        }
+
+        _aimMesh.Clear();
+        if (_aimVerts.Count < 3) return;
+        _aimMesh.SetVertices(_aimVerts);
+        _aimMesh.SetTriangles(_aimTris, 0, false);
+        _aimMesh.RecalculateBounds();
+        Graphics.DrawMesh(_aimMesh, Matrix4x4.identity, _aimMat, 0);
+    }
+
+    void AddAimQuad(float x0, float z0, float x1, float z1, float y)
+    {
+        int b = _aimVerts.Count;
+        _aimVerts.Add(new Vector3(x0, y, z0));
+        _aimVerts.Add(new Vector3(x1, y, z0));
+        _aimVerts.Add(new Vector3(x1, y, z1));
+        _aimVerts.Add(new Vector3(x0, y, z1));
+        _aimTris.Add(b + 0); _aimTris.Add(b + 2); _aimTris.Add(b + 1);
+        _aimTris.Add(b + 0); _aimTris.Add(b + 3); _aimTris.Add(b + 2);
+    }
+
+    void EnsureAimMat()
+    {
+        if (_aimMesh == null)
+        {
+            _aimMesh = new Mesh { name = "PillarAimOverlay" };
+            _aimMesh.MarkDynamic();
+        }
+        if (_aimMat != null) return;
+        var sh = Shader.Find("Hidden/VisionCellOverlay");
+        if (sh == null) sh = Shader.Find("Universal Render Pipeline/Unlit");
+        if (sh == null) sh = Shader.Find("Unlit/Color");
+        if (sh == null) return;
+        _aimMat = new Material(sh);
+        _aimMat.renderQueue = 3000;
     }
 
     void CastFromSlot(SpellChannel ch)
@@ -221,10 +288,19 @@ public class SpellController : MonoBehaviour
 
     void CastPillar(float invested)
     {
-        if (mapGrid == null || _preview == null || _preview.Length == 0) return;
-        var copy = new Vector2Int[_preview.Length];
-        System.Array.Copy(_preview, copy, copy.Length);
-        LightPillar.Spawn(mapGrid, copy, pillarDuration, invested);
+        if (mapGrid == null) mapGrid = FindObjectOfType<MapGrid>();
+        if (_preview == null || _preview.Length == 0)
+            UpdatePreview();
+        if (_preview != null && _preview.Length > 0 && mapGrid != null)
+        {
+            var copy = new Vector2Int[_preview.Length];
+            System.Array.Copy(_preview, copy, copy.Length);
+            LightPillar.Spawn(mapGrid, copy, pillarDuration, invested);
+            return;
+        }
+        if (!MouseGround(out Vector3 hit)) return;
+        var p = LightPillar.Spawn(mapGrid, new[] { Vector2Int.zero }, pillarDuration, invested);
+        p.transform.position = hit;
     }
 
     void CastFlash(float invested)
@@ -259,7 +335,7 @@ public class SpellController : MonoBehaviour
     {
         _preview = new Vector2Int[0];
         if (mapGrid == null) mapGrid = FindObjectOfType<MapGrid>();
-        if (mapGrid == null || !mapGrid.IsReady) return;
+        if (mapGrid == null) return;
         if (!MouseGround(out Vector3 hit)) return;
         if ((hit - transform.position).sqrMagnitude > pillarRange * pillarRange) return;
         mapGrid.WorldToCell(hit, out int cx, out int cz);
@@ -320,6 +396,17 @@ public class SpellController : MonoBehaviour
         l.intensity = intensity;
         l.range = range;
         l.shadows = LightShadows.None;
+        var ball = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        Object.Destroy(ball.GetComponent<Collider>());
+        ball.transform.SetParent(go.transform, false);
+        ball.transform.localScale = Vector3.one * Mathf.Max(1.2f, range * 0.12f);
+        var r = ball.GetComponent<MeshRenderer>();
+        r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+        if (r.material != null)
+        {
+            r.material.color = color;
+            if (r.material.HasProperty("_BaseColor")) r.material.SetColor("_BaseColor", color);
+        }
         Object.Destroy(go, life);
     }
 
@@ -330,12 +417,15 @@ public class SpellController : MonoBehaviour
         if (sh == null) sh = Shader.Find("Unlit/Color");
         if (sh == null) return;
         CellMarkMaterial = new Material(sh);
-        CellMarkMaterial.color = new Color(1f, 0.92f, 0.45f, 0.45f);
+        var c = new Color(1f, 0.84f, 0.22f, 0.8f);
+        CellMarkMaterial.color = c;
+        if (CellMarkMaterial.HasProperty("_BaseColor"))
+            CellMarkMaterial.SetColor("_BaseColor", c);
         if (CellMarkMaterial.HasProperty("_Surface"))
         {
             CellMarkMaterial.SetFloat("_Surface", 1f);
             CellMarkMaterial.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
-            CellMarkMaterial.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+            CellMarkMaterial.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.One);
             CellMarkMaterial.SetInt("_ZWrite", 0);
             CellMarkMaterial.renderQueue = 3000;
         }

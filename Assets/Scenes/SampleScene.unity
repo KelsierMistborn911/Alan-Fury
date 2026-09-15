@@ -707,7 +707,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   invincible: 0
-  maxHealth: 100
+  maxHealth: 40
   healthRegenPerSecond: 0
   healthRegenDelay: 3
   maxStamina: 100
@@ -813,9 +813,22 @@ MonoBehaviour:
   spacingThrustFraction: 0.95
   spacingDeadzone: 0.28
   spacingMaxStep: 1.15
+  spacingHeavyStep: 1.73
   spacingDuration: 0.18
   targetMagnetRange: 3
   targetMagnetSpeed: 5.5
+  infightHoldFraction: 0.92
+  infightElbowWindup: 0.55
+  infightPommelWindup: 0.48
+  infightShoulderWindup: 0.82
+  infightElbowDuration: 0.68
+  infightPommelDuration: 0.58
+  infightShoulderDuration: 0.88
+  shieldRamInterval: 0.55
+  shieldRamDamage: 3
+  shieldRamStagger: 7
+  shieldRamForce: 5.5
+  shieldRamAssist: 3.4
   weaponStuckDuration: 1.6
   stuckSpeedMult: 0.45
   stuckForwardExtraMult: 0.25
@@ -826,6 +839,8 @@ MonoBehaviour:
   EnemyLayers:
     serializedVersion: 2
     m_Bits: 0
+  shockLight: 0.22
+  shockHeavy: 0.26
 --- !u!114 &824045068
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -1669,6 +1684,10 @@ MonoBehaviour:
   gravity: -20
   rotationSpeed: 6
   bipedRotationSpeed: 13
+  bipedTurnStandDeg: 250
+  bipedTurnMoveDeg: 180
+  faceLockAfterHit: 0.32
+  faceLockAfterLeap: 0.28
   arriveThreshold: 1.5
   groundLayers:
     serializedVersion: 2
@@ -2960,21 +2979,16 @@ MonoBehaviour:
   liveRadius: 15
   liveExitExtra: 10
   useVisionFade: 1
-  fadeTransparency: 0.98
   fadePale: 0.45
-  keepBottomFraction: 0.2
-  keepBottomHeight: 1.8
-  occlusionRayRadius: 1.8
+  occlusionRayRadius: 0
   fadeCornerCount: 8
-  playerKeepRadius: 6
-  fadeNearRadius: 8
-  fadeNearFalloff: 6
   fadeSeconds: 0.18
   fadeReturnDelay: 2
   fadeMaterial: {fileID: 2100000, guid: fc357d90650695b47a3717717d8a08bc, type: 2}
   liveCheckEveryNFrames: 4
   liveRoot: {fileID: 0}
   streamCheckEveryNFrames: 8
+  fadeCheckEveryNFrames: 5
   drawFadeGizmos: 1
   fadeGizmoColor: {r: 1, g: 0.15, b: 0.1, a: 1}
   drawTreeLetters: 1
@@ -3026,6 +3040,7 @@ MonoBehaviour:
   attackMaxFear: 0.5
   slotStealMargin: 2
   slotLockTime: 3
+  orbitRoleDuration: 8
   frontShare: 0.6
   frontArcHalfAngle: 60
   regroupInterval: 6

@@ -43,10 +43,13 @@ public class SpellComposer : MonoBehaviour
     void Awake()
     {
         if (slots == null) slots = GetComponent<SpellSlots>();
+        if (slots == null) slots = gameObject.AddComponent<SpellSlots>();
         if (resources == null) resources = GetComponent<PlayerResources>();
         if (combat == null) combat = GetComponent<HumanoidCombat>();
         if (loadout == null) loadout = GetComponent<PlayerLoadout>();
         if (caster == null) caster = GetComponent<SpellController>();
+        if (caster == null) caster = gameObject.AddComponent<SpellController>();
+        if (GetComponent<SpellHud>() == null) gameObject.AddComponent<SpellHud>();
         BuildCrystal();
     }
 
@@ -55,7 +58,7 @@ public class SpellComposer : MonoBehaviour
         if (_crystal == null) return;
         _crystal.gameObject.SetActive(IsComposing);
         if (!IsComposing) return;
-        _crystal.position = transform.position + Vector3.up * 2.85f;
+        _crystal.position = FocusWorldPos();
         var cam = Camera.main;
         if (cam != null) _crystal.rotation = Quaternion.LookRotation(cam.transform.forward, Vector3.up);
     }
@@ -114,6 +117,12 @@ public class SpellComposer : MonoBehaviour
     {
         if (Focus == FocusHand.Right) EquipLeft();
         else EquipRight();
+    }
+
+    Vector3 FocusWorldPos()
+    {
+        Vector3 side = Focus == FocusHand.Left ? -transform.right : transform.right;
+        return transform.position + side * 0.38f + Vector3.up * 1.15f + transform.forward * 0.28f;
     }
 
     void EquipRight()
@@ -276,15 +285,17 @@ public class SpellComposer : MonoBehaviour
         go.name = "SpellModeCrystal";
         Object.Destroy(go.GetComponent<Collider>());
         go.transform.SetParent(transform, false);
-        go.transform.localPosition = new Vector3(0f, 2.85f, 0f);
-        go.transform.localScale = new Vector3(0.22f, 0.38f, 1f);
+        go.transform.localPosition = new Vector3(0f, 1.15f, 0.28f);
+        go.transform.localScale = new Vector3(0.18f, 0.42f, 1f);
         var r = go.GetComponent<MeshRenderer>();
         var sh = Shader.Find("Universal Render Pipeline/Unlit");
         if (sh == null) sh = Shader.Find("Unlit/Color");
         if (sh != null)
         {
             var mat = new Material(sh);
-            mat.color = new Color(0.25f, 0.55f, 1f, 1f);
+            mat.color = new Color(0.55f, 0.85f, 1f, 1f);
+            if (mat.HasProperty("_BaseColor"))
+                mat.SetColor("_BaseColor", new Color(0.55f, 0.85f, 1f, 1f));
             r.material = mat;
         }
         else
