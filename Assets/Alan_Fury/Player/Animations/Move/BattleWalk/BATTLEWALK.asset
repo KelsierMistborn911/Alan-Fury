@@ -1,0 +1,23 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 188b5154c9b4d8642b03d2a24e17bda1, type: 3}
+  m_Name: BATTLEWALK
+  m_EditorClassIdentifier: 
+  SourceClips:
+  - {fileID: 1827226128182048838, guid: adb4e1a334cb6d940be126dfde301eb6, type: 3}
+  - {fileID: 1827226128182048838, guid: fa8aad6d05c97e647928f0fa54d096cf, type: 3}
+  - {fileID: 1827226128182048838, guid: 645b9cb37e74bfb48bf1af61b0e4e9ce, type: 3}
+  - {fileID: 1827226128182048838, guid: dd4af4c65e3b47545881d9439cf85e6c, type: 3}
+  KeyframeMode: 0
+  KeyframeRate: 6
+  ManualKeyframeTimes: []
+  FixedTimeDelay: 0.1
