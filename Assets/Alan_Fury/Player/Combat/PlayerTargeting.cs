@@ -72,6 +72,11 @@ public class PlayerTargeting : MonoBehaviour
         CurrentTarget = null;
     }
 
+    public void SetTarget(Transform t)
+    {
+        CurrentTarget = IsValidEnemy(t) ? t : null;
+    }
+
     public void SetAutoTarget(Transform t) => AutoTarget = t;
     public void ClearAutoTarget() => AutoTarget = null;
 
@@ -147,7 +152,7 @@ public class PlayerTargeting : MonoBehaviour
     void TryCloseSwitch()
     {
         if (!IsValidEnemy(CurrentTarget)) return;
-        int count = Physics.OverlapSphereNonAlloc(transform.position, closeSwitchRange, _enemyBuffer, enemyLayers);
+        int count = CollectEnemies(closeSwitchRange);
         if (count == 0) return;
 
         Vector3 mouse = MouseDirection();
@@ -174,7 +179,7 @@ public class PlayerTargeting : MonoBehaviour
 
     public Transform FindNearestInRadius(float radius)
     {
-        int count = Physics.OverlapSphereNonAlloc(transform.position, radius, _enemyBuffer, enemyLayers);
+        int count = CollectEnemies(radius);
         Transform closest = null;
         float minDist = float.MaxValue;
         for (int i = 0; i < count; i++)
@@ -219,7 +224,7 @@ public class PlayerTargeting : MonoBehaviour
 
     public Transform FindClosestToDirection(Vector3 preferred, float radius)
     {
-        int count = Physics.OverlapSphereNonAlloc(transform.position, radius, _enemyBuffer, enemyLayers);
+        int count = CollectEnemies(radius);
         Transform best = null;
         float bestAngle = float.MaxValue;
         float halfAngle = aimConeAngle * 0.5f;
@@ -240,7 +245,7 @@ public class PlayerTargeting : MonoBehaviour
     public Transform FindPreferredTarget(float radius)
     {
         Vector3 preferred = GetPreferredAimDirection();
-        int count = Physics.OverlapSphereNonAlloc(transform.position, radius, _enemyBuffer, enemyLayers);
+        int count = CollectEnemies(radius);
         Transform best = null;
         float bestScore = float.MaxValue;
 
@@ -258,7 +263,7 @@ public class PlayerTargeting : MonoBehaviour
 
     public Transform FindNearestInCone()
     {
-        int count = Physics.OverlapSphereNonAlloc(transform.position, targetLockRange, _enemyBuffer, enemyLayers);
+        int count = CollectEnemies(targetLockRange);
         Transform closest = null;
         float minDist = float.MaxValue;
         float halfAngle = aimConeAngle * 0.5f;
@@ -283,14 +288,85 @@ public class PlayerTargeting : MonoBehaviour
         return IsValidEnemy(cling.transform) ? cling.transform : null;
     }
 
-    /// <summary>∆ивой враг на enemyLayers (труп / мЄртвый WerewolfStats не берЄм).</summary>
+    /// <summary>∆ивой враг: волк, призрак, скелет. »гроков реестра не берЄм.</summary>
     public bool IsValidEnemy(Transform t)
     {
         if (t == null || !t.gameObject.activeInHierarchy) return false;
         if (t.root == transform.root) return false;
+        if (IsRegisteredPlayer(t)) return false;
+
+        var wolf = t.GetComponentInParent<WerewolfStats>();
+        if (wolf != null) return wolf.IsAlive;
+        var ghost = t.GetComponentInParent<GhostStats>();
+        if (ghost != null) return ghost.IsAlive;
+
+        var archer = t.GetComponentInParent<SkeletonArcherBrain>();
+        if (archer != null)
+            return archer.resources == null || archer.resources.IsAlive;
+        var knight = t.GetComponentInParent<SkeletonBrain>();
+        if (knight != null)
+            return knight.resources == null || knight.resources.IsAlive;
+
         var dmg = t.GetComponentInParent<IDamageable>();
         if (dmg != null) return dmg.IsAlive;
         return true;
+    }
+
+    static bool IsRegisteredPlayer(Transform t)
+    {
+        if (PlayerRegistry.Instance == null || t == null) return false;
+        var players = PlayerRegistry.Instance.Players;
+        for (int i = 0; i < players.Count; i++)
+        {
+            var p = players[i];
+            if (p == null) continue;
+            if (t == p || t.IsChildOf(p) || p.IsChildOf(t)) return true;
+        }
+        return false;
+    }
+
+    int CollectEnemies(float radius)
+    {
+        int mask = enemyLayers.value != 0 ? enemyLayers.value : Physics.AllLayers;
+        int count = Physics.OverlapSphereNonAlloc(transform.position, radius, _enemyBuffer, mask);
+        float r2 = radius * radius;
+        AppendSkeleton(ref count, radius, r2);
+        return count;
+    }
+
+    void AppendSkeleton(ref int count, float radius, float r2)
+    {
+        for (int i = 0; i < SkeletonBrain.Alive.Count && count < _enemyBuffer.Length; i++)
+        {
+            var b = SkeletonBrain.Alive[i];
+            if (b == null || !b.isActiveAndEnabled) continue;
+            if ((b.transform.position - transform.position).sqrMagnitude > r2) continue;
+            var col = ColliderOf(b.transform);
+            if (col != null) PushUnique(col, ref count);
+        }
+        for (int i = 0; i < SkeletonArcherBrain.Alive.Count && count < _enemyBuffer.Length; i++)
+        {
+            var b = SkeletonArcherBrain.Alive[i];
+            if (b == null || !b.isActiveAndEnabled) continue;
+            if ((b.transform.position - transform.position).sqrMagnitude > r2) continue;
+            var col = ColliderOf(b.transform);
+            if (col != null) PushUnique(col, ref count);
+        }
+    }
+
+    static Collider ColliderOf(Transform t)
+    {
+        var col = t.GetComponent<Collider>();
+        if (col != null) return col;
+        return t.GetComponentInChildren<Collider>();
+    }
+
+    void PushUnique(Collider col, ref int count)
+    {
+        if (col == null) return;
+        for (int i = 0; i < count; i++)
+            if (_enemyBuffer[i] == col) return;
+        _enemyBuffer[count++] = col;
     }
 
     bool IsValidRestoreTarget(Transform t)

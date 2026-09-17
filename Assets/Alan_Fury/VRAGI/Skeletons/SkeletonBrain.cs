@@ -2,9 +2,10 @@
 using UnityEngine;
 
 /// <summary>
-/// Мозг одиночного скелета. Движение и удар — только HumanoidLocomotion / HumanoidCombat.
-/// Ритм: подойти шагом → серия ударов → щит и дистанция. Не спамит.
-/// Временный визуал: кружок блока, треугольник замаха (цвет по стадии).
+/// Мозг скелета-рыцаря. Соло — как раньше.
+/// Если на том же объекте SkeletonSquad — командир отряда лучников:
+/// точки маршрута, сопровождение колонны, шеренга на врага, залп.
+/// Движение и удар рыцаря — только HumanoidLocomotion / HumanoidCombat.
 /// </summary>
 [RequireComponent(typeof(HumanoidLocomotion))]
 [RequireComponent(typeof(HumanoidCombat))]
@@ -20,6 +21,7 @@ public class SkeletonBrain : MonoBehaviour
     public PlayerLoadout loadout;
     public Pathfinder pathfinder;
     public NpcPerception perception;
+    public SkeletonSquad squad;
 
     [Header("Обнаружение")]
     public float aggroRadius = 16f;
@@ -74,7 +76,10 @@ public class SkeletonBrain : MonoBehaviour
     public Mode CurrentMode { get; private set; } = Mode.Idle;
     public Transform CurrentTarget { get; private set; }
     public bool ExternalControl { get; private set; }
+    public bool IsCaptain => squad != null && squad.HasArchers;
     public bool IsGuarding => Time.time < _guardUntil;
+
+    public static readonly List<SkeletonBrain> Alive = new List<SkeletonBrain>(8);
 
     private Vector3 _home;
     private Vector3 _goal;
@@ -109,6 +114,7 @@ public class SkeletonBrain : MonoBehaviour
         if (perception == null)
             perception = gameObject.AddComponent<NpcPerception>();
         perception.ApplyHumanoid();
+        if (squad == null) squad = GetComponent<SkeletonSquad>();
     }
 
     void Start()
@@ -120,11 +126,15 @@ public class SkeletonBrain : MonoBehaviour
             gameObject.AddComponent<SkeletonStatsHUD>();
         EnsureDrawn();
         if (showTells) BuildTells();
+        if (squad != null)
+            squad.Bind(this);
+        RegisterTarget();
     }
 
     void OnDestroy()
     {
         if (resources != null) resources.onDeath -= HandleDeath;
+        UnregisterTarget();
     }
 
     void HandleDeath()
@@ -139,6 +149,9 @@ public class SkeletonBrain : MonoBehaviour
             combat.ClearTarget();
         }
         if (_tellRoot != null) _tellRoot.gameObject.SetActive(false);
+        if (squad != null && !squad.Broken)
+            squad.Disband();
+        UnregisterTarget();
         enabled = false;
     }
 
@@ -153,6 +166,12 @@ public class SkeletonBrain : MonoBehaviour
         }
 
         float dt = Time.deltaTime;
+        if (IsCaptain)
+        {
+            TickCaptain(dt);
+            return;
+        }
+
         if (!ExternalControl)
             TickSoloAcquire();
 
@@ -205,6 +224,8 @@ public class SkeletonBrain : MonoBehaviour
         CurrentTarget = null;
         _goal = worldPoint;
         _waitTimer = 0f;
+        if (IsCaptain)
+            squad.IssueMarch(new[] { worldPoint });
         FollowPoint(worldPoint, gait);
     }
 
@@ -212,6 +233,8 @@ public class SkeletonBrain : MonoBehaviour
     {
         ExternalControl = true;
         CurrentTarget = IsTargetAlive(target) ? target : null;
+        if (IsCaptain && CurrentTarget != null)
+            squad.SetThreat(CurrentTarget);
     }
 
     public void CommandIdle()
@@ -221,11 +244,61 @@ public class SkeletonBrain : MonoBehaviour
         IdleStand();
     }
 
-    void TickSoloAcquire()
+    void TickCaptain(float dt)
     {
+        if (!ExternalControl)
+            TickSoloAcquire();
+
+        if (CurrentTarget != null && !IsTargetAlive(CurrentTarget))
+            CurrentTarget = null;
+
+        squad.SetThreat(CurrentTarget);
+
         if (CurrentTarget != null)
         {
-            if (FlatDist(transform.position, CurrentTarget.position) > loseRadius
+            CurrentMode = Mode.Combat;
+            float dist = FlatDist(transform.position, CurrentTarget.position);
+            float reach = ResolveReach();
+
+            if (squad.NeedsReform(CurrentTarget))
+                squad.FormRankToward(CurrentTarget);
+            else if (squad.CanVolley)
+                squad.OrderVolley(CurrentTarget);
+
+            if (dist <= reach + 1.8f)
+            {
+                TickCombat(dt);
+                return;
+            }
+
+            FollowPoint(squad.GetEscortPoint(), patrolGait);
+            if (combat != null)
+            {
+                combat.CommandTarget = CurrentTarget;
+                Vector3 aim = CurrentTarget.position - transform.position;
+                aim.y = 0f;
+                if (aim.sqrMagnitude > 0.01f)
+                    combat.AimDirection = aim.normalized;
+                EnsureDrawn();
+                if (locomotion != null && aim.sqrMagnitude > 0.01f)
+                    locomotion.SetFace(aim.normalized);
+            }
+            return;
+        }
+
+        CurrentMode = HasPatrolWork() ? Mode.Patrol : Mode.Idle;
+        squad.MarchAssignedRoute();
+        FollowPoint(squad.GetEscortPoint(), patrolGait);
+    }
+
+    void TickSoloAcquire()
+    {
+        float aggro = IsCaptain ? Mathf.Max(aggroRadius, squad.engageRange) : aggroRadius;
+        float lose = IsCaptain ? Mathf.Max(loseRadius, squad.loseRange) : loseRadius;
+
+        if (CurrentTarget != null)
+        {
+            if (FlatDist(transform.position, CurrentTarget.position) > lose
                 || !IsTargetAlive(CurrentTarget))
             {
                 CurrentTarget = null;
@@ -236,11 +309,11 @@ public class SkeletonBrain : MonoBehaviour
 
         Transform nearest = null;
         if (PlayerRegistry.Instance != null)
-            nearest = PlayerRegistry.Instance.GetNearestFlat(transform.position, aggroRadius);
+            nearest = PlayerRegistry.Instance.GetNearestFlat(transform.position, aggro);
         if (nearest == null)
         {
             Transform primary = PlayerRegistry.ResolvePrimary();
-            if (primary != null && FlatDist(transform.position, primary.position) <= aggroRadius)
+            if (primary != null && FlatDist(transform.position, primary.position) <= aggro)
                 nearest = primary;
         }
         if (nearest != null && IsTargetAlive(nearest) && CanSee(nearest))
@@ -670,6 +743,17 @@ public class SkeletonBrain : MonoBehaviour
             _blockCircle.enabled = on;
             if (on) _blockCircle.material.color = c;
         }
+    }
+
+    void RegisterTarget()
+    {
+        if (!Alive.Contains(this)) Alive.Add(this);
+        SkeletonSquad.ApplyEnemyLayer(gameObject);
+    }
+
+    void UnregisterTarget()
+    {
+        Alive.Remove(this);
     }
 
     bool CanSee(Transform t)

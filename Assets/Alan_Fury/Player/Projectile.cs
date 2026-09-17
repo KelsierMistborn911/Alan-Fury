@@ -62,10 +62,12 @@ public class Projectile : MonoBehaviour
     {
         if (other == null) return;
         if (IsOwner(other.transform)) return;
+        if (IsSquadFriendly(other.transform)) return;
         if (targetLayers.value != 0 && ((1 << other.gameObject.layer) & targetLayers) == 0)
             return;
 
-        if (other.TryGetComponent<IDamageable>(out var damageable))
+        var damageable = other.GetComponentInParent<IDamageable>();
+        if (damageable != null)
         {
             damageable.TakeDamage(damage, transform.position);
             Vector3 knockback = (other.transform.position - transform.position).normalized;
@@ -79,5 +81,17 @@ public class Projectile : MonoBehaviour
     {
         if (owner == null || t == null) return false;
         return t == owner || t.IsChildOf(owner) || owner.IsChildOf(t);
+    }
+
+    bool IsSquadFriendly(Transform t)
+    {
+        if (owner == null || t == null) return false;
+        bool shooter = owner.GetComponentInParent<SkeletonArcherBrain>() != null
+                    || owner.GetComponentInParent<SkeletonBrain>() != null
+                    || owner.GetComponentInParent<SkeletonSquad>() != null;
+        if (!shooter) return false;
+        return t.GetComponentInParent<SkeletonArcherBrain>() != null
+            || t.GetComponentInParent<SkeletonBrain>() != null
+            || t.GetComponentInParent<SkeletonSquad>() != null;
     }
 }

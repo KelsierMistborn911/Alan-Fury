@@ -194,6 +194,7 @@ public class HumanoidLocomotion : MonoBehaviour
 
     protected CharacterController Controller;
     protected HumanoidCombat Combat;
+    protected RangedController Ranged;
     protected PlayerResources Resources;
 
     private Vector3 _velocity;
@@ -424,6 +425,7 @@ public class HumanoidLocomotion : MonoBehaviour
         Controller = GetComponent<CharacterController>();
         _currentGait = run;
         Combat = GetComponent<HumanoidCombat>();
+        Ranged = GetComponent<RangedController>();
         Resources = GetComponent<PlayerResources>();
         if (Resources != null) Resources.onDeath += HandleDeath;
 
@@ -762,9 +764,14 @@ public class HumanoidLocomotion : MonoBehaviour
     float ComputeStandingTurnAngle()
     {
         Vector3 look = FaceDir;
-        Transform aim = Combat != null ? Combat.ActiveAimTarget : null;
-        if (aim != null)
-            look = aim.position - transform.position;
+        if (Ranged != null && Ranged.IsSelfAiming && Ranged.ShotDir.sqrMagnitude > 0.01f)
+            look = Ranged.ShotDir;
+        else
+        {
+            Transform aim = Combat != null ? Combat.ActiveAimTarget : null;
+            if (aim != null)
+                look = aim.position - transform.position;
+        }
         look.y = 0f;
         if (look.sqrMagnitude < 0.01f) return 0f;
         float angle = Vector3.SignedAngle(transform.forward, look.normalized, Vector3.up);
@@ -1006,6 +1013,12 @@ public class HumanoidLocomotion : MonoBehaviour
             return;
 
         bool isSprinting = _currentGaitLevel == 3;
+        if (Ranged != null && Ranged.IsSelfAiming && Ranged.ShotDir.sqrMagnitude > 0.01f)
+        {
+            ApplyFaceYaw(Ranged.ShotDir, faceTurnSmooth, faceTurnRate);
+            return;
+        }
+
         if (isSprinting && moveDir.sqrMagnitude > 0.01f)
         {
             ApplyFaceYaw(moveDir, sprintFaceTurnSmooth, sprintFaceTurnRate);

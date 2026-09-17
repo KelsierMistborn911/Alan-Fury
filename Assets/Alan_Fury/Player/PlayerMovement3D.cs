@@ -194,6 +194,8 @@ public class PlayerMovement3D : HumanoidLocomotion
 
     Vector3 ComputeLookDirection()
     {
+        if (Ranged != null && Ranged.IsSelfAiming && Ranged.ShotDir.sqrMagnitude > 0.01f)
+            return Ranged.ShotDir;
         Transform aim = Combat != null ? Combat.ActiveAimTarget : null;
         if (aim != null)
         {
