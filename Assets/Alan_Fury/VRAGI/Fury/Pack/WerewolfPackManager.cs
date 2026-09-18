@@ -348,6 +348,74 @@ public class WerewolfPackManager : MonoBehaviour
         Log($"Стая поднята: {_wolves.Count} волков, слотов атаки {maxAttackers}.");
     }
 
+    /// <summary>
+    /// Один волк на кольце distance метров от hunter.
+    /// Сразу знает игрока и идёт в Attack.
+    /// </summary>
+    public GameObject SpawnAwareWolf(Transform hunter, float distance = 50f)
+    {
+        if (wolfPrefab == null)
+        {
+            Debug.LogWarning("WerewolfPackManager: не назначен wolfPrefab — спавнить нечего.");
+            return null;
+        }
+        if (hunter == null)
+            hunter = player != null ? player : PlayerRegistry.ResolvePrimary();
+        if (hunter == null)
+        {
+            Debug.LogWarning("WerewolfPackManager.SpawnAwareWolf: нет цели.");
+            return null;
+        }
+
+        Vector3 origin = hunter.position;
+        Vector3 fwd = hunter.forward;
+        fwd.y = 0f;
+        if (fwd.sqrMagnitude < 0.0001f) fwd = Vector3.forward;
+        fwd.Normalize();
+
+        Vector3 pos = origin + fwd * distance;
+        if (pathfinder != null && pathfinder.IsReady)
+        {
+            float[] angles = { 0f, 40f, -40f, 80f, -80f, 120f, -120f, 180f };
+            for (int i = 0; i < angles.Length; i++)
+            {
+                Vector3 dir = Quaternion.AngleAxis(angles[i], Vector3.up) * fwd;
+                Vector3 cand = origin + dir * distance;
+                bool found;
+                Vector3 snap = pathfinder.NearestWalkableWorld(cand, out found);
+                if (!found) continue;
+                float dx = snap.x - origin.x;
+                float dz = snap.z - origin.z;
+                if (dx * dx + dz * dz < (distance * 0.55f) * (distance * 0.55f))
+                    continue;
+                pos = snap;
+                break;
+            }
+        }
+
+        Vector3 look = origin - pos;
+        look.y = 0f;
+        Quaternion rot = look.sqrMagnitude > 0.0001f
+            ? Quaternion.LookRotation(look.normalized)
+            : Quaternion.identity;
+
+        var go = Instantiate(wolfPrefab, pos, rot);
+
+        var perc = go.GetComponent<NpcPerception>();
+        if (perc != null) perc.ForceKnowAndHunt(hunter);
+
+        var preBrain = go.GetComponent<WerewolfBrain>();
+        if (preBrain != null) preBrain.RequestCombat();
+
+        var attack = go.GetComponent<WerewolfAttackBrain>();
+        if (attack != null) attack.SetRole(PackRole.Attack, false);
+
+        if (player == null) player = hunter;
+        UpdateSlots();
+        Log("Рог стаи: волк в " + distance.ToString("0") + " м, знает цель.");
+        return go;
+    }
+
     // ===================== Роли + токен =====================
 
     void Update()

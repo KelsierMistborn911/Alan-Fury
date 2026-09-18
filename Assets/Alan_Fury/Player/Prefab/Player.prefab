@@ -405,6 +405,10 @@ MonoBehaviour:
   dodgeCooldown: 0.1
   dodgeSteerDegrees: 180
   dodgeExitCarry: 0.35
+  dodgeInvuln: 0.1
+  dodgeAssistMin: 1.2
+  dodgeAssistMax: 3.2
+  dodgeAssistMargin: 0.4
   rollSpeed: 15
   rollDuration: 0.6
   rollCooldown: 1
@@ -528,6 +532,7 @@ MonoBehaviour:
   spacingDeadzone: 0.28
   spacingMaxStep: 1.15
   spacingHeavyStep: 1.73
+  spacingSideBlend: 0.55
   spacingDuration: 0.18
   targetMagnetRange: 3
   targetMagnetSpeed: 5.5
@@ -616,8 +621,12 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   coneHalfAngle: 60
-  debugShowZone: 1
+  showZoneMesh: 1
   debugZoneY: 0.05
+  sweepBladePad: 8
+  telegraphColor: {r: 1, g: 0.85, b: 0.15, a: 0.22}
+  sweepColor: {r: 1, g: 0.12, b: 0.08, a: 0.42}
+  debugShowZone: 1
   visual: {fileID: 2635667669542674056}
 --- !u!120 &4663724128358875171
 LineRenderer:
@@ -861,10 +870,13 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   loadout: {fileID: 1000637426486226446}
+  gridWidth: 10
+  gridHeight: 8
   slotCount: 20
   grantRangedKit: 1
   startingArrows: 30
   startingBolts: 20
+  grantPackHorn: 1
 --- !u!114 &4824334992243338443
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -1001,7 +1013,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: c13b26b102ebf0e4cb30008b20be23b1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  animator: {fileID: 0}
+  animator: {fileID: 7929764488447070920}
   stanceDuration: 5
 --- !u!114 &6681406382610746132
 MonoBehaviour:

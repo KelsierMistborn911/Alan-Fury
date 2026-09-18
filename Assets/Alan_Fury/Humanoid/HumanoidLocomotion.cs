@@ -1,4 +1,4 @@
-﻿using UnityEngine;
+using UnityEngine;
 
 [System.Serializable]
 public struct GaitConfig
@@ -136,6 +136,14 @@ public class HumanoidLocomotion : MonoBehaviour
     [Range(0f, 1f)]
     [Tooltip("Доля пиковой скорости, которая остаётся после уворота.")]
     public float dodgeExitCarry = 0.35f;
+    [Tooltip("Неуязвимость в начале уворота (сек). Пока тело ещё в зоне удара.")]
+    public float dodgeInvuln = 0.1f;
+    [Tooltip("Минимальная дистанция автоуворота из зоны.")]
+    public float dodgeAssistMin = 1.2f;
+    [Tooltip("Максимальная дистанция автоуворота из зоны.")]
+    public float dodgeAssistMax = 3.2f;
+    [Tooltip("Запас за край зоны (м).")]
+    public float dodgeAssistMargin = 0.4f;
 
     [Header("Перекат")]
     public float rollSpeed = 11f;
@@ -219,8 +227,11 @@ public class HumanoidLocomotion : MonoBehaviour
     private int _arcSign;
     private Vector3 _arcCenter;
     private float _lastDodgeEndTime = -99f;
+    private bool _dodgeAssisted;
 
     public bool IsDodging => _isDodging;
+    public bool IsDodgeInvulnerable =>
+        _isDodging && (dodgeDuration - _maneuverTimer) <= dodgeInvuln;
     public float DodgeTimeRemaining => _isDodging ? _maneuverTimer : 0f;
     public float DodgeProgress01 => _isDodging ? 1f - Mathf.Clamp01(_maneuverTimer / dodgeDuration) : 1f;
     public float TimeSinceDodgeEnd => Time.time - _lastDodgeEndTime;
@@ -379,8 +390,11 @@ public class HumanoidLocomotion : MonoBehaviour
         worldDir.y = 0f;
         if (worldDir.sqrMagnitude < 0.01f) return false;
         _maneuverDir = worldDir.normalized;
-        SetupLockManeuver(true);
-        StartManeuver(dodgeSpeed, dodgeDuration, ref _isDodging, ref _lastDodgeTime);
+        float speed = dodgeSpeed;
+        _dodgeAssisted = ResolveDodgeAssist(ref _maneuverDir, ref speed);
+        if (!_dodgeAssisted)
+            SetupLockManeuver(true);
+        StartManeuver(speed, dodgeDuration, ref _isDodging, ref _lastDodgeTime);
         return true;
     }
 
@@ -545,7 +559,8 @@ public class HumanoidLocomotion : MonoBehaviour
             if (_isDodging)
             {
                 _lastDodgeEndTime = Time.time;
-                _velocity = _maneuverDir * dodgeSpeed * dodgeExitCarry;
+                _velocity = _maneuverDir * _maneuverSpeed * dodgeExitCarry;
+                _dodgeAssisted = false;
             }
             if (_isRolling && animator != null && HasParam("Rolling"))
                 animator.SetBool("Rolling", false);
@@ -555,7 +570,7 @@ public class HumanoidLocomotion : MonoBehaviour
             return;
         }
 
-        if (_isDodging && DesiredMoveDir.sqrMagnitude > 0.01f)
+        if (_isDodging && DesiredMoveDir.sqrMagnitude > 0.01f && !(_dodgeAssisted && IsDodgeInvulnerable))
         {
             _maneuverDir = Vector3.RotateTowards(
                 _maneuverDir,
@@ -633,6 +648,114 @@ public class HumanoidLocomotion : MonoBehaviour
         _step.Cancel();
     }
 
+    const float DodgeTravelFactor = 0.77f;
+
+    bool ResolveDodgeAssist(ref Vector3 intent, ref float speed)
+    {
+        WeaponHitbox threat = FindDodgeThreat();
+        if (threat == null) return false;
+
+        Vector3 from = transform.position + Vector3.up * 0.9f;
+        bool inside = threat.PointInFullZone(from);
+        float maxT = dodgeAssistMax;
+
+        Vector3 strike = threat.CurrentDirection;
+        strike.y = 0f;
+        if (strike.sqrMagnitude < 0.01f) strike = transform.forward;
+        else strike.Normalize();
+
+        Vector3 away = from - threat.ZoneOrigin;
+        away.y = 0f;
+        if (away.sqrMagnitude < 0.01f) away = -strike;
+        else away.Normalize();
+
+        Vector3 bestDir = away;
+        float bestTravel = maxT;
+        float bestScore = float.NegativeInfinity;
+        bool found = false;
+
+        for (int i = 0; i < 12; i++)
+        {
+            Vector3 d = Quaternion.Euler(0f, i * 30f, 0f) * Vector3.forward;
+            float leave = threat.RayLeave(from, d, maxT + 0.8f);
+            bool enters = threat.RayEnters(from, d, maxT);
+            if (inside && leave < 0f) continue;
+            if (!inside && enters) continue;
+
+            float travel = inside
+                ? Mathf.Clamp(leave + dodgeAssistMargin, dodgeAssistMin, maxT)
+                : dodgeAssistMin;
+
+            float score = 0f;
+            if (inside) score += (maxT - leave) * 1.8f;
+            score += Vector3.Dot(away, d) * 1.4f;
+            score -= Mathf.Max(0f, Vector3.Dot(strike, d)) * 1.1f;
+            if (intent.sqrMagnitude > 0.01f)
+                score += Vector3.Dot(intent.normalized, d) * 0.35f;
+
+            if (score > bestScore)
+            {
+                bestScore = score;
+                bestDir = d;
+                bestTravel = travel;
+                found = true;
+            }
+        }
+
+        if (!found)
+        {
+            bestDir = away;
+            bestTravel = dodgeAssistMax;
+        }
+
+        intent = bestDir;
+        speed = Mathf.Clamp(bestTravel / (dodgeDuration * DodgeTravelFactor), 14f, dodgeSpeed);
+        return true;
+    }
+
+    WeaponHitbox FindDodgeThreat()
+    {
+        Vector3 me = transform.position + Vector3.up * 0.9f;
+        WeaponHitbox best = null;
+        float bestScore = 0f;
+        var live = WeaponHitbox.Live;
+        for (int i = 0; i < live.Count; i++)
+        {
+            WeaponHitbox hb = live[i];
+            if (hb == null || !hb.IsLive) continue;
+            if (hb.transform == transform || hb.transform.IsChildOf(transform) || transform.IsChildOf(hb.transform))
+                continue;
+
+            float dist = Vector3.Distance(hb.transform.position, transform.position);
+            if (dist > hb.CurrentRange + 3f) continue;
+
+            float score = 0f;
+            if (hb.PointInHotZone(me)) score = 120f;
+            else if (hb.PointInFullZone(me)) score = hb.IsSweeping ? 80f : 55f;
+            else
+            {
+                bool path = false;
+                for (int k = 0; k < 8; k++)
+                {
+                    Vector3 d = Quaternion.Euler(0f, k * 45f, 0f) * Vector3.forward;
+                    if (hb.RayEnters(me, d, dodgeAssistMax))
+                    {
+                        path = true;
+                        break;
+                    }
+                }
+                if (!path) continue;
+                score = hb.IsSweeping ? 40f : 32f;
+            }
+            if (score > bestScore)
+            {
+                bestScore = score;
+                best = hb;
+            }
+        }
+        return best;
+    }
+
     void OnControllerColliderHit(ControllerColliderHit hit)
     {
         if (_isVaulting || _isDodging || _isRolling) return;
@@ -682,7 +805,8 @@ public class HumanoidLocomotion : MonoBehaviour
         bool combatMode = Combat != null && Combat.IsInCombat;
 
         int gait = _currentGaitLevel;
-        if (blocking && gait == 3) gait = 2;
+        if (blocking && gait == 3) gait = combatMode ? 1 : 2;
+        if (combatMode && gait == 2) gait = 1;
         _currentGaitLevel = gait;
 
         if (IsSneaking)
@@ -696,7 +820,7 @@ public class HumanoidLocomotion : MonoBehaviour
             _stepSlowRef = combatMode ? combatWalk : walk;
             _stepFastRef = gait == 3
                 ? (combatMode ? combatSprint : sprint)
-                : (combatMode ? combatRun : run);
+                : run;
             _currentGait = gait == 1 ? _stepSlowRef : _stepFastRef;
         }
 
@@ -764,7 +888,7 @@ public class HumanoidLocomotion : MonoBehaviour
     float ComputeStandingTurnAngle()
     {
         Vector3 look = FaceDir;
-        if (Ranged != null && Ranged.IsSelfAiming && Ranged.ShotDir.sqrMagnitude > 0.01f)
+        if (Ranged != null && Ranged.HasRangedEquipped && Ranged.IsSelfAiming && Ranged.ShotDir.sqrMagnitude > 0.01f)
             look = Ranged.ShotDir;
         else
         {
@@ -1013,7 +1137,7 @@ public class HumanoidLocomotion : MonoBehaviour
             return;
 
         bool isSprinting = _currentGaitLevel == 3;
-        if (Ranged != null && Ranged.IsSelfAiming && Ranged.ShotDir.sqrMagnitude > 0.01f)
+        if (Ranged != null && Ranged.HasRangedEquipped && Ranged.IsSelfAiming && Ranged.ShotDir.sqrMagnitude > 0.01f)
         {
             ApplyFaceYaw(Ranged.ShotDir, faceTurnSmooth, faceTurnRate);
             return;

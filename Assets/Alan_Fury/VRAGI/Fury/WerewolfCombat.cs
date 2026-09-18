@@ -358,6 +358,14 @@ public class WerewolfCombat : MonoBehaviour
                 case AttackKind.Special: locomotion.PlayAttack("Special"); break;
             }
         }
+
+        if (melee != null) melee.Telegraph(BuildRequest(_def));
+        else if (hitbox != null)
+        {
+            var req = BuildRequest(_def);
+            hitbox.ShowTelegraph(req.range, req.radius, req.height, req.offset, req.direction,
+                req.layers, req.cone, req.shape, req.innerRadius, req.yawOffset, req.sweepSign);
+        }
     }
 
     private void EnterActive()
@@ -367,6 +375,8 @@ public class WerewolfCombat : MonoBehaviour
 
         if (_kind == AttackKind.Jump)
         {
+            if (melee != null) melee.Stop();
+            else if (hitbox != null) hitbox.Deactivate();
             if (perception != null && perception.HasPlayer && locomotion != null && locomotion.IsGrounded)
                 locomotion.Leap(perception.PlayerPos, jumpArc);
             else
@@ -538,11 +548,22 @@ public class WerewolfCombat : MonoBehaviour
 
     private void FireHitbox(AttackDef def, float durationOverride = 0f)
     {
-        if (hitbox == null) return;
+        if (hitbox == null && melee == null) return;
 
-        // Бьём туда, куда СМОТРИМ. Раньше удар летел в игрока независимо от разворота —
-        // волк попадал спиной, и обойти его было нельзя. Теперь обход = промах.
-        // Наскок — исключение: там направление задаёт сам прыжок.
+        var req = BuildRequest(def, durationOverride);
+        if (melee != null) melee.Play(req);
+        else
+        {
+            hitbox.SetHitInfo(req.info);
+            hitbox.Activate(req.range, req.radius, req.height, req.offset, req.direction,
+                req.damage, req.stagger, targetLayers, req.duration, hitTickInterval,
+                0f, 0, req.cone, req.shape, req.innerRadius, req.yawOffset, req.sweepSign);
+        }
+    }
+
+    MeleeAction.Request BuildRequest(AttackDef def, float durationOverride = 0f)
+    {
+        // Бьём туда, куда СМОТРИМ. Наскок — исключение: направление задаёт прыжок.
         Vector3 dir = _kind == AttackKind.Jump && perception != null && perception.HasPlayer
             ? Flat(perception.PlayerPos - transform.position)
             : transform.forward;
@@ -552,12 +573,14 @@ public class WerewolfCombat : MonoBehaviour
         float cone = 52f;
         float inner = def.range * 0.28f;
         float yaw = 0f;
+        float sweepSign = (_combo % 2 == 0) ? -1f : 1f;
         if (_kind == AttackKind.Jump)
         {
             band = CombatRange.Close;
             shape = HitZoneShape.Ellipse;
             cone = -1f;
             inner = 0f;
+            sweepSign = 1f;
         }
         else if (_kind == AttackKind.Special)
         {
@@ -565,6 +588,7 @@ public class WerewolfCombat : MonoBehaviour
             shape = HitZoneShape.Ellipse;
             cone = -1f;
             inner = 0f;
+            sweepSign = 1f;
         }
 
         HitInfo info = HitInfo.Basic(def.damage, transform.position);
@@ -573,7 +597,7 @@ public class WerewolfCombat : MonoBehaviour
         if (_kind == AttackKind.Special)
             info.zone = BiteLegZone();
 
-        var req = new MeleeAction.Request
+        return new MeleeAction.Request
         {
             band = band,
             range = def.range,
@@ -590,18 +614,10 @@ public class WerewolfCombat : MonoBehaviour
             shape = shape,
             innerRadius = inner,
             yawOffset = yaw,
+            sweepSign = sweepSign,
             info = info,
             target = perception != null && perception.HasPlayer ? perception.player : null
         };
-
-        if (melee != null) melee.Play(req);
-        else if (hitbox != null)
-        {
-            hitbox.SetHitInfo(info);
-            hitbox.Activate(req.range, req.radius, req.height, req.offset, dir,
-                req.damage, req.stagger, targetLayers, req.duration, hitTickInterval,
-                0f, 0, req.cone, req.shape, req.innerRadius, req.yawOffset);
-        }
     }
 
     // ===================== Утилиты =====================

@@ -1,61 +1,62 @@
 using UnityEngine;
 
 /// <summary>
-/// Боевая машина гуманоида. Без Input / Camera.
-/// Драйвер (игрок или ИИ) вызывает TryHoldAttack / ReleaseAttack / TryThrust / SetBlocking и т.д.
-/// Окно урона всегда через MeleeAction.Play — тот же пайплайн, что у игрока.
+/// Р‘РѕРµРІР°СЏ РјР°С€РёРЅР° РіСѓРјР°РЅРѕРёРґР°. Р‘РµР· Input / Camera.
+/// Р”СЂР°Р№РІРµСЂ (РёРіСЂРѕРє РёР»Рё РР) РІС‹Р·С‹РІР°РµС‚ TryHoldAttack / ReleaseAttack / TryThrust / SetBlocking Рё С‚.Рґ.
+/// РћРєРЅРѕ СѓСЂРѕРЅР° РІСЃРµРіРґР° С‡РµСЂРµР· MeleeAction.Play вЂ” С‚РѕС‚ Р¶Рµ РїР°Р№РїР»Р°Р№РЅ, С‡С‚Рѕ Сѓ РёРіСЂРѕРєР°.
 /// </summary>
 public class HumanoidCombat : MonoBehaviour
 {
     public enum AttackForm { SlashLeft, SlashRight, Thrust, Elbow, Pommel, Shoulder, CloseHit }
 
-    [Header("Ссылки")]
+    [Header("РЎСЃС‹Р»РєРё")]
     public PlayerResources resources;
     public PlayerLoadout loadout;
     public WeaponHitbox hitbox;
     public PlayerStance stance;
-    [Tooltip("Аниматор. Пусто — найдётся на объекте.")]
+    [Tooltip("РђРЅРёРјР°С‚РѕСЂ. РџСѓСЃС‚Рѕ вЂ” РЅР°Р№РґС‘С‚СЃСЏ РЅР° РѕР±СЉРµРєС‚Рµ.")]
     public Animator animator;
-    [Tooltip("Визуал оружия. Пусто — найдётся на объекте.")]
+    [Tooltip("Р’РёР·СѓР°Р» РѕСЂСѓР¶РёСЏ. РџСѓСЃС‚Рѕ вЂ” РЅР°Р№РґС‘С‚СЃСЏ РЅР° РѕР±СЉРµРєС‚Рµ.")]
     public WeaponVisual weaponVisual;
     public MeleeAction melee;
 
-    [Header("Комбо / стойки (атака)")]
+    [Header("РљРѕРјР±Рѕ / СЃС‚РѕР№РєРё (Р°С‚Р°РєР°)")]
     public float comboWindow = 1f;
     [Range(0.5f, 1f)] public float stanceSpeedBonus = 0.85f;
     [Range(0.3f, 0.9f)] public float heavyChargeThreshold = 0.55f;
 
-    [Header("Управление боем")]
+    [Header("РЈРїСЂР°РІР»РµРЅРёРµ Р±РѕРµРј")]
     public float sheathVisualDelay = 1f;
     public float combatLingerSeconds = 15f;
     public float combatFaceRange = 10f;
 
-    [Header("Парирование")]
+    [Header("РџР°СЂРёСЂРѕРІР°РЅРёРµ")]
     public float parryWindow = 0.25f;
     public float parryCooldown = 0.25f;
 
-    [Header("Удар под блоком")]
+    [Header("РЈРґР°СЂ РїРѕРґ Р±Р»РѕРєРѕРј")]
     public float blockAttackWindup = 0.15f;
     [Range(0.3f, 1f)] public float blockAttackRangeMult = 0.7f;
     public float blockAttackStaminaMult = 1.35f;
 
-    [Header("Выпад / импульс")]
+    [Header("Р’С‹РїР°Рґ / РёРјРїСѓР»СЊСЃ")]
     public float lungeSpeedMultiplier = 1.6f;
     [Range(0f, 1f)] public float lungeInputDot = 0.5f;
     public float movementDamageCoefficient = 0.02f;
 
-    [Header("Подшаг к дистанции удара")]
+    [Header("РџРѕРґС€Р°Рі Рє РґРёСЃС‚Р°РЅС†РёРё СѓРґР°СЂР°")]
     [Range(0.4f, 1f)] public float spacingIdealFraction = 0.72f;
     [Range(0.5f, 1.2f)] public float spacingThrustFraction = 0.95f;
     public float spacingDeadzone = 0.28f;
     public float spacingMaxStep = 0.86f;
     public float spacingHeavyStep = 1.73f;
+    [Range(0f, 1.2f)] public float spacingSideBlend = 0.55f;
     public float spacingDuration = 0.18f;
     public float targetMagnetRange = 4.2f;
     public float targetMagnetSpeed = 5.5f;
 
-    [Header("Клинч")]
-    [Tooltip("Держать это расстояние, пока нет умышленного входа.")]
+    [Header("РљР»РёРЅС‡")]
+    [Tooltip("Р”РµСЂР¶Р°С‚СЊ СЌС‚Рѕ СЂР°СЃСЃС‚РѕСЏРЅРёРµ, РїРѕРєР° РЅРµС‚ СѓРјС‹С€Р»РµРЅРЅРѕРіРѕ РІС…РѕРґР°.")]
     [Range(0.7f, 1.2f)] public float infightHoldFraction = 0.92f;
     [Range(0.35f, 0.9f)] public float infightElbowWindup = 0.55f;
     [Range(0.35f, 0.9f)] public float infightPommelWindup = 0.48f;
@@ -69,13 +70,13 @@ public class HumanoidCombat : MonoBehaviour
     public float shieldRamForce = 5.5f;
     public float shieldRamAssist = 3.4f;
 
-    [Header("Застревание оружия")]
+    [Header("Р—Р°СЃС‚СЂРµРІР°РЅРёРµ РѕСЂСѓР¶РёСЏ")]
     public float weaponStuckDuration = 1.6f;
     [Range(0.15f, 0.9f)] public float stuckSpeedMult = 0.45f;
     [Range(0.05f, 0.6f)] public float stuckForwardExtraMult = 0.25f;
     public float stuckPullFreeTime = 0.22f;
 
-    [Header("Комбо удар+уворот")]
+    [Header("РљРѕРјР±Рѕ СѓРґР°СЂ+СѓРІРѕСЂРѕС‚")]
     public float dodgeAttackMinWindup = 0.08f;
     public float dodgeAttackBufferAfter = 0.2f;
     public float dodgeAttackPerfectTolerance = 0.08f;
@@ -96,10 +97,10 @@ public class HumanoidCombat : MonoBehaviour
 
     public CombatStance CurrentStance => stance != null ? stance.Current : CombatStance.Neutral;
 
-    /// <summary>Цель, которую выставил драйвер (лок игрока или мозг NPC).</summary>
+    /// <summary>Р¦РµР»СЊ, РєРѕС‚РѕСЂСѓСЋ РІС‹СЃС‚Р°РІРёР» РґСЂР°Р№РІРµСЂ (Р»РѕРє РёРіСЂРѕРєР° РёР»Рё РјРѕР·Рі NPC).</summary>
     public Transform CommandTarget { get; set; }
     public Transform AutoTarget { get; set; }
-    /// <summary>Мировое горизонтальное направление прицела, если цели нет.</summary>
+    /// <summary>РњРёСЂРѕРІРѕРµ РіРѕСЂРёР·РѕРЅС‚Р°Р»СЊРЅРѕРµ РЅР°РїСЂР°РІР»РµРЅРёРµ РїСЂРёС†РµР»Р°, РµСЃР»Рё С†РµР»Рё РЅРµС‚.</summary>
     public Vector3 AimDirection { get; set; }
     public LayerMask EnemyLayers;
 
@@ -162,6 +163,7 @@ public class HumanoidCombat : MonoBehaviour
         public HitZoneShape shape;
         public float innerRadius;
         public float yawOffset;
+        public float sweepSign;
         public HitInfo info;
     }
     protected PreparedAttack _prep;
@@ -175,7 +177,7 @@ public class HumanoidCombat : MonoBehaviour
     protected float _noRadialPushUntil;
     protected float _shockUntil;
 
-    [Header("Шок от удара")]
+    [Header("РЁРѕРє РѕС‚ СѓРґР°СЂР°")]
     public float shockLight = 0.22f;
     public float shockHeavy = 0.26f;
 
@@ -286,6 +288,8 @@ public class HumanoidCombat : MonoBehaviour
             isHoldingAttack = false;
             _hitPrepared = false;
             IsInfighting = false;
+            if (melee != null) melee.Stop();
+            else if (hitbox != null) hitbox.Deactivate();
             return;
         }
 
@@ -559,6 +563,7 @@ public class HumanoidCombat : MonoBehaviour
 
         IsWindingUp = true;
         stateTimer = windup;
+        ShowPreparedTelegraph();
         if (hitbox != null && hitbox.visual != null) hitbox.visual.ShowWindup();
     }
 
@@ -929,6 +934,7 @@ public class HumanoidCombat : MonoBehaviour
             _prep.shape = shape;
             _prep.innerRadius = inner;
             _prep.yawOffset = yaw;
+            _prep.sweepSign = (form == AttackForm.SlashLeft || form == AttackForm.Elbow) ? -1f : 1f;
 
             CombatRange hitBand = ResolveBandToFocus();
             _prep.info = new HitInfo
@@ -965,6 +971,18 @@ public class HumanoidCombat : MonoBehaviour
         ClearStepBuffer();
     }
 
+    void ShowPreparedTelegraph()
+    {
+        if (!_hitPrepared || currentWeapon == null) return;
+        if (melee == null && hitbox == null) return;
+
+        var req = BuildPreparedRequest();
+        if (melee != null) melee.Telegraph(req);
+        else
+            hitbox.ShowTelegraph(req.range, req.radius, req.height, req.offset, req.direction,
+                req.layers, req.cone, req.shape, req.innerRadius, req.yawOffset, req.sweepSign);
+    }
+
     void ActivatePreparedHitbox()
     {
         if (!_hitPrepared) return;
@@ -975,6 +993,21 @@ public class HumanoidCombat : MonoBehaviour
 
         if (currentWeapon == null) return;
 
+        var req = BuildPreparedRequest();
+        if (melee != null) melee.Play(req);
+        else
+        {
+            hitbox.SetHitInfo(req.info);
+            hitbox.Activate(
+                req.range, req.radius, req.height, req.offset, req.direction,
+                req.damage, req.stagger, req.layers, req.duration, req.tick,
+                req.charge, req.combo, req.cone,
+                req.shape, req.innerRadius, req.yawOffset, req.sweepSign);
+        }
+    }
+
+    MeleeAction.Request BuildPreparedRequest()
+    {
         _prep.dir = GetAttackDirection();
         _prep.info.sourcePosition = transform.position;
         _prep.info.hitDirection = _prep.dir;
@@ -995,19 +1028,7 @@ public class HumanoidCombat : MonoBehaviour
             _prep.info.isInfight = IsInfighting;
         }
 
-        if (melee == null)
-        {
-            if (hitbox == null) return;
-            hitbox.SetHitInfo(_prep.info);
-            hitbox.Activate(
-                _prep.range, _prep.radius, _prep.height, _prep.offset, _prep.dir,
-                _prep.damage, _prep.stagger, _prep.layers, _prep.dur, _prep.tick,
-                _prep.charge, _prep.combo, _prep.cone,
-                _prep.shape, _prep.innerRadius, _prep.yawOffset);
-            return;
-        }
-
-        melee.Play(new MeleeAction.Request
+        return new MeleeAction.Request
         {
             band = band,
             range = _prep.range,
@@ -1026,10 +1047,11 @@ public class HumanoidCombat : MonoBehaviour
             shape = _prep.shape,
             innerRadius = _prep.innerRadius,
             yawOffset = _prep.yawOffset,
+            sweepSign = _prep.sweepSign == 0f ? 1f : _prep.sweepSign,
             info = _prep.info,
             weapon = currentWeapon,
             target = aim
-        });
+        };
     }
 
     AttackForm ChooseAttackForm(bool wasInCombo)
@@ -1201,7 +1223,7 @@ public class HumanoidCombat : MonoBehaviour
                 ? CombatRangeTable.Default.Outer(CombatRange.Clinch) * infightHoldFraction
                 : ideal;
             float error = dist - desired;
-            Vector3 dir = to / dist;
+            Vector3 dir = FootworkDir(form, to / dist);
             float dur = spacingDuration > 0.05f ? spacingDuration : 0.18f;
             float cap = FootworkCap();
             if (error <= spacingDeadzone)
@@ -1222,13 +1244,45 @@ public class HumanoidCombat : MonoBehaviour
         if (attackDir.sqrMagnitude < 0.01f) return false;
         float emptyDur = spacingDuration > 0.05f ? spacingDuration : 0.18f;
         float emptyCap = FootworkCap();
-        movement.AddLungeSpeed(attackDir, emptyCap / emptyDur, emptyDur);
+        movement.AddLungeSpeed(FootworkDir(form, attackDir), emptyCap / emptyDur, emptyDur);
         return true;
     }
 
     float FootworkCap()
     {
         return _isHeavyAttack ? spacingHeavyStep : spacingMaxStep;
+    }
+
+    Vector3 FootworkDir(AttackForm form, Vector3 forward)
+    {
+        forward.y = 0f;
+        if (forward.sqrMagnitude < 0.0001f) return transform.forward;
+        forward.Normalize();
+
+        float side = 0f;
+        switch (form)
+        {
+            case AttackForm.SlashLeft:
+            case AttackForm.Elbow:
+                side = -1f;
+                break;
+            case AttackForm.SlashRight:
+                side = 1f;
+                break;
+            case AttackForm.Shoulder:
+                side = 0.25f;
+                break;
+            default:
+                return forward;
+        }
+
+        Vector3 right = Vector3.Cross(Vector3.up, forward);
+        if (right.sqrMagnitude < 0.0001f) return forward;
+        right.Normalize();
+        float blend = Mathf.Clamp(spacingSideBlend, 0f, 1.2f);
+        Vector3 dir = forward + right * (side * blend);
+        dir.y = 0f;
+        return dir.sqrMagnitude > 0.0001f ? dir.normalized : forward;
     }
 
     float CurrentIdealDistance()
@@ -1326,11 +1380,8 @@ public class HumanoidCombat : MonoBehaviour
         if (IsAttacking)
         {
             if (melee != null) melee.Stop();
-            if (hitbox != null)
-            {
-                if (hitbox.visual != null) hitbox.visual.HideWindup();
-                hitbox.Deactivate();
-            }
+            else if (hitbox != null) hitbox.Deactivate();
+            if (hitbox != null && hitbox.visual != null) hitbox.visual.HideWindup();
             EndAttack();
         }
 
@@ -1348,6 +1399,7 @@ public class HumanoidCombat : MonoBehaviour
         AutoTarget = null;
         _canStickThisAttack = false;
         if (hitbox != null && hitbox.visual != null) hitbox.visual.HideWindup();
+        if (melee != null && melee.IsTelegraphing) melee.Stop();
         if (stance != null) stance.PulseCurrent();
     }
 

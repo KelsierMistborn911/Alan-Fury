@@ -1,4 +1,4 @@
-﻿using UnityEngine;
+using UnityEngine;
 
 /// <summary>
 /// Движение оборотня через CharacterController.
@@ -133,6 +133,7 @@ public class WerewolfLocomotion : MonoBehaviour
     private bool _leaping;        // сейчас в воздухе (боевой Leap/Jump)
     private bool _lockFaceOnLand;
     private float _faceLockUntil;
+    private float _lastLandTime = -99f;
     private float _stepImpulse;   // импульс шага в этом кадре (наземная походка)
     private bool _placed;
 
@@ -180,6 +181,9 @@ public class WerewolfLocomotion : MonoBehaviour
 
     public bool IsGrounded => _cc != null && _cc.isGrounded;
     public bool IsLeaping => _leaping;
+    public Vector3 PlanarVel { get { Vector3 v = _horizVel; v.y = 0f; return v; } }
+    public float PlanarSpeed => PlanarVel.magnitude;
+    public float TimeSinceLand => Time.time - _lastLandTime;
     public bool IsClinging { get; private set; }
 
     private Transform _clingPartner;
@@ -435,6 +439,7 @@ public class WerewolfLocomotion : MonoBehaviour
             if (_leaping)
             {
                 _leaping = false;
+                _lastLandTime = Time.time;
                 if (_lockFaceOnLand)
                 {
                     _lockFaceOnLand = false;

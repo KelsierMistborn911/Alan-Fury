@@ -44,7 +44,10 @@ public class PlayerMovement3D : HumanoidLocomotion
 
         Vector3 move = ComputeCameraMoveDir();
         bool shift = Input.GetKey(KeyCode.LeftShift);
+        bool inCombat = Combat != null && Combat.IsInCombat;
         int gait = shift ? 3 : (_isRunning ? 2 : 1);
+        if (inCombat && !shift)
+            gait = 1;
 
         if (shift && move.sqrMagnitude < 0.01f)
         {
@@ -194,7 +197,7 @@ public class PlayerMovement3D : HumanoidLocomotion
 
     Vector3 ComputeLookDirection()
     {
-        if (Ranged != null && Ranged.IsSelfAiming && Ranged.ShotDir.sqrMagnitude > 0.01f)
+        if (Ranged != null && Ranged.HasRangedEquipped && Ranged.IsSelfAiming && Ranged.ShotDir.sqrMagnitude > 0.01f)
             return Ranged.ShotDir;
         Transform aim = Combat != null ? Combat.ActiveAimTarget : null;
         if (aim != null)

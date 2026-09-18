@@ -1,4 +1,4 @@
-﻿using UnityEngine;
+using UnityEngine;
 using UnityEngine.Serialization;
 
 /// <summary>
@@ -99,6 +99,7 @@ public class NpcPerception : MonoBehaviour
     }
 
     public float PlayerWeaponConeHalfAngle => _playerHitbox != null ? _playerHitbox.coneHalfAngle : 60f;
+    public WeaponHitbox PlayerHitbox => _playerHitbox;
 
     public float AngleFromPlayerGaze
     {
@@ -165,6 +166,7 @@ public class NpcPerception : MonoBehaviour
     private Vector3 _cuePos;
     private float _cueRadius = 1f;
     private float _cueAge;
+    private bool _forcedHunt;
 
     void Awake()
     {
@@ -288,6 +290,25 @@ public class NpcPerception : MonoBehaviour
             next = PlayerRegistry.ResolvePrimary();
         if (next != null)
             BindPlayer(next);
+    }
+
+    /// <summary>
+    /// Знает игрока без накопления Notice: lock + охота.
+    /// Cue не тает, пока флаг жив.
+    /// </summary>
+    public void ForceKnowAndHunt(Transform t)
+    {
+        if (t == null) return;
+        BindPlayer(t);
+        Notice01 = 1f;
+        IsLocked = true;
+        _forcedHunt = true;
+        ReportCue(t.position, Mathf.Max(0.5f, sightUncertainty));
+    }
+
+    public void ClearForcedHunt()
+    {
+        _forcedHunt = false;
     }
 
     void BindPlayer(Transform t)
@@ -476,7 +497,13 @@ public class NpcPerception : MonoBehaviour
             }
         }
 
-        if (_cueValid)
+        if (_forcedHunt && player != null)
+        {
+            Notice01 = 1f;
+            IsLocked = true;
+            ReportCue(player.position, Mathf.Max(0.5f, sightUncertainty));
+        }
+        else if (_cueValid)
         {
             _cueAge += dt;
             if (_cueAge > cueLifetime)

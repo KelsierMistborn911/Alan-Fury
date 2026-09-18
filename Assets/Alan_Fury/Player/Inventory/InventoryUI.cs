@@ -1,9 +1,10 @@
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
+using System.Collections.Generic;
 
 /// <summary>
-/// Инвентарь. I — открыть. ПКМ по клетке — контекстное меню (Надеть / Снять).
+/// Инвентарь-сетка. I — открыть. ПКМ по предмету — Надеть / Снять / Использовать.
 /// </summary>
 public class InventoryUI : MonoBehaviour
 {
@@ -11,23 +12,21 @@ public class InventoryUI : MonoBehaviour
 
     [Header("Настройки")]
     public KeyCode toggleKey = KeyCode.I;
-    public int columns = 5;
-    public float cellSize = 64f;
-    public float cellSpacing = 6f;
+    public float cellSize = 44f;
+    public float cellSpacing = 3f;
 
     enum SlotKind { Bag, Right, Left }
 
     Canvas _canvas;
     GameObject _panel;
-    Image[] _slotIcons;
-    Text[] _slotCounts;
+    RectTransform _gridRoot;
     Image _rightHandIcon;
     Image _leftHandIcon;
+    readonly List<GameObject> _itemViews = new List<GameObject>();
     bool _built;
 
     RectTransform _menu;
-    readonly System.Collections.Generic.List<GameObject> _menuRows =
-        new System.Collections.Generic.List<GameObject>();
+    readonly List<GameObject> _menuRows = new List<GameObject>();
 
     void Start()
     {
@@ -57,7 +56,7 @@ public class InventoryUI : MonoBehaviour
         {
             if (Input.GetMouseButtonDown(0) && !PointerOverMenu())
                 CloseMenu();
-            if (Input.GetMouseButtonDown(1) && !PointerOverSlotOrMenu())
+            if (Input.GetMouseButtonDown(1) && !PointerOverMenu())
                 CloseMenu();
         }
     }
@@ -100,6 +99,10 @@ public class InventoryUI : MonoBehaviour
         if (_panel != null) _panel.SetActive(false);
     }
 
+    float Step => cellSize + cellSpacing;
+    int Cols => inventory != null ? inventory.gridWidth : 10;
+    int Rows => inventory != null ? inventory.gridHeight : 8;
+
     void BuildUI()
     {
         if (_built) return;
@@ -120,69 +123,83 @@ public class InventoryUI : MonoBehaviour
         canvasObj.AddComponent<CanvasScaler>();
         canvasObj.AddComponent<GraphicRaycaster>();
 
-        _panel = CreateImage("Panel", canvasObj.transform, new Color(0.08f, 0.08f, 0.08f, 0.92f)).gameObject;
+        float gridW = Cols * Step + cellSpacing;
+        float gridH = Rows * Step + cellSpacing;
+        float handH = cellSize * 2f + cellSpacing;
+        float w = gridW + 16f;
+        float h = gridH + handH + 52f;
+
+        _panel = CreateImage("Panel", canvasObj.transform, new Color(0.08f, 0.08f, 0.08f, 0.94f)).gameObject;
         var panelRt = _panel.GetComponent<RectTransform>();
-        int rows = Mathf.CeilToInt(inventory.slotCount / (float)columns);
-        float w = columns * (cellSize + cellSpacing) + cellSpacing;
-        float h = (rows + 1) * (cellSize + cellSpacing) + cellSpacing + 30f;
         panelRt.sizeDelta = new Vector2(w, h);
         panelRt.anchoredPosition = Vector2.zero;
 
-        var title = CreateText("Title", _panel.transform, "Инвентарь  ·  ПКМ — меню", 16);
+        var title = CreateText("Title", _panel.transform, "Инвентарь  ·  ПКМ — меню", 15);
         var titleRt = title.GetComponent<RectTransform>();
         titleRt.anchorMin = new Vector2(0.5f, 1f);
         titleRt.anchorMax = new Vector2(0.5f, 1f);
-        titleRt.anchoredPosition = new Vector2(0f, -18f);
-        titleRt.sizeDelta = new Vector2(w, 24f);
+        titleRt.anchoredPosition = new Vector2(0f, -16f);
+        titleRt.sizeDelta = new Vector2(w, 22f);
 
-        _rightHandIcon = CreateSlot(_panel.transform, "RightHand", 0, 0, SlotKind.Right, -1);
-        _leftHandIcon = CreateSlot(_panel.transform, "LeftHand", 1, 0, SlotKind.Left, -1);
+        _rightHandIcon = CreateHand(_panel.transform, "RightHand", SlotKind.Right, 8f, -(36f));
+        _leftHandIcon = CreateHand(_panel.transform, "LeftHand", SlotKind.Left, 8f + Step * 3f, -(36f));
 
-        _slotIcons = new Image[inventory.slotCount];
-        _slotCounts = new Text[inventory.slotCount];
-        for (int i = 0; i < inventory.slotCount; i++)
+        _gridRoot = CreateImage("Grid", _panel.transform, new Color(0.06f, 0.06f, 0.06f, 1f)).rectTransform;
+        _gridRoot.anchorMin = new Vector2(0f, 1f);
+        _gridRoot.anchorMax = new Vector2(0f, 1f);
+        _gridRoot.pivot = new Vector2(0f, 1f);
+        _gridRoot.anchoredPosition = new Vector2(8f, -(36f + handH + 4f));
+        _gridRoot.sizeDelta = new Vector2(gridW, gridH);
+
+        for (int y = 0; y < Rows; y++)
         {
-            int index = i;
-            int col = i % columns;
-            int row = i / columns + 1;
-            _slotIcons[i] = CreateSlot(_panel.transform, $"Slot{i}", col, row, SlotKind.Bag, index);
-            _slotCounts[i] = CreateText($"Count{i}", _slotIcons[i].transform, "", 12);
-            var crt = _slotCounts[i].GetComponent<RectTransform>();
-            crt.anchorMin = Vector2.zero;
-            crt.anchorMax = Vector2.one;
-            crt.offsetMin = Vector2.zero;
-            crt.offsetMax = new Vector2(-4f, -2f);
-            _slotCounts[i].alignment = TextAnchor.LowerRight;
+            for (int x = 0; x < Cols; x++)
+            {
+                var cell = CreateImage($"c{x}_{y}", _gridRoot, new Color(0.17f, 0.17f, 0.17f, 1f));
+                var rt = cell.rectTransform;
+                rt.anchorMin = new Vector2(0f, 1f);
+                rt.anchorMax = new Vector2(0f, 1f);
+                rt.pivot = new Vector2(0f, 1f);
+                rt.sizeDelta = new Vector2(cellSize, cellSize);
+                rt.anchoredPosition = new Vector2(cellSpacing + x * Step, -(cellSpacing + y * Step));
+                cell.raycastTarget = false;
+            }
         }
 
         BuildMenu(canvasObj.transform);
     }
 
-    Image CreateSlot(Transform parent, string name, int col, int row, SlotKind kind, int index)
+    Image CreateHand(Transform parent, string name, SlotKind kind, float x, float y)
     {
-        var bg = CreateImage(name, parent, kind == SlotKind.Bag
-            ? new Color(0.18f, 0.18f, 0.18f, 1f)
-            : new Color(0.28f, 0.24f, 0.12f, 1f));
+        var bg = CreateImage(name, parent, new Color(0.28f, 0.24f, 0.12f, 1f));
         var rt = bg.GetComponent<RectTransform>();
         rt.anchorMin = new Vector2(0f, 1f);
         rt.anchorMax = new Vector2(0f, 1f);
         rt.pivot = new Vector2(0f, 1f);
-        rt.sizeDelta = new Vector2(cellSize, cellSize);
-        rt.anchoredPosition = new Vector2(
-            cellSpacing + col * (cellSize + cellSpacing),
-            -(36f + cellSpacing + row * (cellSize + cellSpacing)));
+        rt.sizeDelta = new Vector2(cellSize * 2.4f, cellSize * 2f);
+        rt.anchoredPosition = new Vector2(x, y);
 
         var click = bg.gameObject.AddComponent<InventorySlotClick>();
-        click.onClick = ev => OnSlotClick(kind, index, ev);
+        click.onClick = ev => OnSlotClick(kind, -1, ev);
+
+        var label = CreateText("HandLabel", bg.transform, kind == SlotKind.Right ? "ПК" : "ЛК", 11);
+        var lrt = label.GetComponent<RectTransform>();
+        lrt.anchorMin = new Vector2(0f, 1f);
+        lrt.anchorMax = new Vector2(1f, 1f);
+        lrt.pivot = new Vector2(0.5f, 1f);
+        lrt.sizeDelta = new Vector2(0f, 14f);
+        lrt.anchoredPosition = new Vector2(0f, -2f);
+        label.raycastTarget = false;
 
         var icon = CreateImage("Icon", bg.transform, Color.white);
         var irt = icon.GetComponent<RectTransform>();
         irt.anchorMin = Vector2.zero;
         irt.anchorMax = Vector2.one;
-        irt.offsetMin = new Vector2(4f, 4f);
-        irt.offsetMax = new Vector2(-4f, -4f);
+        irt.offsetMin = new Vector2(6f, 4f);
+        irt.offsetMax = new Vector2(-6f, -16f);
         icon.enabled = false;
         icon.raycastTarget = false;
+        icon.preserveAspect = true;
         return icon;
     }
 
@@ -217,16 +234,36 @@ public class InventoryUI : MonoBehaviour
                 return;
             }
             var slot = inventory.Slots[index];
-            if (slot.IsEmpty || slot.item.type != ItemData.ItemType.Equipment || slot.item.weapon == null)
+            if (slot.IsEmpty)
             {
                 CloseMenu();
                 return;
             }
-            AddMenuRow("Надеть", () =>
+
+            bool any = false;
+            if (slot.item.type == ItemData.ItemType.Equipment && slot.item.weapon != null)
             {
-                inventory.Equip(index);
+                AddMenuRow("Надеть", () =>
+                {
+                    inventory.Equip(index);
+                    CloseMenu();
+                });
+                any = true;
+            }
+            if (slot.item.CanUse)
+            {
+                AddMenuRow("Использовать", () =>
+                {
+                    inventory.Use(index);
+                    CloseMenu();
+                });
+                any = true;
+            }
+            if (!any)
+            {
                 CloseMenu();
-            });
+                return;
+            }
         }
         else
         {
@@ -313,17 +350,12 @@ public class InventoryUI : MonoBehaviour
         if (_menu == null || !_menu.gameObject.activeSelf) return false;
         if (EventSystem.current == null) return false;
         var ped = new PointerEventData(EventSystem.current) { position = Input.mousePosition };
-        var hits = new System.Collections.Generic.List<RaycastResult>();
+        var hits = new List<RaycastResult>();
         EventSystem.current.RaycastAll(ped, hits);
         for (int i = 0; i < hits.Count; i++)
             if (hits[i].gameObject.transform.IsChildOf(_menu) || hits[i].gameObject == _menu.gameObject)
                 return true;
         return false;
-    }
-
-    bool PointerOverSlotOrMenu()
-    {
-        return PointerOverMenu();
     }
 
     Image CreateImage(string name, Transform parent, Color color)
@@ -350,38 +382,78 @@ public class InventoryUI : MonoBehaviour
 
     void Refresh()
     {
-        if (!_built) return;
+        if (!_built || inventory == null || _gridRoot == null) return;
 
-        for (int i = 0; i < inventory.Slots.Count && i < _slotIcons.Length; i++)
+        for (int i = 0; i < _itemViews.Count; i++)
+            if (_itemViews[i] != null) Destroy(_itemViews[i]);
+        _itemViews.Clear();
+
+        for (int i = 0; i < inventory.Slots.Count; i++)
         {
             var slot = inventory.Slots[i];
-            if (slot.IsEmpty)
-            {
-                _slotIcons[i].enabled = false;
-                _slotCounts[i].text = "";
-            }
-            else
-            {
-                _slotIcons[i].enabled = slot.item.icon != null;
-                _slotIcons[i].sprite = slot.item.icon;
-                string name = slot.item.itemName;
-                if (string.IsNullOrEmpty(name)) name = slot.item.name;
-                _slotCounts[i].text = slot.count > 1 ? name + " ×" + slot.count : name;
-            }
+            if (slot.IsEmpty) continue;
+            _itemViews.Add(CreateItemView(slot, i));
         }
 
         SetEquipIcon(_rightHandIcon, inventory.EquippedRight);
         SetEquipIcon(_leftHandIcon, inventory.EquippedLeft);
     }
 
+    GameObject CreateItemView(Inventory.Slot slot, int index)
+    {
+        float w = slot.W * cellSize + (slot.W - 1) * cellSpacing;
+        float h = slot.H * cellSize + (slot.H - 1) * cellSpacing;
+
+        var bg = CreateImage("Item_" + index, _gridRoot, new Color(0.22f, 0.20f, 0.14f, 0.95f));
+        var rt = bg.rectTransform;
+        rt.anchorMin = new Vector2(0f, 1f);
+        rt.anchorMax = new Vector2(0f, 1f);
+        rt.pivot = new Vector2(0f, 1f);
+        rt.sizeDelta = new Vector2(w, h);
+        rt.anchoredPosition = new Vector2(
+            cellSpacing + slot.x * Step,
+            -(cellSpacing + slot.y * Step));
+
+        var click = bg.gameObject.AddComponent<InventorySlotClick>();
+        click.onClick = ev => OnSlotClick(SlotKind.Bag, index, ev);
+
+        var icon = CreateImage("Icon", bg.transform, Color.white);
+        var irt = icon.rectTransform;
+        irt.anchorMin = Vector2.zero;
+        irt.anchorMax = Vector2.one;
+        irt.offsetMin = new Vector2(3f, 3f);
+        irt.offsetMax = new Vector2(-3f, -3f);
+        var sprite = slot.item.ResolvedIcon;
+        icon.enabled = sprite != null;
+        icon.sprite = sprite;
+        icon.preserveAspect = true;
+        icon.raycastTarget = false;
+
+        string name = slot.item.itemName;
+        if (string.IsNullOrEmpty(name)) name = slot.item.name;
+        string label = slot.count > 1 ? name + " ×" + slot.count : name;
+        var txt = CreateText("Name", bg.transform, label, 11);
+        txt.alignment = TextAnchor.LowerLeft;
+        var trt = txt.rectTransform;
+        trt.anchorMin = Vector2.zero;
+        trt.anchorMax = Vector2.one;
+        trt.offsetMin = new Vector2(4f, 2f);
+        trt.offsetMax = new Vector2(-4f, -2f);
+        txt.raycastTarget = false;
+
+        return bg.gameObject;
+    }
+
     void SetEquipIcon(Image icon, ItemData item)
     {
-        if (item == null || item.icon == null)
+        var sprite = item != null ? item.ResolvedIcon : null;
+        if (sprite == null)
             icon.enabled = false;
         else
         {
             icon.enabled = true;
-            icon.sprite = item.icon;
+            icon.sprite = sprite;
+            icon.preserveAspect = true;
         }
     }
 }
