@@ -1,19 +1,21 @@
 using UnityEngine;
 
 /// <summary>
-/// Исполнение ближнего удара. Не выбирает форму и не играет замах/анимацию —
-/// это хозяин (CombatController / WerewolfCombat).
-/// Сюда: пояс, зона, спрайт через WeaponHitbox, урон.
+/// РСЃРїРѕР»РЅРµРЅРёРµ Р±Р»РёР¶РЅРµРіРѕ СѓРґР°СЂР°. РќРµ РІС‹Р±РёСЂР°РµС‚ С„РѕСЂРјСѓ Рё РЅРµ РёРіСЂР°РµС‚ Р·Р°РјР°С…/Р°РЅРёРјР°С†РёСЋ вЂ”
+/// СЌС‚Рѕ С…РѕР·СЏРёРЅ (CombatController / WerewolfCombat).
+/// РЎСЋРґР°: РїРѕСЏСЃ, Р·РѕРЅР°-РјРµС€ С‡РµСЂРµР· WeaponHitbox, СѓСЂРѕРЅ.
+/// Telegraph = Р·Р°РјР°С… (Р·РѕРЅР° Р±РµР· СѓСЂРѕРЅР°). Play = РїСЂРѕС…РѕРґ СѓРґР°СЂР° РїРѕ Р·РѕРЅРµ. Stop = РїСЂРµСЂС‹РІР°РЅРёРµ.
 /// </summary>
 public class MeleeAction : MonoBehaviour
 {
     public WeaponHitbox hitbox;
-    [Tooltip("Пусто — встроенная таблица.")]
+    [Tooltip("РџСѓСЃС‚Рѕ вЂ” РІСЃС‚СЂРѕРµРЅРЅР°СЏ С‚Р°Р±Р»РёС†Р°.")]
     public CombatRangeTable table;
 
     public CombatRangeTable Table => table != null ? table : CombatRangeTable.Default;
 
     public bool IsPlaying { get; private set; }
+    public bool IsTelegraphing => hitbox != null && hitbox.IsTelegraphing;
 
     public struct Request
     {
@@ -27,6 +29,7 @@ public class MeleeAction : MonoBehaviour
         public HitZoneShape shape;
         public float innerRadius;
         public float yawOffset;
+        public float sweepSign;
         public HitInfo info;
         public WeaponData weapon;
         public Transform target;
@@ -37,11 +40,64 @@ public class MeleeAction : MonoBehaviour
         if (hitbox == null) hitbox = GetComponentInChildren<WeaponHitbox>();
     }
 
+    public void Telegraph(in Request req)
+    {
+        if (hitbox == null) return;
+        Resolve(req, out float range, out _, out Vector3 dir, out _);
+        hitbox.ShowTelegraph(
+            range,
+            req.radius,
+            req.height,
+            req.offset,
+            dir,
+            req.layers,
+            req.cone,
+            req.shape,
+            req.innerRadius,
+            req.yawOffset,
+            req.sweepSign == 0f ? 1f : req.sweepSign
+        );
+        IsPlaying = false;
+    }
+
     public void Play(in Request req)
     {
         if (hitbox == null) return;
 
-        float damage = req.damage;
+        Resolve(req, out float range, out float damage, out Vector3 dir, out HitInfo info);
+
+        hitbox.SetHitInfo(info);
+        hitbox.Activate(
+            range,
+            req.radius,
+            req.height,
+            req.offset,
+            dir,
+            damage,
+            req.stagger,
+            req.layers,
+            req.duration,
+            req.tick,
+            req.charge,
+            req.combo,
+            req.cone,
+            req.shape,
+            req.innerRadius,
+            req.yawOffset,
+            req.sweepSign == 0f ? 1f : req.sweepSign
+        );
+        IsPlaying = true;
+    }
+
+    public void Stop()
+    {
+        IsPlaying = false;
+        if (hitbox != null) hitbox.Deactivate();
+    }
+
+    void Resolve(in Request req, out float range, out float damage, out Vector3 dir, out HitInfo info)
+    {
+        damage = req.damage;
         CombatRange band = req.band;
         if (req.target != null)
         {
@@ -56,39 +112,16 @@ public class MeleeAction : MonoBehaviour
             if (m > 0f) damage *= m;
         }
 
-        HitInfo info = req.info;
+        range = req.range > 0f ? req.range : Table.Outer(band);
+        dir = req.direction.sqrMagnitude > 0.001f ? req.direction.normalized : transform.forward;
+
+        info = req.info;
         if (info.rawDamage <= 0f && damage > 0f)
             info = HitInfo.Basic(damage, transform.position);
         info.rawDamage = damage;
         info.finalDamage = damage;
         info.stagger = req.stagger;
-        info.hitDirection = req.direction.sqrMagnitude > 0.001f ? req.direction.normalized : transform.forward;
+        info.hitDirection = dir;
         info.sourcePosition = transform.position;
-
-        hitbox.SetHitInfo(info);
-        hitbox.Activate(
-            req.range > 0f ? req.range : Table.Outer(band),
-            req.radius,
-            req.height,
-            req.offset,
-            info.hitDirection,
-            damage,
-            req.stagger,
-            req.layers,
-            req.duration,
-            req.tick,
-            req.charge,
-            req.combo,
-            req.cone,
-            req.shape,
-            req.innerRadius,
-            req.yawOffset
-        );
-        IsPlaying = true;
-    }
-
-    public void Stop()
-    {
-        IsPlaying = false;
     }
 }
