@@ -331,7 +331,20 @@ public class PlayerTargeting : MonoBehaviour
         int count = Physics.OverlapSphereNonAlloc(transform.position, radius, _enemyBuffer, mask);
         float r2 = radius * radius;
         AppendSkeleton(ref count, radius, r2);
+        AppendDummy(ref count, radius, r2);
         return count;
+    }
+
+    void AppendDummy(ref int count, float radius, float r2)
+    {
+        for (int i = 0; i < TrainingDummyStats.Alive.Count && count < _enemyBuffer.Length; i++)
+        {
+            var s = TrainingDummyStats.Alive[i];
+            if (s == null || !s.isActiveAndEnabled || !s.IsAlive) continue;
+            if ((s.transform.position - transform.position).sqrMagnitude > r2) continue;
+            var col = ColliderOf(s.transform);
+            if (col != null) PushUnique(col, ref count);
+        }
     }
 
     void AppendSkeleton(ref int count, float radius, float r2)

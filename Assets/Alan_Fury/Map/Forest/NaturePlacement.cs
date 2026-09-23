@@ -375,12 +375,12 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
                     Zone zone = GetZone(x, z);
                     if (!CanGrow(layer, zone)) continue;
 
-                    bool stable = (zone == Zone.Grove);
-                    float roll = stable ? Hash01(x, z, vi, 0) : Random.value;
+                    bool stable = true;
+                    float roll = Hash01(x, z, vi, 0);
                     float dens = GetDensity(layer, zone);
                     if (roll > dens) continue;
 
-                    float shareRoll = stable ? Hash01(x, z, vi, 1) : Random.value;
+                    float shareRoll = Hash01(x, z, vi, 1);
                     if (shareRoll > myChance) continue;
 
                     if (useGrid)
@@ -530,6 +530,57 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
             h = (h ^ (h >> 13)) * 1274126177u;
             h ^= (h >> 16);
             return (h & 0xFFFFFF) / 16777215f;
+        }
+    }
+
+    /// <summary>
+    /// Якоря стволов (центр клетки) теми же бросками, что PlaceSector.
+    /// Трава режет круги вокруг этих точек, не клетки.
+    /// </summary>
+    public void CollectTreeAnchors(List<Vector2> dst)
+    {
+        if (dst == null || heightSource == null || !heightSource.isGenerated) return;
+        if (layers == null) return;
+        int w = heightSource.width;
+        int d = heightSource.depth;
+        float ts = terrainBuilder != null ? terrainBuilder.tileSize : 4f;
+        Vector3 origin = new Vector3(-w * ts * 0.5f, 0f, -d * ts * 0.5f);
+
+        for (int li = 0; li < layers.Count; li++)
+        {
+            var layer = layers[li];
+            if (layer == null || !layer.enabled || !layer.IsTree) continue;
+            int fp = Mathf.Max(1, layer.footprint);
+            int half = fp / 2;
+            int step = fp;
+            float weightSum = 0f;
+            if (layer.variants != null)
+                foreach (var ov in layer.variants) if (ov != null) weightSum += Mathf.Max(0f, ov.weight);
+
+            int variantCount = layer.variants != null ? layer.variants.Count : 0;
+            for (int vi = 0; vi < variantCount; vi++)
+            {
+                var v = layer.variants[vi];
+                if (v == null) continue;
+                float myChance = weightSum > 0f ? Mathf.Max(0f, v.weight) / weightSum : 1f;
+                for (int x = borderCells + half; x < w - borderCells - half; x += step)
+                {
+                    for (int z = borderCells + half; z < d - borderCells - half; z += step)
+                    {
+                        if (heightSource.GetHeight(x, z) <= waterLevel) continue;
+                        Zone zone = GetZone(x, z);
+                        if (!CanGrow(layer, zone)) continue;
+                        if (Hash01(x, z, vi, 0) > GetDensity(layer, zone)) continue;
+                        if (Hash01(x, z, vi, 1) > myChance) continue;
+                        if (mapGrid != null && mapGrid.IsReady)
+                        {
+                            if (mapGrid.HasFlag(x, z, MapGrid.OccupancyFlags.Road)) continue;
+                            if (FootprintHitsRoad(x, z, fp)) continue;
+                        }
+                        dst.Add(new Vector2(origin.x + (x + 0.5f) * ts, origin.z + (z + 0.5f) * ts));
+                    }
+                }
+            }
         }
     }
 

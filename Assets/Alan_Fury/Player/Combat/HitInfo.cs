@@ -48,6 +48,17 @@ public enum HitIntent
 }
 
 /// <summary>
+/// Тип кинетики удара. Пока влияет только на отброс.
+/// Оглушение / нокаут — следующая ступень той же шкалы.
+/// </summary>
+public enum DamageKind
+{
+    Slash = 0,
+    Pierce = 1,
+    Blunt = 2
+}
+
+/// <summary>
 /// Контекст одного попадания. Собирает CombatController, тащит WeaponHitbox, принимает WoundTracker.
 /// </summary>
 public struct HitInfo
@@ -63,6 +74,7 @@ public struct HitInfo
     public WoundStage stage;
 
     public HitIntent intent;
+    public DamageKind kind;
     public bool isHeavy;
     public bool isInfight;           // локоть / рукоять / плечо / таран щитом
     public CombatRange band;
@@ -81,7 +93,21 @@ public struct HitInfo
             zone = BodyZone.Torso,
             penetration = PenetrationResult.Shallow,
             stage = WoundStage.Wound,
-            intent = HitIntent.Neutral
+            intent = HitIntent.Neutral,
+            kind = DamageKind.Slash
         };
     }
+
+    /// <summary>Множитель отброса. Колющий почти не двигает, дробящий толкает сильнее.</summary>
+    public static float KnockbackOf(DamageKind kind)
+    {
+        switch (kind)
+        {
+            case DamageKind.Pierce: return 0.18f;
+            case DamageKind.Blunt: return 1.55f;
+            default: return 0.72f;
+        }
+    }
+
+    public float KnockbackImpulse => stagger * KnockbackOf(kind);
 }

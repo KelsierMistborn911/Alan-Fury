@@ -1,12 +1,12 @@
 using UnityEngine;
 
 /// <summary>
-/// Контроллер шага. Генерирует синусоидальный импульс-толчок поверх базовой скорости.
-/// Внешний код вызывает TryStart() при наличии ввода, Tick() каждый кадр.
+/// Один шаг/толчок. TryStart() когда готов новый шаг, Tick() каждый кадр.
 ///
-/// Каденция считается как ПОЛНЫЙ период: cooldown = max(0, 1/frequency - duration).
-/// Поэтому stepFrequency теперь честно означает «шагов в секунду»,
-/// а на высоких частотах cooldown уходит в 0 и шаги склеиваются в непрерывный галоп.
+/// Период = duration + cooldown, cooldown = max(0, 1/frequency - duration).
+/// Impulse = длина шага (м). Hop = высота подскока (м), 0 = по земле.
+/// Tick() по-прежнему возвращает impulse * sin — волки используют как добавку к скорости.
+/// Игрок читает Impulse/Duration/Phase/Hop и сам считает перемещение за шаг.
 /// </summary>
 public class StepController
 {
@@ -17,22 +17,17 @@ public class StepController
     private float _impulse;
     private float _duration = 0.0001f;
     private float _cooldown;
+    private float _hop;
 
     public bool IsActive => _active;
-
-    /// <summary>Прогресс текущего шага 0..1 (0 вне шага).</summary>
     public float Phase => _active ? Mathf.Clamp01(_timer / _duration) : 0f;
-
-    /// <summary>Нормализованная кривая шага 0..1 — для боба, звука, наклона камеры.</summary>
     public float Curve => _active ? Mathf.Sin(Phase * Mathf.PI) : 0f;
+    public float Duration => _duration;
+    public float Impulse => _impulse;
+    public float Hop => _hop;
 
-    /// <summary>Вызывается в момент начала каждого шага (футстеп-звук и т.п.).</summary>
     public System.Action onStepStart;
 
-    /// <summary>
-    /// Пытается начать новый шаг. Параметры блендятся между двумя гейтами
-    /// по фактической скорости currentSpeed.
-    /// </summary>
     public void TryStart(float currentSpeed, GaitConfig a, GaitConfig b)
     {
         if (_active || _cooldownTimer > 0f) return;
@@ -40,16 +35,18 @@ public class StepController
         float t = Mathf.InverseLerp(a.speed, b.speed, currentSpeed);
         _impulse = Mathf.Lerp(a.stepDistance, b.stepDistance, t);
         _duration = Mathf.Max(0.0001f, Mathf.Lerp(a.stepDuration, b.stepDuration, t));
+        _hop = Mathf.Lerp(a.stepHop, b.stepHop, t);
 
-        float period = Mathf.Lerp(1f / a.stepFrequency, 1f / b.stepFrequency, t);
-        _cooldown = Mathf.Max(0f, period - _duration);   // полный период = duration + cooldown
+        float freqA = Mathf.Max(0.01f, a.stepFrequency);
+        float freqB = Mathf.Max(0.01f, b.stepFrequency);
+        float period = Mathf.Lerp(1f / freqA, 1f / freqB, t);
+        _cooldown = Mathf.Max(0f, period - _duration);
 
         _timer = 0f;
         _active = true;
         onStepStart?.Invoke();
     }
 
-    /// <summary>Возвращает мгновенный импульс скорости вдоль шага (метры в секунду).</summary>
     public float Tick(float deltaTime)
     {
         if (_cooldownTimer > 0f)
@@ -69,7 +66,13 @@ public class StepController
         return _impulse * Curve;
     }
 
-    /// <summary>Принудительно отменяет шаг (при манёврах).</summary>
+    public void OverrideTiming(float duration, float impulse)
+    {
+        if (!_active) return;
+        _duration = Mathf.Max(0.05f, duration);
+        _impulse = Mathf.Max(0f, impulse);
+    }
+
     public void Cancel()
     {
         _active = false;

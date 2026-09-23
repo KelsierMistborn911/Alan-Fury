@@ -29,6 +29,12 @@ public class PlayerResources : MonoBehaviour, IDamageable
     [Tooltip("Масса персонажа для бонуса урона от скорости движения (удар на Shift / комбо с уворотом).")]
     public float mass = 80f;
 
+    [Header("Прерывание")]
+    [Tooltip("Срыв замаха/удара, если урон не меньше.")]
+    public float interruptMinDamage = 8f;
+    [Tooltip("Срыв замаха/удара, если stagger не меньше.")]
+    public float interruptMinStagger = 3.5f;
+
     // Текущие значения
     public float CurrentHealth { get; private set; }
     public float CurrentStamina { get; private set; }
@@ -153,8 +159,14 @@ public class PlayerResources : MonoBehaviour, IDamageable
         float dmg = hit.finalDamage > 0f ? hit.finalDamage : hit.rawDamage;
         bool blocked = _combat != null && _combat.IsBlocking && IsInBlockArc(hit.sourcePosition);
         TakeDamage(dmg, hit.sourcePosition);
-        if (!blocked && _combat != null)
+        if (!blocked && _combat != null && ShouldInterrupt(hit, dmg))
             _combat.ReceiveHitShock(hit.isHeavy || hit.stagger >= 5.5f);
+    }
+
+    bool ShouldInterrupt(HitInfo hit, float dmg)
+    {
+        if (_loco != null && (_loco.IsDodging || _loco.IsRolling)) return false;
+        return dmg >= interruptMinDamage || hit.stagger >= interruptMinStagger;
     }
 
     public void Heal(float amount)

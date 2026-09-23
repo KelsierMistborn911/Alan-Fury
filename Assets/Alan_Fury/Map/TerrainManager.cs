@@ -17,6 +17,7 @@ public class TerrainManager : MonoBehaviour
     public SpriteVegetationPlacer vegetationPlacer;    // legacy спрайтовая растительность
     public NaturePlacement naturePlacement;            // единая система деревья + растительность
     public NatureRenderer natureRenderer;              // отрисовка + live
+    public GrassField grassField;                      // отдельное поле Dynamic Grass FX
 
     [Header("Сетка занятости")]
     public MapGrid mapGrid;                             // единая occupancy-сетка (base/sector/region)
@@ -126,6 +127,13 @@ public class TerrainManager : MonoBehaviour
             LogStep("Растительность (legacy)", ref sw);
         }
 
+        // 4.3 Отдельное поле травы (материал Dynamic Grass FX)
+        if (grassField != null)
+        {
+            grassField.Build();
+            LogStep("GrassField", ref sw);
+        }
+
         // 4.5 Сетка проходимости для AI + пересчёт границы карты.
         if (pathfinder != null)
         {
@@ -163,6 +171,7 @@ public class TerrainManager : MonoBehaviour
         if (naturePlacement != null) naturePlacement.UnloadAll();
         if (natureRenderer != null) natureRenderer.ClearLive();
         if (vegetationPlacer != null) vegetationPlacer.ClearAll();
+        if (grassField != null) grassField.Clear();
         if (mapGrid != null) mapGrid.Clear();
         if (heightGenerator != null) heightGenerator.Clear();
         if (roadGenerator != null) roadGenerator.ClearRoad();
@@ -185,6 +194,7 @@ public class TerrainManager : MonoBehaviour
         if (objectPlacer == null) objectPlacer = GetComponent<ObjectPlacer>();
         if (naturePlacement == null) naturePlacement = GetComponent<NaturePlacement>();
         if (natureRenderer == null) natureRenderer = GetComponent<NatureRenderer>();
+        if (grassField == null) grassField = GetComponent<GrassField>();
         if (mapGrid == null) mapGrid = GetComponent<MapGrid>();
         if (roadGenerator == null) roadGenerator = GetComponent<RoadGenerator>();
         if (fogCurtain == null) fogCurtain = GetComponent<MapFogCurtain>();
@@ -203,6 +213,14 @@ public class TerrainManager : MonoBehaviour
             objectPlacer.mapGrid = mapGrid;
         if (pathfinder != null && pathfinder.mapGrid == null)
             pathfinder.mapGrid = mapGrid;
+        if (grassField != null)
+        {
+            if (grassField.heightSource == null) grassField.heightSource = heightGenerator;
+            if (grassField.terrainBuilder == null) grassField.terrainBuilder = chunkedTerrainBuilder;
+            if (grassField.mapGrid == null) grassField.mapGrid = mapGrid;
+            if (grassField.naturePlacement == null) grassField.naturePlacement = naturePlacement;
+            if (grassField.roadGenerator == null) grassField.roadGenerator = roadGenerator;
+        }
     }
 
     private bool ValidateComponents()

@@ -56,12 +56,12 @@ public class HumanoidLocomotion : MonoBehaviour
     [Header("Боевые режимы движения")]
     public GaitConfig combatWalk = new GaitConfig
     {
-        speed = 14.3f,
-        acceleration = 80f,
-        deceleration = 70f,
-        stepDistance = 3.74f,
-        stepDuration = 0.23f,
-        stepFrequency = 4.3f,
+        speed = 15.5f,
+        acceleration = 90f,
+        deceleration = 80f,
+        stepDistance = 2.15f,
+        stepDuration = 0.14f,
+        stepFrequency = 6.8f,
         stepHop = 0f
     };
 
@@ -230,12 +230,14 @@ public class HumanoidLocomotion : MonoBehaviour
     private bool _dodgeAssisted;
 
     public bool IsDodging => _isDodging;
+    public bool IsRolling => _isRolling;
     public bool IsDodgeInvulnerable =>
         _isDodging && (dodgeDuration - _maneuverTimer) <= dodgeInvuln;
     public float DodgeTimeRemaining => _isDodging ? _maneuverTimer : 0f;
     public float DodgeProgress01 => _isDodging ? 1f - Mathf.Clamp01(_maneuverTimer / dodgeDuration) : 1f;
     public float TimeSinceDodgeEnd => Time.time - _lastDodgeEndTime;
     public float DodgeSpeedValue => dodgeSpeed;
+    public bool HasDodgeThreat => FindDodgeThreat() != null;
     public float CurrentSpeed => _velocity.magnitude;
     public Vector3 RecoilDir => _recoilDir;
     public bool IsSneaking { get; private set; }
@@ -254,6 +256,8 @@ public class HumanoidLocomotion : MonoBehaviour
     private float _stuckSpeedMult = 0.45f;
     private float _stuckForwardExtraMult = 0.25f;
     private float _stuckPullFreeTime = 0.22f;
+    private Transform _embedTarget;
+    private float _embedPull;
 
     public bool IsWeaponStuck => _stuckTimer > 0f;
     public bool IsClung { get; private set; }
@@ -277,7 +281,8 @@ public class HumanoidLocomotion : MonoBehaviour
     }
 
     public void EnterWeaponStuck(float duration, Vector3 embedDir,
-        float speedMult = 0.45f, float forwardExtraMult = 0.25f, float pullFreeTime = 0.22f)
+        float speedMult = 0.45f, float forwardExtraMult = 0.25f, float pullFreeTime = 0.22f,
+        Transform embedTarget = null, float embedPull = 0f)
     {
         embedDir.y = 0f;
         if (embedDir.sqrMagnitude < 0.01f) embedDir = transform.forward;
@@ -287,12 +292,16 @@ public class HumanoidLocomotion : MonoBehaviour
         _stuckSpeedMult = Mathf.Clamp(speedMult, 0.1f, 1f);
         _stuckForwardExtraMult = Mathf.Clamp(forwardExtraMult, 0.05f, 1f);
         _stuckPullFreeTime = Mathf.Max(0.05f, pullFreeTime);
+        _embedTarget = embedTarget;
+        _embedPull = Mathf.Max(0f, embedPull);
     }
 
     public void ClearWeaponStuck()
     {
         _stuckTimer = 0f;
         _stuckPullAccum = 0f;
+        _embedTarget = null;
+        _embedPull = 0f;
     }
 
     public void AddLungeSpeed(Vector3 dir, float speed, float hold = 0.18f)
@@ -301,6 +310,81 @@ public class HumanoidLocomotion : MonoBehaviour
         if (dir.sqrMagnitude < 0.01f || speed <= 0f) return;
         _velocity = dir.normalized * speed;
         _lungeLeft = Mathf.Max(0.05f, hold);
+    }
+
+    private bool _altDash;
+    public bool IsAltDashing => _altDash && _lungeLeft > 0.01f;
+
+    public bool TryAltDash(Vector3 dir, float meters)
+    {
+        if (IsDead || _isDodging || _isRolling || _isVaulting) return false;
+        if (_stuckTimer > 0f) return false;
+        dir.y = 0f;
+        if (dir.sqrMagnitude < 0.01f) return false;
+        meters = Mathf.Clamp(meters, 0.2f, 2f);
+        float dur = 0.26f;
+        _step.Cancel();
+        _combatStepLock = false;
+        _altDash = true;
+        AddLungeSpeed(dir.normalized, meters / dur, dur);
+        return true;
+    }
+
+    public bool IsStepping => _step != null && _step.IsActive;
+    public float CombatStepLength => Mathf.Max(0.8f, combatWalk.stepDistance);
+    private bool _combatStepLock;
+
+    /// <summary>Один боевой шаг в сторону. Не слайд. Пока шаг или кулдаун — отказ.</summary>
+    public bool TryCombatStep(Vector3 worldDir, float travel = -1f, bool rush = false)
+    {
+        if (IsDead || _isDodging || _isRolling || _isVaulting) return false;
+        if (_lungeLeft > 0.01f || _stuckTimer > 0f) return false;
+        worldDir.y = 0f;
+        if (worldDir.sqrMagnitude < 0.01f) return false;
+        worldDir.Normalize();
+
+        if (DesiredMoveDir.sqrMagnitude > 0.04f)
+        {
+            _combatStepLock = false;
+            return false;
+        }
+
+        if (_step.IsActive)
+            return false;
+
+        DesiredMoveDir = worldDir;
+        _cmdSet = true;
+        _combatStepLock = true;
+
+        BeginCombatApproachStep(worldDir, rush);
+        if (!_step.IsActive) return false;
+        float cap = Mathf.Max(combatWalk.stepDistance, combatSprint.stepDistance, 8f);
+        if (travel > 0.05f)
+        {
+            _stepTravel = Mathf.Clamp(travel, 0.35f, cap);
+            float pace = rush
+                ? Mathf.Max(sprint.speed, combatSprint.speed)
+                : Mathf.Max(4f, combatWalk.speed);
+            _stepDur = rush
+                ? Mathf.Clamp(_stepTravel / Mathf.Max(8f, pace), 0.08f, 0.16f)
+                : Mathf.Clamp(_stepTravel / pace, combatWalk.stepDuration, 0.28f);
+            _step.OverrideTiming(_stepDur, _stepTravel);
+        }
+        return true;
+    }
+
+    void BeginCombatApproachStep(Vector3 dir, bool rush)
+    {
+        GaitConfig gait = rush ? combatSprint : combatWalk;
+        if (rush)
+        {
+            gait.speed = Mathf.Max(gait.speed, sprint.speed);
+            gait.stepDuration = Mathf.Min(gait.stepDuration, 0.16f);
+        }
+        _currentGait = gait;
+        _stepSlowRef = gait;
+        _stepFastRef = gait;
+        BeginStep(dir);
     }
 
     private Vector3 _planarAssist;
@@ -437,6 +521,16 @@ public class HumanoidLocomotion : MonoBehaviour
     protected virtual void Start()
     {
         Controller = GetComponent<CharacterController>();
+        if (Mathf.Abs(combatWalk.stepDuration - 0.23f) < 0.02f
+            && combatWalk.stepFrequency <= 4.6f)
+        {
+            combatWalk.speed = 15.5f;
+            combatWalk.acceleration = 90f;
+            combatWalk.deceleration = 80f;
+            combatWalk.stepDistance = 2.15f;
+            combatWalk.stepDuration = 0.14f;
+            combatWalk.stepFrequency = 6.8f;
+        }
         _currentGait = run;
         Combat = GetComponent<HumanoidCombat>();
         Ranged = GetComponent<RangedController>();
@@ -499,6 +593,7 @@ public class HumanoidLocomotion : MonoBehaviour
 
         ApplyGait();
         TickWeaponStuck();
+        TickEmbedPull();
         TickMovement();
         TickClingPull();
         TickRecoil();
@@ -515,6 +610,24 @@ public class HumanoidLocomotion : MonoBehaviour
         _stuckTimer -= Time.deltaTime;
         if (_stuckTimer <= 0f)
             ClearWeaponStuck();
+    }
+
+    void TickEmbedPull()
+    {
+        if (_stuckTimer <= 0f || _embedTarget == null || _embedPull <= 0f) return;
+        if (_isDodging || _isRolling) return;
+
+        Vector3 to = _embedTarget.position - transform.position;
+        to.y = 0f;
+        float dist = to.magnitude;
+        if (dist < 0.08f) return;
+        Vector3 inward = to / dist;
+
+        Vector3 input = DesiredMoveDir;
+        if (input.sqrMagnitude > 0.04f && Vector3.Dot(input.normalized, inward) < -0.2f)
+            return;
+
+        AddPlanarAssist(inward * _embedPull);
     }
 
     void TickClingPull()
@@ -914,7 +1027,9 @@ public class HumanoidLocomotion : MonoBehaviour
         }
         bool hasInput = targetDir.sqrMagnitude > 0.01f;
         bool isSprinting = _currentGaitLevel == 3;
-        bool wantMove = hasInput || isSprinting;
+        if (_combatStepLock && _step.IsActive && !hasInput && _stepDir.sqrMagnitude > 0.01f)
+            targetDir = _stepDir;
+        bool wantMove = hasInput || isSprinting || (_combatStepLock && _step.IsActive);
 
         bool startingWalk = hasInput && !_hadMoveInput && _velocity.magnitude <= moveThreshold
             && !isSprinting && _currentGaitLevel == 1 && !_inCombat;
@@ -941,6 +1056,12 @@ public class HumanoidLocomotion : MonoBehaviour
             MoveHorizontal(_velocity * Time.deltaTime);
             HandleRotation(_velocity.sqrMagnitude > 0.01f ? _velocity : default);
             ConsumePlanarAssist();
+            if (_lungeLeft <= 0f)
+            {
+                if (_altDash)
+                    _velocity = Vector3.zero;
+                _altDash = false;
+            }
             return;
         }
 
@@ -1019,6 +1140,8 @@ public class HumanoidLocomotion : MonoBehaviour
 
             float pulse = stepPlantFloor + (1f - stepPlantFloor) * _step.Curve;
             float targetSpeed = _currentGait.speed * speedMult * pulse * _turnRecover;
+            if (_combatStepLock && _stepTravel > 0.05f && _stepDur > 0.05f)
+                targetSpeed = (_stepTravel / _stepDur) * pulse;
             Vector3 targetVelocity = moveDir * targetSpeed;
 
             Vector3 along = moveDir * Vector3.Dot(_velocity, moveDir);
@@ -1037,26 +1160,34 @@ public class HumanoidLocomotion : MonoBehaviour
             _velocity = along + side;
             MoveHorizontal(_velocity * Time.deltaTime);
             _step.Tick(Time.deltaTime);
+            if (!_step.IsActive)
+                _combatStepLock = false;
 
             HandleRotation(targetDir);
         }
         else if (_step.IsActive)
         {
-            if (_inCombat)
+            if (_inCombat || _combatStepLock)
             {
                 float pulse = stepPlantFloor + (1f - stepPlantFloor) * _step.Curve;
-                Vector3 targetVelocity = _stepDir * (_currentGait.speed * pulse);
+                float stepSpeed = _stepDur > 0.001f && _stepTravel > 0.05f
+                    ? _stepTravel / _stepDur
+                    : _currentGait.speed;
+                Vector3 targetVelocity = _stepDir * (stepSpeed * pulse);
                 _velocity = Vector3.MoveTowards(
                     _velocity,
                     targetVelocity,
-                    _currentGait.deceleration * Time.deltaTime);
+                    _currentGait.acceleration * Time.deltaTime);
                 MoveHorizontal(_velocity * Time.deltaTime);
                 _step.Tick(Time.deltaTime);
                 HandleRotation(_stepDir);
+                if (!_step.IsActive)
+                    _combatStepLock = false;
             }
             else
             {
                 _step.Cancel();
+                _combatStepLock = false;
                 HandleRotation();
                 if (_velocity.magnitude > 0.05f)
                 {
@@ -1134,7 +1265,15 @@ public class HumanoidLocomotion : MonoBehaviour
     void HandleRotation(Vector3 moveDir = default)
     {
         if (Combat != null && Combat.IsAttacking)
+        {
+            if (Combat.IsWindingUp)
+            {
+                Vector3 windupFace = Combat.AttackFaceDir;
+                if (windupFace.sqrMagnitude > 0.01f)
+                    ApplyFaceYaw(windupFace, faceTurnSmooth, faceTurnRate);
+            }
             return;
+        }
 
         bool isSprinting = _currentGaitLevel == 3;
         if (Ranged != null && Ranged.HasRangedEquipped && Ranged.IsSelfAiming && Ranged.ShotDir.sqrMagnitude > 0.01f)

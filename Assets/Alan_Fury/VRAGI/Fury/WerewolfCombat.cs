@@ -168,7 +168,8 @@ public class WerewolfCombat : MonoBehaviour
         = new System.Collections.Generic.List<WerewolfCombat>(8);
 
     // ===================== Публичное для мозга =====================
-    public bool IsBusy => _phase != Phase.Idle || IsClinging;
+    public bool IsShocked => Time.time < _shockUntil;
+    public bool IsBusy => _phase != Phase.Idle || IsClinging || IsShocked;
     public bool IsClinging => _clingVictim != null;
     public Transform ClingVictim => _clingVictim;
 
@@ -201,18 +202,24 @@ public class WerewolfCombat : MonoBehaviour
 
     public void InterruptFromHit(bool heavy, HitInfo hit = default)
     {
-        _shockUntil = Time.time + (heavy ? 0.26f : 0.22f);
-        if (locomotion != null) locomotion.LockFace(heavy ? 0.36f : 0.32f);
-        if (IsClinging && (hit.isInfight || hit.band <= CombatRange.Clinch))
+        float stun = heavy ? 0.48f : 0.32f;
+        if (hit.kind == DamageKind.Blunt) stun += 0.12f;
+        _shockUntil = Time.time + stun;
+        if (locomotion != null)
+        {
+            locomotion.LockFace(heavy ? 0.42f : 0.32f);
+            locomotion.PlayHitReact();
+        }
+        if (IsClinging && (hit.isInfight || hit.band <= CombatRange.Clinch || hit.kind == DamageKind.Blunt))
             Peel(clingPeelStamina);
         if (IsClinging) return;
-        if (_phase == Phase.Idle) return;
         if (_kind == AttackKind.Jump && locomotion != null && locomotion.IsLeaping)
             return;
+        if (_phase == Phase.Idle) return;
         if (melee != null) melee.Stop();
         if (hitbox != null) hitbox.Deactivate();
         _phase = Phase.Recover;
-        _phaseTimer = 0.12f;
+        _phaseTimer = 0.16f;
         _combo = 0;
     }
 
@@ -529,11 +536,12 @@ public class WerewolfCombat : MonoBehaviour
         info.zone = BiteLegZone();
         info.band = CombatRange.PointBlank;
         info.stagger = 4f;
+        info.kind = DamageKind.Pierce;
         info.hitDirection = perception != null
             ? Flat(_clingVictim.position - transform.position)
             : transform.forward;
         _clingDamageable.TakeHit(info);
-        _clingDamageable.ApplyKnockback(info.hitDirection * info.stagger);
+        _clingDamageable.ApplyKnockback(info.hitDirection * info.KnockbackImpulse);
         OnHitLanded?.Invoke();
         if (locomotion != null) locomotion.PlayAttack("Special");
     }
@@ -594,6 +602,9 @@ public class WerewolfCombat : MonoBehaviour
         HitInfo info = HitInfo.Basic(def.damage, transform.position);
         info.hitDirection = dir;
         info.stagger = def.stagger;
+        info.kind = _kind == AttackKind.Special ? DamageKind.Pierce
+            : _kind == AttackKind.Jump ? DamageKind.Blunt
+            : DamageKind.Slash;
         if (_kind == AttackKind.Special)
             info.zone = BiteLegZone();
 

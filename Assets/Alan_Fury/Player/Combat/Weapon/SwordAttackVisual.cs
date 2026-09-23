@@ -16,14 +16,18 @@ public class SwordAttackVisual : MonoBehaviour
     private SpriteRenderer arcRenderer;
     private SpriteRenderer windupRenderer;
 
+    private WeaponHitbox _hitbox;
     private bool isShowingArc;
     private float arcTimer;
     private float arcDuration;
-    private Vector3 flyDir;       // направление вылета дуги
-    private Vector3 arcStartPos;  // стартовая позиция дуги
+    private Vector3 flyDir;
+    private Vector3 arcStartPos;
 
     void Awake()
     {
+        _hitbox = GetComponent<WeaponHitbox>();
+        if (_hitbox == null) _hitbox = GetComponentInParent<WeaponHitbox>();
+
         // --- Спрайт атаки ---
         GameObject arcObj = new GameObject("ArcSprite");
         arcObj.transform.SetParent(transform);
@@ -59,12 +63,23 @@ public class SwordAttackVisual : MonoBehaviour
             return;
         }
 
-        // Плавное затухание к концу + вылет вперёд
-        float t = arcTimer / arcDuration;
+        float t = arcDuration > 0.0001f ? Mathf.Clamp01(arcTimer / arcDuration) : 0f;
         Color c = arcColor;
-        c.a = arcColor.a * t;
+        c.a = arcColor.a * Mathf.Lerp(0.25f, 1f, t);
         arcRenderer.color = c;
-        arcRenderer.transform.position = arcStartPos + flyDir * (flyDistance * (1f - t));
+
+        if (_hitbox != null && _hitbox.IsSweeping)
+        {
+            _hitbox.GetStrikePose(out _, out Vector3 tip, out Vector3 cut);
+            Vector3 mid = Vector3.Lerp(_hitbox.ZoneOrigin, tip, 0.72f) + Vector3.up * (arcHeight * 0.4f);
+            float yaw = Mathf.Atan2(cut.x, cut.z) * Mathf.Rad2Deg;
+            arcRenderer.transform.position = mid;
+            arcRenderer.transform.rotation = Quaternion.Euler(90f, yaw, 0f);
+        }
+        else
+        {
+            arcRenderer.transform.position = arcStartPos + flyDir * (flyDistance * (1f - t));
+        }
     }
 
     // Вызывается при начале замаха

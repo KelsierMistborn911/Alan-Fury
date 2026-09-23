@@ -117,6 +117,10 @@ public class WerewolfLocomotion : MonoBehaviour
     [Header("Прибытие")]
     public float arriveThreshold = 1.5f;
 
+    [Header("Контакт с игроком")]
+    [Tooltip("Не заходить телом в игрока ближе этого радиуса. Прыжок и хватка не режутся.")]
+    public float contactRadius = 1.35f;
+
     [Header("Старт: посадка на землю")]
     public LayerMask groundLayers = ~0;
     public float groundProbeHeight = 50f;
@@ -124,7 +128,7 @@ public class WerewolfLocomotion : MonoBehaviour
     [Header("Анимация")]
     [Tooltip("Аниматор волка (опционально — пока нет, оставь пустым, ошибок не будет). " +
              "Параметры: Stance (bool: вкл = на двух ногах), Gait (int: 0 стоит, 1 шаг, 2 бег, 3 спринт), " +
-             "триггеры StandUp/DropDown/Leap/Vault/Death. Старые Run (bool) и Speed (float) пока пишутся тоже.")]
+             "триггеры StandUp/DropDown/Leap/Vault/Death/HitReact. Старые Run (bool) и Speed (float) пока пишутся тоже.")]
     public Animator animator;
 
     private CharacterController _cc;
@@ -170,6 +174,9 @@ public class WerewolfLocomotion : MonoBehaviour
     /// <summary>Послать триггер атаки. Зовёт WerewolfCombat, чтобы не дублировать проверку параметров.</summary>
     public void PlayAttack(string trigger) => SetTrig(trigger);
 
+    /// <summary>Получение удара. Нет параметра HitReact в контроллере — тихо пропускаем.</summary>
+    public void PlayHitReact() => SetTrig("HitReact");
+
     private int _moveFrame = -1;
     private Vector3 _moveTarget;
     private float _moveSpeed;
@@ -190,6 +197,7 @@ public class WerewolfLocomotion : MonoBehaviour
     private float _clingHold = 1.05f;
     private CharacterController _ignoredPlayerCc;
     private float _nextIgnoreRefresh;
+    private bool _ignoringPlayers;
 
     /// <summary>Текущая стойка. Меняется через SetStance, во время перехода остаётся прежней.</summary>
     public Stance CurrentStance => _stance;
@@ -223,7 +231,7 @@ public class WerewolfLocomotion : MonoBehaviour
     void Start()
     {
         if (boundary == null) boundary = GetComponent<MapBoundary>();
-        IgnorePlayerCollision(true);
+        IgnorePlayerCollision(false);
     }
 
     // =================== Намерение от мозга ===================
@@ -252,6 +260,7 @@ public class WerewolfLocomotion : MonoBehaviour
         _leaping = true;
         _lockFaceOnLand = true;
         _step.Cancel();
+        IgnorePlayerCollision(true);
         SetTrig("Leap");
     }
 
@@ -273,6 +282,7 @@ public class WerewolfLocomotion : MonoBehaviour
     {
         _clingPartner = null;
         IsClinging = false;
+        if (!_leaping) IgnorePlayerCollision(false);
     }
 
     public void IgnorePlayerCollision(bool ignore)
@@ -289,7 +299,43 @@ public class WerewolfLocomotion : MonoBehaviour
             Physics.IgnoreCollision(_cc, other, ignore);
             _ignoredPlayerCc = other;
         }
+        _ignoringPlayers = ignore;
         _nextIgnoreRefresh = Time.time + 1.5f;
+    }
+
+    void SyncPlayerCollision()
+    {
+        bool want = _leaping || IsClinging;
+        if (want == _ignoringPlayers && Time.time < _nextIgnoreRefresh) return;
+        IgnorePlayerCollision(want);
+    }
+
+    /// <summary>Срезает составляющую в игрока внутри contactRadius. Прыжок/хватка не трогаем.</summary>
+    void RejectIntoPlayers(ref Vector3 planar)
+    {
+        if (_leaping || IsClinging || contactRadius <= 0.01f) return;
+        planar.y = 0f;
+        if (planar.sqrMagnitude < 1e-8f) return;
+        if (PlayerRegistry.Instance == null) return;
+        var list = PlayerRegistry.Instance.Players;
+        for (int i = 0; i < list.Count; i++)
+        {
+            var t = list[i];
+            if (t == null) continue;
+            Vector3 to = t.position - transform.position;
+            to.y = 0f;
+            float dist = to.magnitude;
+            if (dist >= contactRadius) continue;
+            if (dist < 0.001f) continue;
+            Vector3 inward = to / dist;
+            float into = Vector3.Dot(planar, inward);
+            if (into > 0f) planar -= inward * into;
+        }
+    }
+
+    void OnDisable()
+    {
+        if (_ignoringPlayers) IgnorePlayerCollision(false);
     }
 
     /// <summary>Мгновенный горизонтальный импульс (отброс от удара). Затухает обычным торможением.</summary>
@@ -304,8 +350,7 @@ public class WerewolfLocomotion : MonoBehaviour
         force.y = 0f;
         if (force.sqrMagnitude < 0.0001f) return;
         float raw = force.magnitude * (80f / Mathf.Max(40f, mass));
-        bool heavy = raw >= 5.5f;
-        float travel = heavy ? 0.85f : 0.45f;
+        float travel = Mathf.Clamp(raw * 0.11f, 0.04f, 1.35f);
         float decel = Mathf.Max(8f, deceleration);
         float speed = Mathf.Sqrt(Mathf.Max(0.05f, 2f * decel * travel));
         Vector3 dir = force.normalized;
@@ -355,8 +400,7 @@ public class WerewolfLocomotion : MonoBehaviour
             if (_stanceTimer <= 0f) _stance = _stanceTarget;
         }
 
-        if (Time.time >= _nextIgnoreRefresh)
-            IgnorePlayerCollision(true);
+        SyncPlayerCollision();
 
         bool active = _moveFrame == Time.frameCount && _stanceTimer <= 0f && !IsClinging;
         Vector3 pos = transform.position;
@@ -407,6 +451,7 @@ public class WerewolfLocomotion : MonoBehaviour
                 }
 
                 Vector3 targetVel = dir * targetSpeed;
+                RejectIntoPlayers(ref targetVel);
                 float rate = targetVel.magnitude > _horizVel.magnitude ? acceleration : deceleration;
                 _horizVel = Vector3.MoveTowards(_horizVel, targetVel, rate * dt);
             }
@@ -414,6 +459,7 @@ public class WerewolfLocomotion : MonoBehaviour
             {
                 _horizVel = Vector3.MoveTowards(_horizVel, Vector3.zero, deceleration * dt);
             }
+            RejectIntoPlayers(ref _horizVel);
 
             float spd = _horizVel.magnitude;
 
@@ -462,6 +508,7 @@ public class WerewolfLocomotion : MonoBehaviour
             pulse = Mathf.Lerp(1f, Mathf.Max(_step.Curve, 0.15f), stepPulseWeight);
 
         Vector3 horiz = (_horizVel * pulse + stepVec) * dt; horiz.y = 0f;
+        RejectIntoPlayers(ref horiz);
         if (boundary != null && boundary.IsReady) horiz = boundary.Constrain(pos, horiz);
         _cc.Move(horiz + Vector3.up * (_vertVel * dt));
 

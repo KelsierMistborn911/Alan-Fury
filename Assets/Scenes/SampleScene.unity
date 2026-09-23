@@ -324,10 +324,10 @@ Camera:
     y: 0
     width: 1
     height: 1
-  near clip plane: -45
+  near clip plane: 0.01
   far clip plane: 150
   field of view: 60
-  orthographic: 1
+  orthographic: 0
   orthographic size: 15
   m_Depth: -1
   m_CullingMask:
@@ -647,6 +647,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   animator: {fileID: 0}
   stanceDuration: 5
+  poseHold: 0.5
 --- !u!114 &824045062
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -660,8 +661,16 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   coneHalfAngle: 60
-  debugShowZone: 1
+  showZoneMesh: 1
+  showStrikeMesh: 1
   debugZoneY: 0.05
+  sweepBladePad: 8
+  strikeBladeLength: 0.45
+  telegraphColor: {r: 1, g: 0.85, b: 0.15, a: 0.22}
+  sweepColor: {r: 1, g: 0.12, b: 0.08, a: 0.42}
+  strikeColor: {r: 1, g: 0.92, b: 0.55, a: 0.92}
+  strikeWindupColor: {r: 1, g: 0.85, b: 0.2, a: 0.35}
+  debugShowZone: 1
   visual: {fileID: 0}
 --- !u!114 &824045063
 MonoBehaviour:
@@ -722,6 +731,8 @@ MonoBehaviour:
   blockDamageMultiplier: 0.5
   blockArcAngle: 200
   mass: 80
+  interruptMinDamage: 8
+  interruptMinStagger: 3.5
 --- !u!114 &824045066
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -740,6 +751,7 @@ MonoBehaviour:
   loadout: {fileID: 0}
   pathfinder: {fileID: 0}
   perception: {fileID: 0}
+  squad: {fileID: 0}
   aggroRadius: 16
   loseRadius: 24
   drawVisionGizmo: 1
@@ -814,9 +826,15 @@ MonoBehaviour:
   spacingDeadzone: 0.28
   spacingMaxStep: 1.15
   spacingHeavyStep: 1.73
+  spacingApproachRange: 6.2
+  spacingApproachMaxSteps: 4
+  spacingSideBlend: 0.55
+  spacingSideStep: 0.65
+  spacingOrbitStep: 1.35
   spacingDuration: 0.18
   targetMagnetRange: 3
   targetMagnetSpeed: 5.5
+  targetMagnetOrbit: 3.2
   infightHoldFraction: 0.92
   infightElbowWindup: 0.55
   infightPommelWindup: 0.48
@@ -836,9 +854,17 @@ MonoBehaviour:
   dodgeAttackMinWindup: 0.08
   dodgeAttackBufferAfter: 0.2
   dodgeAttackPerfectTolerance: 0.08
+  strikeLead: 0.08
+  sweepHitAt: 0.6
+  stanceEnterWindup: 0.22
+  chainWindupMult: 0.62
+  autoHeavyReachPad: 0.35
+  slashFaceOutward: 25
+  safeHoldPad: 1.35
   EnemyLayers:
     serializedVersion: 2
     m_Bits: 0
+  lockNamedForms: 0
   shockLight: 0.22
   shockHeavy: 0.26
 --- !u!114 &824045068
@@ -936,6 +962,10 @@ MonoBehaviour:
   dodgeCooldown: 0.6
   dodgeSteerDegrees: 180
   dodgeExitCarry: 0.35
+  dodgeInvuln: 0.1
+  dodgeAssistMin: 1.2
+  dodgeAssistMax: 3.2
+  dodgeAssistMargin: 0.4
   rollSpeed: 11
   rollDuration: 0.4
   rollCooldown: 1.2
@@ -1548,6 +1578,79 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1001 &977760327
+PrefabInstance:
+  m_ObjectHideFlags: 0
+  serializedVersion: 2
+  m_Modification:
+    serializedVersion: 3
+    m_TransformParent: {fileID: 0}
+    m_Modifications:
+    - target: {fileID: 1717242044076724739, guid: b0cc3b9ddc8febc419d0035e663f9427,
+        type: 3}
+      propertyPath: m_Name
+      value: training_dummy Variant
+      objectReference: {fileID: 0}
+    - target: {fileID: 1951667617655649094, guid: b0cc3b9ddc8febc419d0035e663f9427,
+        type: 3}
+      propertyPath: m_Enabled
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 2062382714828310713, guid: b0cc3b9ddc8febc419d0035e663f9427,
+        type: 3}
+      propertyPath: m_LocalPosition.x
+      value: -4.0828686
+      objectReference: {fileID: 0}
+    - target: {fileID: 2062382714828310713, guid: b0cc3b9ddc8febc419d0035e663f9427,
+        type: 3}
+      propertyPath: m_LocalPosition.y
+      value: 50
+      objectReference: {fileID: 0}
+    - target: {fileID: 2062382714828310713, guid: b0cc3b9ddc8febc419d0035e663f9427,
+        type: 3}
+      propertyPath: m_LocalPosition.z
+      value: -361.39777
+      objectReference: {fileID: 0}
+    - target: {fileID: 2062382714828310713, guid: b0cc3b9ddc8febc419d0035e663f9427,
+        type: 3}
+      propertyPath: m_LocalRotation.w
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 2062382714828310713, guid: b0cc3b9ddc8febc419d0035e663f9427,
+        type: 3}
+      propertyPath: m_LocalRotation.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 2062382714828310713, guid: b0cc3b9ddc8febc419d0035e663f9427,
+        type: 3}
+      propertyPath: m_LocalRotation.y
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 2062382714828310713, guid: b0cc3b9ddc8febc419d0035e663f9427,
+        type: 3}
+      propertyPath: m_LocalRotation.z
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 2062382714828310713, guid: b0cc3b9ddc8febc419d0035e663f9427,
+        type: 3}
+      propertyPath: m_LocalEulerAnglesHint.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 2062382714828310713, guid: b0cc3b9ddc8febc419d0035e663f9427,
+        type: 3}
+      propertyPath: m_LocalEulerAnglesHint.y
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 2062382714828310713, guid: b0cc3b9ddc8febc419d0035e663f9427,
+        type: 3}
+      propertyPath: m_LocalEulerAnglesHint.z
+      value: 0
+      objectReference: {fileID: 0}
+    m_RemovedComponents: []
+    m_RemovedGameObjects: []
+    m_AddedGameObjects: []
+    m_AddedComponents: []
+  m_SourcePrefab: {fileID: 100100000, guid: b0cc3b9ddc8febc419d0035e663f9427, type: 3}
 --- !u!1 &1222755967
 GameObject:
   m_ObjectHideFlags: 0
@@ -1689,6 +1792,7 @@ MonoBehaviour:
   faceLockAfterHit: 0.32
   faceLockAfterLeap: 0.28
   arriveThreshold: 1.5
+  contactRadius: 1.35
   groundLayers:
     serializedVersion: 2
     m_Bits: 4294967295
@@ -2115,7 +2219,6 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   inventory: {fileID: 0}
   toggleKey: 105
-  columns: 5
   cellSize: 64
   cellSpacing: 6
 --- !u!4 &1745007970
@@ -2392,6 +2495,7 @@ GameObject:
   - component: {fileID: 1950520787}
   - component: {fileID: 1950520786}
   - component: {fileID: 1950520785}
+  - component: {fileID: 1950520788}
   m_Layer: 7
   m_Name: Terrain
   m_TagString: Untagged
@@ -2474,6 +2578,7 @@ MonoBehaviour:
   vegetationPlacer: {fileID: 866895052}
   naturePlacement: {fileID: 1950520786}
   natureRenderer: {fileID: 1950520787}
+  grassField: {fileID: 1950520788}
   mapGrid: {fileID: 1950520785}
   roadGenerator: {fileID: 1950520782}
   fogCurtain: {fileID: 1950520781}
@@ -2809,10 +2914,12 @@ MonoBehaviour:
     growInThicket: 1
     variants:
     - name: Tree_Main
-      prefab: {fileID: 1163520723493932928, guid: 96aaf914762445442a32be02abd4c9f0,
+      prefab: {fileID: 1478839899352244680, guid: 56097d59501df1043b06ebeb1df3db6b,
         type: 3}
-      mesh: {fileID: 4300000, guid: 5648c7aa655120f44aab862e4a038f3c, type: 3}
-      material: {fileID: 0}
+      mesh: {fileID: -8437849265212345515, guid: 66d4573ab249b2e42a966d9ff59951c8,
+        type: 3}
+      material: {fileID: 3152351394207331309, guid: e40b77c055237f941894dce9dea4d241,
+        type: 3}
       sprite: {fileID: 0}
       weight: 100
       minScale: 5
@@ -2979,6 +3086,11 @@ MonoBehaviour:
   liveRadius: 15
   liveExitExtra: 10
   useVisionFade: 1
+  fadeZoneRadius: 1.8
+  fadeCursorRadius: 1
+  fadeCorridorHalf: 1.5
+  fadeEdgeMeters: 2.2
+  fadeKeepHeight: 2.3
   fadePale: 0.45
   occlusionRayRadius: 0
   fadeCornerCount: 8
@@ -2994,6 +3106,56 @@ MonoBehaviour:
   drawTreeLetters: 1
   treeLetterColor: {r: 0.2, g: 0.85, b: 0.25, a: 1}
   treeLetterFadedColor: {r: 1, g: 0.82, b: 0.12, a: 1}
+--- !u!114 &1950520788
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1950520764}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6ab0c2576d64e0948bd20bc861d0ce46, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  heightSource: {fileID: 1950520784}
+  terrainBuilder: {fileID: 1950520777}
+  mapGrid: {fileID: 1950520785}
+  naturePlacement: {fileID: 1950520786}
+  roadGenerator: {fileID: 1950520782}
+  grassMaterial: {fileID: 2100000, guid: 398e375eea068974d8413ce961f68a52, type: 2}
+  heightOffset: 0.03
+  skipBorderCells: 2
+  maxSlope: 1.6
+  chunkSize: 10
+  cellSubdiv: 4
+  centerBlades: 22
+  edgeBlades: 5
+  trunkRadius: 2.6
+  fadeMeters: 10
+  bladeHeight: 1.15
+  bladeWidth: 0.11
+  windStrength: 0.14
+  windSpeed: 0.35
+  screenPad: 1.05
+  player: {fileID: 0}
+  drawRadius: 28
+  pushRadius: 1.8
+  pushStrength: 1.15
+  recoverSeconds: 1.35
+  minForwardSpeed: 1.2
+  forwardDot: 0.25
+  useTreeCircles: 1
+  skipWater: 1
+  waterLevel: 0
+  skipRoads: 1
+  skipUnderTrees: 0
+  growInGrove: 1
+  growInForest: 1
+  growInThicket: 1
+  coverage: 1
+  shadowCasting: 0
+  receiveShadows: 1
 --- !u!1 &1984545281
 GameObject:
   m_ObjectHideFlags: 0
@@ -3281,3 +3443,4 @@ SceneRoots:
   - {fileID: 8635552657198810605}
   - {fileID: 824045073}
   - {fileID: 8829691084510088204}
+  - {fileID: 977760327}

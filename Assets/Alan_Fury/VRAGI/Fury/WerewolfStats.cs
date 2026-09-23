@@ -35,10 +35,10 @@ public class WerewolfStats : MonoBehaviour, IDamageable
 
     [Header("Здоровье")]
     public float maxHealth = 30f;
-    [Tooltip("Реген HP после паузы. 0 = выкл.")]
+    [Tooltip("Реген HP сразу, даже под ударом и кровотечением. 0 = выкл.")]
     public float healthRegenPerSecond = 1.5f;
-    [Tooltip("Пауза после урона перед регеном (сек).")]
-    public float healthRegenDelay = 6f;
+    [Tooltip("Устарело. Паузы регена больше нет.")]
+    public float healthRegenDelay = 0f;
 
     [Header("Стамина")]
     public float maxStamina = 60f;
@@ -66,13 +66,18 @@ public class WerewolfStats : MonoBehaviour, IDamageable
     [Tooltip("Тяжелее — меньше отброс. Игрок = 80.")]
     public float mass = 100f;
 
+    [Header("Прерывание")]
+    [Tooltip("Срыв атаки волка, если урон не меньше.")]
+    public float interruptMinDamage = 8f;
+    [Tooltip("Срыв атаки волка, если stagger не меньше.")]
+    public float interruptMinStagger = 3.5f;
+
     [Header("Цель")]
     [Tooltip("Своя цель. Задаёт кольцо с мин. и макс. дистанцией. Пусто — волк вне драки.")]
     public Transform target;
 
     private float _stamina;
     private float _regenTimer;
-    private float _healthRegenTimer;
     private float _health;
     private float _aggression;
     private float _fear;
@@ -200,11 +205,18 @@ public class WerewolfStats : MonoBehaviour, IDamageable
         TakeDamage(amount);
     }
 
+    bool ShouldInterrupt(HitInfo hit)
+    {
+        float dmg = hit.finalDamage > 0f ? hit.finalDamage : hit.rawDamage;
+        if (dmg >= 0.2f || hit.stagger >= 0.5f) return true;
+        return dmg >= interruptMinDamage || hit.stagger >= interruptMinStagger;
+    }
+
     public void TakeHit(HitInfo hit)
     {
         if (!IsAlive) return;
-        if (_combat != null)
-            _combat.InterruptFromHit(hit.isHeavy || hit.stagger >= 5.5f, hit);
+        if (_combat != null && ShouldInterrupt(hit))
+            _combat.InterruptFromHit(hit.isHeavy || hit.stagger >= 5.5f || hit.kind == DamageKind.Blunt, hit);
         if (_wounds == null) _wounds = GetComponent<WoundTracker>();
         if (_wounds != null)
         {
@@ -218,7 +230,6 @@ public class WerewolfStats : MonoBehaviour, IDamageable
     {
         if (!IsAlive || amount <= 0f) return;
         _health = Mathf.Max(0f, _health - amount);
-        if (healthRegenDelay > 0f) _healthRegenTimer = healthRegenDelay;
 
         if (reportFear)
         {
@@ -248,10 +259,7 @@ public class WerewolfStats : MonoBehaviour, IDamageable
             _stamina = Mathf.Min(maxStamina, _stamina + staminaRegenPerSecond * dt);
 
         if (IsAlive && healthRegenPerSecond > 0f && _health < maxHealth)
-        {
-            if (_healthRegenTimer > 0f) _healthRegenTimer -= dt;
-            else _health = Mathf.Min(maxHealth, _health + healthRegenPerSecond * dt);
-        }
+            _health = Mathf.Min(maxHealth, _health + healthRegenPerSecond * dt);
 
         _slowTimer -= dt;
         if (_slowTimer <= 0f)

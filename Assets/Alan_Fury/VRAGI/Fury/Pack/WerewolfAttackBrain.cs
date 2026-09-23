@@ -577,9 +577,22 @@ public class WerewolfAttackBrain : MonoBehaviour, WerewolfPackManager.IPackAgent
 
         Vector3 p = perception.PlayerPos;
         bool grab = perception.DistanceToPlayer > MeleeRange;
-        Vector3 land = grab ? p : CommitLandingPoint();
+        Vector3 land = grab ? StrikeStandPoint() : CommitLandingPoint();
         locomotion.MoveTo(land + SeparationOffset(), runSpeed, dt);
         if (locomotion.IsBiped) locomotion.FaceTowards(p, dt);
+    }
+
+    /// <summary>Край досягаемости, не центр игрока.</summary>
+    private Vector3 StrikeStandPoint()
+    {
+        Vector3 p = perception.PlayerPos;
+        Vector3 outward = transform.position - p; outward.y = 0f;
+        if (outward.sqrMagnitude < 1e-4f) outward = -perception.PlayerForwardFlat;
+        outward.Normalize();
+        float reach = MeleeRange;
+        if (perception.AngleFromPlayerGaze >= specialBehindAngle)
+            reach = Mathf.Min(reach, SpecialReach);
+        return p + outward * (reach * 0.92f);
     }
 
     private Vector3 CommitLandingPoint()

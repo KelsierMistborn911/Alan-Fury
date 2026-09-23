@@ -7,6 +7,8 @@
 /// </summary>
 public class CombatController3D : HumanoidCombat
 {
+    protected override bool UsesAttackApproach => true;
+
     [Header("Игрок: захват цели")]
     public PlayerTargeting targeting;
 
@@ -101,23 +103,28 @@ public class CombatController3D : HumanoidCombat
 
     void TickPlayerCombatInput()
     {
-        if (resources != null && resources.IsDead) return;
-        if (IsComposing()) return;
-        if (_spells != null && _spells.BlocksMelee) return;
+        if (resources != null && resources.IsDead) { AttackHeld = false; return; }
+        if (IsComposing()) { AttackHeld = false; return; }
+        if (_spells != null && _spells.BlocksMelee) { AttackHeld = false; return; }
         if (loadout != null && loadout.HasTwoHandWeapon()
             && loadout.GetMainWeapon() != null && loadout.GetMainWeapon().isRanged)
+        {
+            AttackHeld = false;
             return;
+        }
 
         if (IsArmed && Input.GetKeyDown(parryKey))
             TryParry();
 
+        bool blocking = IsShieldArmed && Input.GetKey(blockKey) && loadout != null && loadout.HasShield();
+        AttackHeld = Input.GetMouseButton(0) && !blocking;
+
         if (IsCharging && Input.GetKeyDown(KeyCode.Space))
         {
             CancelCharge();
+            AttackHeld = false;
             return;
         }
-
-        if (IsAttacking) return;
 
         if (IsCharging)
         {
@@ -125,6 +132,8 @@ public class CombatController3D : HumanoidCombat
                 ReleaseAttack();
             return;
         }
+
+        if (IsAttacking) return;
 
         bool wantsBlock = IsShieldArmed && Input.GetKey(blockKey) && loadout != null && loadout.HasShield();
         SetBlocking(wantsBlock);

@@ -3,8 +3,9 @@ using System.Collections.Generic;
 
 /// <summary>
 /// Отрисовка + hybrid live + стриминг.
-/// Fade: коридор от персонажа через курсор. Полупрозрачная крона только
-/// если она заслоняет видимую клетку внутри этого коридора.
+/// Fade: коридор игрок→курсор + маленькие пятна у обоих.
+/// Сила по пикселю: внутри зрения макс, к краю зрения и коридора — в непрозрачное.
+/// Ствол (низ + радиус корня) не выцветает. Без среза-плоскости.
 /// Live — коллайдер; картинка всегда инстанс.
 /// </summary>
 public class NatureRenderer : MonoBehaviour
@@ -26,14 +27,24 @@ public class NatureRenderer : MonoBehaviour
 
     [Header("Fade (заслон камеры)")]
     public bool useVisionFade = true;
+    [Tooltip("Пятно вокруг игрока (м).")]
+    public float fadeZoneRadius = 1.8f;
+    [Tooltip("Пятно вокруг курсора (м). Держать маленьким.")]
+    public float fadeCursorRadius = 1.0f;
+    [Tooltip("Полуширина коридора игрок → курсор (м).")]
+    public float fadeCorridorHalf = 1.5f;
+    [Tooltip("Ширина мягкого края у зоны и у границы зрения (м).")]
+    public float fadeEdgeMeters = 2.2f;
+    [Tooltip("Высота ствола, который не выцветает (м от корня).")]
+    public float fadeKeepHeight = 2.3f;
     [Tooltip("Насколько обесцветить крону в fade.")]
-    [Range(0f, 1f)] public float fadePale = 0.45f;
+    [Range(0f, 1f)] public float fadePale = 0f;
     [Tooltip("Радиус луча угол контура → камера (м).")]
     public float occlusionRayRadius = 1.8f;
     [Tooltip("Сколько углов золотого контура (4–12).")]
     [Range(4, 12)] public int fadeCornerCount = 8;
     [Tooltip("Разгон / спад прозрачности, сек.")]
-    public float fadeSeconds = 0.18f;
+    public float fadeSeconds = 0.32f;
     [Tooltip("После того как дерево больше не заслоняет зрение — столько секунд ещё прозрачное, потом отрастает.")]
     public float fadeReturnDelay = 2f;
     public Material fadeMaterial;
@@ -66,10 +77,11 @@ public class NatureRenderer : MonoBehaviour
     private readonly List<Matrix4x4> _opaque = new List<Matrix4x4>(256);
     private readonly List<Matrix4x4> _faded = new List<Matrix4x4>(256);
     private readonly List<float> _fadedW = new List<float>(256);
-    private readonly List<float> _fadedFrom = new List<float>(256);
     private readonly List<Matrix4x4> _partBatch = new List<Matrix4x4>(256);
     private readonly Dictionary<long, float> _fadeAmt = new Dictionary<long, float>(256);
-    private readonly Dictionary<long, float> _fadeFromFrac = new Dictionary<long, float>(256);
+    private readonly Color32[] _maskBlur = new Color32[MaskDim * MaskDim];
+    private readonly int[] _visDist = new int[MaskDim * MaskDim];
+    private readonly int[] _bfsQ = new int[MaskDim * MaskDim];
     private readonly Dictionary<long, float> _fadeReturnAt = new Dictionary<long, float>(256);
     private readonly HashSet<long> _fadeSeen = new HashSet<long>();
     private readonly List<long> _fadeDead = new List<long>();
@@ -132,6 +144,12 @@ public class NatureRenderer : MonoBehaviour
     private static readonly int VisionNearFadeId = Shader.PropertyToID("_VisionNearFade");
     private static readonly int VisionNearFalloffId = Shader.PropertyToID("_VisionNearFalloff");
     private static readonly int VisionFadeFromFracId = Shader.PropertyToID("_VisionFadeFromFrac");
+    private static readonly int VisionCursorXZId = Shader.PropertyToID("_VisionCursorXZ");
+    private static readonly int VisionCorridorHalfId = Shader.PropertyToID("_VisionCorridorHalf");
+    private static readonly int VisionPlayerRadiusId = Shader.PropertyToID("_VisionPlayerRadius");
+    private static readonly int VisionCursorRadiusId = Shader.PropertyToID("_VisionCursorRadius");
+    private static readonly int VisionEdgeMetersId = Shader.PropertyToID("_VisionEdgeMeters");
+    private static readonly int VisionKeepHeightId = Shader.PropertyToID("_VisionKeepHeight");
 
     private class LiveEntry
     {
@@ -286,7 +304,7 @@ public class NatureRenderer : MonoBehaviour
     {
         Shader.SetGlobalFloat(VisionFadeAlphaId, 0f);
         Shader.SetGlobalFloat(VisionKeepBottomId, 0f);
-        Shader.SetGlobalFloat(VisionKeepFractionId, 0.2f);
+        Shader.SetGlobalFloat(VisionKeepFractionId, 0f);
         Shader.SetGlobalFloat(VisionFadePaleId, Mathf.Clamp01(fadePale));
         Shader.SetGlobalFloat(VisionFadeSoftId, 1f);
         Shader.SetGlobalFloat(VisionGroundYId, player != null ? player.position.y : 0f);
@@ -303,15 +321,21 @@ public class NatureRenderer : MonoBehaviour
         Shader.SetGlobalFloat(VisionMaskOnId, _maskOk ? 1f : 0f);
         if (player != null)
             Shader.SetGlobalVector(VisionPlayerXZId, new Vector4(player.position.x, player.position.z, 0f, 0f));
+        Shader.SetGlobalVector(VisionCursorXZId, new Vector4(_cursorWorld.x, _cursorWorld.z, 0f, 0f));
         if (cam != null)
         {
             Vector3 cf = cam.transform.forward;
             Shader.SetGlobalVector(VisionCamFwdId, new Vector4(cf.x, cf.y, cf.z, 0f));
         }
-        Shader.SetGlobalFloat(VisionKeepRadiusId, 1.6f);
+        Shader.SetGlobalFloat(VisionKeepRadiusId, 1.8f);
         Shader.SetGlobalFloat(VisionNearFadeId, 0f);
-        Shader.SetGlobalFloat(VisionNearFalloffId, 0.01f);
+        Shader.SetGlobalFloat(VisionNearFalloffId, 1.0f);
         Shader.SetGlobalFloat(VisionFadeFromFracId, 0f);
+        Shader.SetGlobalFloat(VisionCorridorHalfId, Mathf.Max(0.2f, fadeCorridorHalf));
+        Shader.SetGlobalFloat(VisionPlayerRadiusId, Mathf.Max(0.2f, fadeZoneRadius));
+        Shader.SetGlobalFloat(VisionCursorRadiusId, Mathf.Max(0.15f, fadeCursorRadius));
+        Shader.SetGlobalFloat(VisionEdgeMetersId, Mathf.Max(0.75f, fadeEdgeMeters));
+        Shader.SetGlobalFloat(VisionKeepHeightId, Mathf.Max(0.5f, fadeKeepHeight));
     }
 
     private void ResolveCursorFocus()
@@ -330,9 +354,8 @@ public class NatureRenderer : MonoBehaviour
         grid.WorldToCell(_cursorWorld, out int cx, out int cz);
         _cursorOnVisible = _visibleSet.Contains(new Vector2Int(cx, cz));
         BuildCorridorCells(grid);
+        StampFadeMask();
     }
-
-    private const float CorridorHalf = 2f;
 
     private void BuildCorridorCells(MapGrid grid)
     {
@@ -341,40 +364,50 @@ public class NatureRenderer : MonoBehaviour
         if (player == null || grid == null || !grid.IsReady) return;
 
         _corridorOrigin = new Vector2(player.position.x, player.position.z);
-        Vector2 toCursor = new Vector2(_cursorWorld.x, _cursorWorld.z) - _corridorOrigin;
+        Vector2 cursor = new Vector2(_cursorWorld.x, _cursorWorld.z);
+        Vector2 toCursor = cursor - _corridorOrigin;
         if (toCursor.sqrMagnitude < 0.36f)
         {
             Vector3 f = player.forward;
             toCursor = new Vector2(f.x, f.z);
         }
-        if (toCursor.sqrMagnitude < 1e-6f) return;
+        if (toCursor.sqrMagnitude < 1e-6f) toCursor = Vector2.up;
         _corridorDir = toCursor.normalized;
         _corridorOk = true;
 
-        float half = CorridorHalf + grid.TileSize * 0.5f;
+        float half = Mathf.Max(0.4f, fadeCorridorHalf) + fadeEdgeMeters;
+        float pR = Mathf.Max(0.4f, fadeZoneRadius) + fadeEdgeMeters;
+        float cR = Mathf.Max(0.3f, fadeCursorRadius) + fadeEdgeMeters;
+        float pR2 = pR * pR;
+        float cR2 = cR * cR;
+        float segLen = Vector2.Distance(_corridorOrigin, cursor);
+
         for (int i = 0; i < _visibleCells.Count; i++)
         {
             var cell = _visibleCells[i];
-            if (CellInCorridor(grid, cell.x, cell.y, half))
+            Vector3 w = grid.CellCenterWorld(cell.x, cell.y);
+            Vector2 p = new Vector2(w.x, w.z);
+            if ((p - _corridorOrigin).sqrMagnitude <= pR2
+                || (p - cursor).sqrMagnitude <= cR2
+                || DistToSegment(p, _corridorOrigin, cursor, segLen) <= half)
                 _corridorSet.Add(cell);
         }
     }
 
-    private bool CellInCorridor(MapGrid grid, int cx, int cz, float half)
+    private static float DistToSegment(Vector2 p, Vector2 a, Vector2 b, float abLen)
     {
-        Vector3 w = grid.CellCenterWorld(cx, cz);
-        Vector2 q = new Vector2(w.x, w.z) - _corridorOrigin;
-        float t = q.x * _corridorDir.x + q.y * _corridorDir.y;
-        if (t < -grid.TileSize * 0.5f) return false;
-        float perp = Mathf.Abs(q.x * _corridorDir.y - q.y * _corridorDir.x);
-        return perp <= half;
+        Vector2 ab = b - a;
+        if (abLen < 1e-4f) return Vector2.Distance(p, a);
+        float t = Mathf.Clamp01(Vector2.Dot(p - a, ab) / (abLen * abLen));
+        Vector2 proj = a + ab * t;
+        return Vector2.Distance(p, proj);
     }
 
     private void EnsureCellMask()
     {
         if (_cellMask != null) return;
         _cellMask = new Texture2D(MaskDim, MaskDim, TextureFormat.RGBA32, false, true);
-        _cellMask.filterMode = FilterMode.Point;
+        _cellMask.filterMode = FilterMode.Bilinear;
         _cellMask.wrapMode = TextureWrapMode.Clamp;
         _cellMask.name = "VisionFadeCellMask";
         _cellMaskPixels = new Color32[MaskDim * MaskDim];
@@ -409,17 +442,84 @@ public class NatureRenderer : MonoBehaviour
         for (int i = 0; i < _cellMaskPixels.Length; i++)
             _cellMaskPixels[i] = clear;
 
-        var on = new Color32(255, 255, 255, 255);
-        for (int i = 0; i < _visibleCells.Count; i++)
-        {
-            int lx = _visibleCells[i].x - _maskOx;
-            int lz = _visibleCells[i].y - _maskOz;
-            if ((uint)lx >= MaskDim || (uint)lz >= MaskDim) continue;
-            _cellMaskPixels[lz * MaskDim + lx] = on;
-        }
-        _cellMask.SetPixels32(_cellMaskPixels);
-        _cellMask.Apply(false, false);
         _maskOk = true;
+    }
+
+    private void StampFadeMask()
+    {
+        if (_cellMask == null || _cellMaskPixels == null) return;
+
+        int n = MaskDim * MaskDim;
+        for (int i = 0; i < n; i++)
+            _visDist[i] = 0;
+
+        foreach (var cell in _visibleSet)
+        {
+            int lx = cell.x - _maskOx;
+            int lz = cell.y - _maskOz;
+            if ((uint)lx >= MaskDim || (uint)lz >= MaskDim) continue;
+            _visDist[lz * MaskDim + lx] = 999;
+        }
+
+        int qh = 0, qt = 0;
+        for (int i = 0; i < n; i++)
+        {
+            if (_visDist[i] != 0) continue;
+            _bfsQ[qt++] = i;
+        }
+
+        int[] dx = { 1, -1, 0, 0 };
+        int[] dz = { 0, 0, 1, -1 };
+        while (qh < qt)
+        {
+            int i = _bfsQ[qh++];
+            int x = i % MaskDim;
+            int z = i / MaskDim;
+            int nd = _visDist[i] + 1;
+            for (int k = 0; k < 4; k++)
+            {
+                int nx = x + dx[k];
+                int nz = z + dz[k];
+                if ((uint)nx >= MaskDim || (uint)nz >= MaskDim) continue;
+                int j = nz * MaskDim + nx;
+                if (_visDist[j] <= nd) continue;
+                _visDist[j] = nd;
+                _bfsQ[qt++] = j;
+            }
+        }
+
+        float edge = Mathf.Max(0.75f, fadeEdgeMeters);
+        float ts = 1f;
+        if (playerVision != null && playerVision.mapGrid != null && playerVision.mapGrid.IsReady)
+            ts = Mathf.Max(0.25f, playerVision.mapGrid.TileSize);
+
+        for (int i = 0; i < n; i++)
+        {
+            float meters = _visDist[i] * ts;
+            float w = Mathf.Clamp01(meters / edge);
+            byte v = (byte)Mathf.RoundToInt(w * 255f);
+            _cellMaskPixels[i] = new Color32(v, v, v, v);
+        }
+
+        for (int z = 0; z < MaskDim; z++)
+        {
+            for (int x = 0; x < MaskDim; x++)
+            {
+                int i = z * MaskDim + x;
+                int acc = _cellMaskPixels[i].r * 4;
+                int ww = 4;
+                if (x > 0) { acc += _cellMaskPixels[i - 1].r; ww++; }
+                if (x + 1 < MaskDim) { acc += _cellMaskPixels[i + 1].r; ww++; }
+                if (z > 0) { acc += _cellMaskPixels[i - MaskDim].r; ww++; }
+                if (z + 1 < MaskDim) { acc += _cellMaskPixels[i + MaskDim].r; ww++; }
+                byte v = (byte)Mathf.Clamp(acc / ww, 0, 255);
+                _maskBlur[i] = new Color32(v, v, v, v);
+            }
+        }
+
+        _cellMask.SetPixels32(_maskBlur);
+        _cellMask.Apply(false, false);
+        _maskOk = _visibleSet.Count > 0;
     }
 
     private void BuildFieldFromGoldContour()
@@ -485,24 +585,19 @@ public class NatureRenderer : MonoBehaviour
 
     private const float SemiFadeAmt = 0.9f;
 
-    private float EvaluateFade(Bounds b, Matrix4x4 root, float localH, int footprint, out float fromFrac)
+    private float EvaluateFade(Bounds b, Matrix4x4 root, float localH, int footprint)
     {
-        fromFrac = 0f;
         if (!_corridorOk || _corridorSet.Count == 0) return 0f;
-        return HitsCorridorCrown(b, root, localH, footprint, out fromFrac) ? SemiFadeAmt : 0f;
+        return HitsFadeZone(b, root, footprint) ? SemiFadeAmt : 0f;
     }
 
-    private bool HitsCorridorCrown(Bounds b, Matrix4x4 root, float localH, int footprint, out float fromFrac)
+    private bool HitsFadeZone(Bounds b, Matrix4x4 root, int footprint)
     {
-        fromFrac = 0f;
         MapGrid grid = playerVision != null ? playerVision.mapGrid : null;
         if (grid == null || !grid.IsReady) return false;
 
         Vector3 dir = cam != null ? cam.transform.forward : Vector3.down;
         float gy = player != null ? player.position.y : b.min.y;
-        float pivotY = root.m13;
-        float scaleY = ((Vector3)root.GetColumn(1)).magnitude;
-        float hWorld = Mathf.Max(localH * scaleY, 0.01f);
 
         Vector3 pos = root.GetColumn(3);
         grid.WorldToCell(pos, out int ox, out int oz);
@@ -518,7 +613,6 @@ public class NatureRenderer : MonoBehaviour
         for (int iy = 0; iy <= ny; iy++)
         {
             float y = b.min.y + (b.size.y * iy) / ny;
-            bool bandHit = false;
             for (int i = 0; i < 5; i++)
             {
                 float sx = 0f, sz = 0f;
@@ -531,14 +625,9 @@ public class NatureRenderer : MonoBehaviour
                 grid.WorldToCell(g, out int cx, out int cz);
                 if (cx >= x0 && cx <= x1 && cz >= z0 && cz <= z1)
                     continue;
-                if (!_corridorSet.Contains(new Vector2Int(cx, cz)))
-                    continue;
-                bandHit = true;
-                break;
+                if (_corridorSet.Contains(new Vector2Int(cx, cz)))
+                    return true;
             }
-            if (!bandHit) continue;
-            fromFrac = Mathf.Clamp01((y - pivotY) / hWorld);
-            return true;
         }
         return false;
     }
@@ -576,7 +665,6 @@ public class NatureRenderer : MonoBehaviour
         if (w <= 0.001f)
         {
             _fadeAmt.Remove(key);
-            _fadeFromFrac.Remove(key);
             _fadeReturnAt.Remove(key);
             _fadeWant.Remove(key);
             return 0f;
@@ -601,7 +689,6 @@ public class NatureRenderer : MonoBehaviour
         for (int i = 0; i < _fadeDead.Count; i++)
         {
             _fadeAmt.Remove(_fadeDead[i]);
-            _fadeFromFrac.Remove(_fadeDead[i]);
             _fadeReturnAt.Remove(_fadeDead[i]);
             _fadeWant.Remove(_fadeDead[i]);
         }
@@ -792,15 +879,12 @@ public class NatureRenderer : MonoBehaviour
             _opaque.Clear();
             _faded.Clear();
             _fadedW.Clear();
-            _fadedFrom.Clear();
 
             bool treeFade = useVisionFade && layer.IsTree && FadeShaderOk();
-            int layerFp = layer.IsTree ? Mathf.Max(1, layer.footprint) : 1;
             Bounds localBounds = (vi < _variantBounds.Count)
                 ? _variantBounds[vi]
                 : EncapsulateParts(v);
-            float localH = localBounds.size.y;
-            _drawLocalH = localH;
+            _drawLocalH = localBounds.size.y;
 
             for (int sx = pcx - r; sx <= pcx + r; sx++)
             {
@@ -812,30 +896,10 @@ public class NatureRenderer : MonoBehaviour
                         if (batch == null) continue;
                         for (int i = 0; i < batch.Length; i++)
                         {
-                            long key = PosHash(batch[i].GetColumn(3));
-                            float fromFrac = 0f;
-                            float want = 0f;
                             if (treeFade)
                             {
-                                if (_evalFadeThisFrame)
-                                {
-                                    Bounds wb = TransformBounds(localBounds, batch[i]);
-                                    want = EvaluateFade(wb, batch[i], localH, layerFp, out fromFrac);
-                                    _fadeWant[key] = want;
-                                    if (want > 0.01f)
-                                        _fadeFromFrac[key] = fromFrac;
-                                }
-                                else
-                                    _fadeWant.TryGetValue(key, out want);
-                            }
-                            float fadeW = treeFade ? StepFade(key, want) : 0f;
-                            if (fadeW > 0.01f)
-                            {
                                 _faded.Add(batch[i]);
-                                _fadedW.Add(fadeW);
-                                float stored = fromFrac;
-                                _fadeFromFrac.TryGetValue(key, out stored);
-                                _fadedFrom.Add(stored);
+                                _fadedW.Add(1f);
                             }
                             else _opaque.Add(batch[i]);
                         }
@@ -843,9 +907,10 @@ public class NatureRenderer : MonoBehaviour
                 }
             }
 
-            DrawParts(v, _opaque, v.propertyBlock, shadows, fade: false);
-            if (_faded.Count > 0)
+            if (treeFade)
                 DrawParts(v, _faded, null, shadows, fade: true);
+            else
+                DrawParts(v, _opaque, v.propertyBlock, shadows, fade: false);
         }
         PruneFadeWeights();
     }
@@ -952,7 +1017,6 @@ public class NatureRenderer : MonoBehaviour
         List<Matrix4x4> roots, UnityEngine.Rendering.ShadowCastingMode shadows)
     {
         const int wBuckets = 8;
-        const int hBuckets = 8;
         bool ident = part.localToRoot.isIdentity;
         Matrix4x4 partInv = ident ? Matrix4x4.identity : part.localToRoot.inverse;
         float localH = _drawLocalH;
@@ -961,38 +1025,26 @@ public class NatureRenderer : MonoBehaviour
         {
             float lo = (b - 1) / (float)wBuckets;
             float hi = b / (float)wBuckets;
-            for (int hb = 0; hb < hBuckets; hb++)
+            _partBatch.Clear();
+            int n = roots.Count;
+            int wn = _fadedW.Count;
+            for (int i = 0; i < n; i++)
             {
-                float flo = hb / (float)hBuckets;
-                float fhi = (hb + 1) / (float)hBuckets;
-                _partBatch.Clear();
-                int n = roots.Count;
-                int wn = _fadedW.Count;
-                int fn = _fadedFrom.Count;
-                for (int i = 0; i < n; i++)
-                {
-                    float w = i < wn ? _fadedW[i] : 1f;
-                    if (w <= lo || w > hi) continue;
-                    float f = i < fn ? _fadedFrom[i] : 0f;
-                    if (hb < hBuckets - 1)
-                    {
-                        if (f < flo || f >= fhi) continue;
-                    }
-                    else if (f < flo) continue;
-                    _partBatch.Add(ident ? roots[i] : roots[i] * part.localToRoot);
-                }
-                if (_partBatch.Count == 0) continue;
-                _fadeBlock.Clear();
-                CopyAlbedo(part.material, _fadeBlock);
-                _fadeBlock.SetFloat(VisionFadeWeightId, hi);
-                _fadeBlock.SetFloat(VisionKeepFractionId, 0.2f);
-                _fadeBlock.SetFloat(VisionKeepBottomId, 0f);
-                _fadeBlock.SetFloat(VisionTreeLocalHeightId, localH);
-                _fadeBlock.SetMatrix(VisionPartInvId, partInv);
-                _fadeBlock.SetFloat(VisionFadePaleId, fadePale);
-                _fadeBlock.SetFloat(VisionFadeFromFracId, flo);
-                DrawList(part.mesh, mat, _fadeBlock, _partBatch, shadows, part.submesh);
+                float w = i < wn ? _fadedW[i] : 1f;
+                if (w <= lo || w > hi) continue;
+                _partBatch.Add(ident ? roots[i] : roots[i] * part.localToRoot);
             }
+            if (_partBatch.Count == 0) continue;
+            _fadeBlock.Clear();
+            CopyAlbedo(part.material, _fadeBlock);
+            _fadeBlock.SetFloat(VisionFadeWeightId, hi);
+            _fadeBlock.SetFloat(VisionKeepFractionId, 0f);
+            _fadeBlock.SetFloat(VisionKeepBottomId, 0f);
+            _fadeBlock.SetFloat(VisionTreeLocalHeightId, localH);
+            _fadeBlock.SetMatrix(VisionPartInvId, partInv);
+            _fadeBlock.SetFloat(VisionFadePaleId, fadePale);
+            _fadeBlock.SetFloat(VisionFadeFromFracId, 0f);
+            DrawList(part.mesh, mat, _fadeBlock, _partBatch, shadows, part.submesh);
         }
     }
 

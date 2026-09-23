@@ -105,7 +105,16 @@ public class PlayerMovement3D : HumanoidLocomotion
     {
         if (!Input.GetKeyDown(KeyCode.LeftAlt) && !Input.GetKeyDown(KeyCode.RightAlt))
             return;
-        Vector3 dir = move.sqrMagnitude > 0.01f ? move : ComputeLookDirection();
+
+        bool hasMove = move.sqrMagnitude > 0.01f;
+        if (!hasMove && !HasDodgeThreat)
+        {
+            if (Combat != null)
+                Combat.TryDisengageStep();
+            return;
+        }
+
+        Vector3 dir = hasMove ? move : ComputeLookDirection();
         TryDodge(dir);
     }
 

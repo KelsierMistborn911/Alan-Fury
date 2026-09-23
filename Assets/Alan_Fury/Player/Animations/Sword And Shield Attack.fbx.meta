@@ -1,5 +1,5 @@
 fileFormatVersion: 2
-guid: 5dc9094f0e33e1e4fae54fd655467053
+guid: 0e7c8cff499fb0d49aa5c7f4b7f3cf92
 ModelImporter:
   serializedVersion: 22200
   internalIDToNameTable: []
@@ -33,11 +33,11 @@ ModelImporter:
     extraUserProperties: []
     clipAnimations:
     - serializedVersion: 16
-      name: Sword And Shield Crouch Block
+      name: Sword And Shield Attack
       takeName: mixamo.com
       internalID: -203655887218126122
       firstFrame: 0
-      lastFrame: 15
+      lastFrame: 30
       wrapMode: 0
       orientationOffsetY: 0
       level: 0

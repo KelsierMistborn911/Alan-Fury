@@ -15,25 +15,34 @@ public class WeaponHitbox : MonoBehaviour
     public float coneHalfAngle = 60f;
 
     [Header("Зона (меш)")]
-    [Tooltip("Показывать меш зоны на замахе и во время прохода удара.")]
-    public bool showZoneMesh = true;
-    [Tooltip("Высота зоны над origin (м).")]
+    [Tooltip("Полная зона-заливка. Для отладки формы. Удар смотреть через showStrikeMesh.")]
+    public bool showZoneMesh = false;
+    [Tooltip("Клинок удара: тонкая кромка, едет по Sweep01. Это и есть удар в игре.")]
+    public bool showStrikeMesh = true;
+    [Tooltip("Высота меша над origin (м).")]
     public float debugZoneY = 0.05f;
-    [Tooltip("Толщина кромки прохода (градусы для сектора).")]
+    [Tooltip("Толщина кромки прохода (градусы для сектора / метры для укола).")]
     public float sweepBladePad = 8f;
+    [Tooltip("Длина видимого клинка укола (м).")]
+    public float strikeBladeLength = 0.45f;
 
     public Color telegraphColor = new Color(1f, 0.85f, 0.15f, 0.22f);
     public Color sweepColor = new Color(1f, 0.12f, 0.08f, 0.42f);
+    public Color strikeColor = new Color(1f, 0.92f, 0.55f, 0.92f);
+    public Color strikeWindupColor = new Color(1f, 0.85f, 0.2f, 0.35f);
 
     [Header("Отладка")]
     public bool debugShowZone = false;
 
     private Transform _zoneFull;
     private Transform _zoneSweep;
+    private Transform _zoneStrike;
     private Mesh _meshFull;
     private Mesh _meshSweep;
+    private Mesh _meshStrike;
     private Material _matFull;
     private Material _matSweep;
+    private Material _matStrike;
 
     private float _activeCone;
     private HitZoneShape _shape;
@@ -64,6 +73,7 @@ public class WeaponHitbox : MonoBehaviour
 
     public SwordAttackVisual visual;
     public System.Action onHit;
+    public System.Action<HitInfo, Transform> onLanded;
 
     static readonly List<WeaponHitbox> LiveList = new List<WeaponHitbox>(16);
     public static IReadOnlyList<WeaponHitbox> Live => LiveList;
@@ -76,6 +86,15 @@ public class WeaponHitbox : MonoBehaviour
     public float CurrentRange => range;
     public Vector3 CurrentDirection => direction;
     public Vector3 ZoneOrigin => HitOrigin();
+
+    /// <summary>Текущая поза клинка: origin зоны, кончик, направление реза.</summary>
+    public void GetStrikePose(out Vector3 origin, out Vector3 tip, out Vector3 cutDir)
+    {
+        origin = HitOrigin();
+        float u = _telegraphing ? 0f : Sweep01;
+        StrikeAxes(u, out cutDir, out tip);
+        tip = origin + tip;
+    }
 
     void Awake()
     {
@@ -98,8 +117,10 @@ public class WeaponHitbox : MonoBehaviour
         LiveList.Remove(this);
         if (_zoneFull != null) Destroy(_zoneFull.gameObject);
         if (_zoneSweep != null) Destroy(_zoneSweep.gameObject);
+        if (_zoneStrike != null) Destroy(_zoneStrike.gameObject);
         if (_matFull != null) Destroy(_matFull);
         if (_matSweep != null) Destroy(_matSweep);
+        if (_matStrike != null) Destroy(_matStrike);
     }
 
     public void SetHitInfo(HitInfo info)
@@ -124,6 +145,7 @@ public class WeaponHitbox : MonoBehaviour
         timer = 0f;
         lastHitTime.Clear();
         RefreshZoneMeshes(0f, fullOnly: true);
+        RefreshStrikeMesh(0f, windup: true);
     }
 
     public void Activate(float range, float radius, float height, Vector3 offset,
@@ -162,10 +184,11 @@ public class WeaponHitbox : MonoBehaviour
         timer = 0f;
         lastHitTime.Clear();
 
-        if (visual != null)
+        if (visual != null && _shape != HitZoneShape.Capsule)
             visual.ShowArc(this.direction, offset, this.duration, chargePercent, comboIndex);
 
         RefreshZoneMeshes(0f, fullOnly: false);
+        RefreshStrikeMesh(0f, windup: false);
     }
 
     public void Deactivate()
@@ -176,6 +199,7 @@ public class WeaponHitbox : MonoBehaviour
         _followFacing = false;
         if (visual != null) visual.HideArc();
         HideZoneMeshes();
+        HideStrikeMesh();
     }
 
     void ApplyShape(float range, float radius, float height, Vector3 offset,
@@ -205,6 +229,7 @@ public class WeaponHitbox : MonoBehaviour
             if (_followFacing)
                 this.direction = PlanarForward();
             RefreshZoneMeshes(0f, fullOnly: true);
+            RefreshStrikeMesh(0f, windup: true);
             return;
         }
 
@@ -219,6 +244,7 @@ public class WeaponHitbox : MonoBehaviour
         }
 
         RefreshZoneMeshes(Sweep01, fullOnly: false);
+        RefreshStrikeMesh(Sweep01, windup: false);
 
         if (expired)
         {
@@ -226,6 +252,7 @@ public class WeaponHitbox : MonoBehaviour
             _hasHitInfo = false;
             if (visual != null) visual.HideArc();
             HideZoneMeshes();
+            HideStrikeMesh();
         }
     }
 
@@ -387,21 +414,45 @@ public class WeaponHitbox : MonoBehaviour
         hit.stagger = stagger;
         hit.finalDamage = damage;
 
-        damageable.TakeHit(hit);
+        var host = damageable as Component;
+        bool preview = TrainingDummyStats.IsPreviewAttacker(this);
+        if (preview)
+        {
+            float shown = hit.finalDamage > 0f ? hit.finalDamage : hit.rawDamage;
+            DamagePopup.Spawn(target.position + Vector3.up * 2f, shown,
+                new Color(1f, 0.82f, 0.22f), " ~");
+            hit.penetration = WoundTracker.EvaluatePenetration(hit, 1f);
+        }
+        else
+        {
+            damageable.TakeHit(hit);
+            WoundTracker wounds = host != null
+                ? host.GetComponentInParent<WoundTracker>()
+                : (target != null ? target.GetComponentInParent<WoundTracker>() : null);
+            hit.penetration = wounds != null
+                ? wounds.LastPenetration
+                : WoundTracker.EvaluatePenetration(hit, 1f);
+        }
 
         Vector3 knockback = (target.position - transform.position).normalized;
         knockback.y = 0f;
-        float impulse = stagger;
+        float impulse = hit.stagger * HitInfo.KnockbackOf(hit.kind);
         bool closeHold = hit.isInfight || hit.band <= CombatRange.Clinch;
         bool strongHit = hit.isHeavy && hit.chargePercent >= 0.55f;
         bool strongImpulse = hit.stagger > 5.5f;
-        if (closeHold && !(strongHit && strongImpulse))
+        bool fromWolf = GetComponentInParent<WerewolfCombat>() != null;
+        if (closeHold && !fromWolf && !(strongHit && strongImpulse))
             impulse *= 0.08f;
+        if (preview)
+        {
+            var dummy = GetComponentInParent<TrainingDummyStats>();
+            if (dummy != null) impulse *= dummy.previewKnockback;
+        }
         damageable.ApplyKnockback(knockback * impulse);
 
-        var host = damageable as Component;
         lastHitTime[host != null ? host.gameObject : target.gameObject] = Time.time;
         onHit?.Invoke();
+        onLanded?.Invoke(hit, target);
     }
 
     Collider[] QueryColliders(Vector3 origin, int mask = -1)
@@ -461,36 +512,36 @@ public class WeaponHitbox : MonoBehaviour
         switch (_shape)
         {
             case HitZoneShape.Capsule:
-            {
-                float len = Mathf.Max(0.12f, range * Mathf.Max(u, 0.02f));
-                Vector3 end = origin + direction * len;
-                return PointToSegment(target, origin, end) <= radius;
-            }
+                {
+                    float len = Mathf.Max(0.12f, range * Mathf.Max(u, 0.02f));
+                    Vector3 end = origin + direction * len;
+                    return PointToSegment(target, origin, end) <= radius;
+                }
             case HitZoneShape.Ellipse:
-            {
-                if (dist < 0.0001f) return u > 0.02f;
-                Quaternion inv = Quaternion.Inverse(Quaternion.LookRotation(direction));
-                Vector3 local = inv * flat;
-                float nx = radius > 0.01f ? local.x / radius : local.x;
-                float nz = range > 0.01f ? local.z / range : local.z;
-                float reach = Mathf.Max(0.08f, u);
-                return nx * nx + nz * nz <= reach * reach;
-            }
+                {
+                    if (dist < 0.0001f) return u > 0.02f;
+                    Quaternion inv = Quaternion.Inverse(Quaternion.LookRotation(direction));
+                    Vector3 local = inv * flat;
+                    float nx = radius > 0.01f ? local.x / radius : local.x;
+                    float nz = range > 0.01f ? local.z / range : local.z;
+                    float reach = Mathf.Max(0.08f, u);
+                    return nx * nx + nz * nz <= reach * reach;
+                }
             case HitZoneShape.Sector:
-            {
-                if (dist > range + 0.15f) return false;
-                if (dist < 0.0001f) return true;
-                Vector3 fwd = Quaternion.Euler(0f, _yawOffset, 0f) * direction;
-                float ang = Vector3.SignedAngle(fwd, flat, Vector3.up);
-                return AngleInSweep(ang, u);
-            }
+                {
+                    if (dist > range + 0.15f) return false;
+                    if (dist < 0.0001f) return true;
+                    Vector3 fwd = Quaternion.Euler(0f, _yawOffset, 0f) * direction;
+                    float ang = Vector3.SignedAngle(fwd, flat, Vector3.up);
+                    return AngleInSweep(ang, u);
+                }
             default:
-            {
-                if (dist > range + 0.01f) return false;
-                if (dist < 0.0001f) return true;
-                float ang = Vector3.SignedAngle(direction, flat, Vector3.up);
-                return AngleInSweep(ang, u);
-            }
+                {
+                    if (dist > range + 0.01f) return false;
+                    if (dist < 0.0001f) return true;
+                    float ang = Vector3.SignedAngle(direction, flat, Vector3.up);
+                    return AngleInSweep(ang, u);
+                }
         }
     }
 
@@ -597,6 +648,158 @@ public class WeaponHitbox : MonoBehaviour
         if (_zoneSweep != null) _zoneSweep.gameObject.SetActive(false);
     }
 
+    void HideStrikeMesh()
+    {
+        if (_zoneStrike != null) _zoneStrike.gameObject.SetActive(false);
+    }
+
+    void StrikeAxes(float sweep, out Vector3 cutDir, out Vector3 tipLocal)
+    {
+        float u = Mathf.Clamp01(sweep);
+        Vector3 fwd = direction.sqrMagnitude > 0.01f ? direction : PlanarForward();
+
+        if (_shape == HitZoneShape.Capsule)
+        {
+            cutDir = fwd;
+            tipLocal = fwd * (range * Mathf.Max(0.04f, u));
+            return;
+        }
+
+        if (_shape == HitZoneShape.Ellipse)
+        {
+            cutDir = fwd;
+            tipLocal = fwd * (range * Mathf.Max(0.06f, u));
+            return;
+        }
+
+        float a0 = _yawOffset - _activeCone;
+        float a1 = _yawOffset + _activeCone;
+        float ang = _sweepSign >= 0f
+            ? Mathf.Lerp(a0, a1, u)
+            : Mathf.Lerp(a1, a0, u);
+        cutDir = Quaternion.Euler(0f, ang, 0f) * fwd;
+        tipLocal = cutDir * range;
+    }
+
+    void RefreshStrikeMesh(float sweep, bool windup)
+    {
+        if (!showStrikeMesh && !debugShowZone)
+        {
+            HideStrikeMesh();
+            return;
+        }
+
+        if (_zoneStrike == null)
+            CreateZone("HitStrike", strikeColor, out _zoneStrike, out _meshStrike, out _matStrike);
+
+        Vector3 origin = HitOrigin() + Vector3.up * debugZoneY;
+        Vector3 dir = direction.sqrMagnitude > 0.01f ? direction : PlanarForward();
+        _zoneStrike.SetPositionAndRotation(origin, Quaternion.LookRotation(dir));
+        _zoneStrike.localScale = Vector3.one;
+        BuildStrikeMesh(_meshStrike, Mathf.Clamp01(sweep));
+        if (_matStrike != null)
+            _matStrike.color = windup ? strikeWindupColor : strikeColor;
+        if (!_zoneStrike.gameObject.activeSelf)
+            _zoneStrike.gameObject.SetActive(true);
+    }
+
+    void BuildStrikeMesh(Mesh mesh, float sweep)
+    {
+        if (_shape == HitZoneShape.Capsule)
+        {
+            BuildStrikeCapsule(mesh, sweep);
+            return;
+        }
+        if (_shape == HitZoneShape.Ellipse)
+        {
+            BuildStrikeEllipse(mesh, sweep);
+            return;
+        }
+        BuildStrikeSector(mesh, sweep);
+    }
+
+    void BuildStrikeSector(Mesh mesh, float sweep)
+    {
+        float inner = Mathf.Min(_innerRadius, range * 0.95f);
+        float a0 = (_yawOffset - _activeCone) * Mathf.Deg2Rad;
+        float a1 = (_yawOffset + _activeCone) * Mathf.Deg2Rad;
+        float from = _sweepSign >= 0f ? a0 : a1;
+        float to = _sweepSign >= 0f ? a1 : a0;
+        float front = Mathf.Lerp(from, to, Mathf.Clamp01(sweep));
+        float pad = Mathf.Max(2f, sweepBladePad) * Mathf.Deg2Rad;
+        float lo = front - pad;
+        float hi = front + pad;
+
+        const int seg = 4;
+        var verts = new Vector3[(seg + 1) * 2];
+        var tris = new int[seg * 6];
+        for (int i = 0; i <= seg; i++)
+        {
+            float a = Mathf.Lerp(lo, hi, i / (float)seg);
+            float s = Mathf.Sin(a);
+            float c = Mathf.Cos(a);
+            verts[i * 2] = new Vector3(s * inner, 0f, c * inner);
+            verts[i * 2 + 1] = new Vector3(s * range, 0f, c * range);
+        }
+        for (int i = 0; i < seg; i++)
+        {
+            int v = i * 2, t = i * 6;
+            tris[t] = v; tris[t + 1] = v + 1; tris[t + 2] = v + 2;
+            tris[t + 3] = v + 2; tris[t + 4] = v + 1; tris[t + 5] = v + 3;
+        }
+        mesh.Clear();
+        mesh.vertices = verts;
+        mesh.triangles = tris;
+        mesh.RecalculateNormals();
+    }
+
+    void BuildStrikeCapsule(Mesh mesh, float sweep)
+    {
+        float len = range * Mathf.Max(0.04f, Mathf.Clamp01(sweep));
+        float blade = Mathf.Max(0.12f, strikeBladeLength);
+        float z0 = Mathf.Max(0f, len - blade);
+        float r = Mathf.Max(0.05f, radius);
+        var verts = new Vector3[]
+        {
+            new Vector3(-r, 0f, z0),
+            new Vector3(-r, 0f, len),
+            new Vector3( r, 0f, len),
+            new Vector3( r, 0f, z0),
+        };
+        var tris = new int[] { 0, 1, 2, 0, 2, 3 };
+        mesh.Clear();
+        mesh.vertices = verts;
+        mesh.triangles = tris;
+        mesh.RecalculateNormals();
+    }
+
+    void BuildStrikeEllipse(Mesh mesh, float sweep)
+    {
+        float s = Mathf.Max(0.06f, Mathf.Clamp01(sweep));
+        float inner = Mathf.Max(0.02f, s - 0.12f);
+        const int n = 20;
+        var verts = new Vector3[(n + 1) * 2];
+        var tris = new int[n * 6];
+        for (int i = 0; i <= n; i++)
+        {
+            float a = i / (float)n * Mathf.PI * 2f;
+            float sn = Mathf.Sin(a);
+            float cs = Mathf.Cos(a);
+            verts[i * 2] = new Vector3(sn * radius * inner, 0f, cs * range * inner);
+            verts[i * 2 + 1] = new Vector3(sn * radius * s, 0f, cs * range * s);
+        }
+        for (int i = 0; i < n; i++)
+        {
+            int v = i * 2, t = i * 6;
+            tris[t] = v; tris[t + 1] = v + 1; tris[t + 2] = v + 2;
+            tris[t + 3] = v + 2; tris[t + 4] = v + 1; tris[t + 5] = v + 3;
+        }
+        mesh.Clear();
+        mesh.vertices = verts;
+        mesh.triangles = tris;
+        mesh.RecalculateNormals();
+    }
+
     void BuildZoneMesh(Mesh mesh, float sweep)
     {
         switch (_shape)
@@ -651,8 +854,10 @@ public class WeaponHitbox : MonoBehaviour
         float inner = Mathf.Min(_innerRadius, range * 0.95f);
         float a0 = (_yawOffset - _activeCone) * Mathf.Deg2Rad;
         float a1 = (_yawOffset + _activeCone) * Mathf.Deg2Rad;
-        float from = _sweepSign >= 0f ? a0 : a1;
-        float to = Mathf.Lerp(from, _sweepSign >= 0f ? a1 : a0, Mathf.Clamp01(sweep));
+        float u = Mathf.Clamp01(sweep);
+        // Всегда aStart ≤ aEnd, иначе вывернутая намотка — жёлтая зона пропадает на CCW.
+        float from = _sweepSign >= 0f ? a0 : Mathf.Lerp(a1, a0, u);
+        float to = _sweepSign >= 0f ? Mathf.Lerp(a0, a1, u) : a1;
 
         var verts = new Vector3[(segments + 1) * 2];
         var tris = new int[segments * 6];
