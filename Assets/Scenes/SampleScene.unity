@@ -647,7 +647,6 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   animator: {fileID: 0}
   stanceDuration: 5
-  poseHold: 0.5
 --- !u!114 &824045062
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -754,6 +753,9 @@ MonoBehaviour:
   squad: {fileID: 0}
   aggroRadius: 16
   loseRadius: 24
+  meleeEngage: 4.6
+  captainSight: 32
+  captainViewHalf: 80
   drawVisionGizmo: 1
   drawVisionAlways: 0
   waypoints: []
@@ -812,6 +814,7 @@ MonoBehaviour:
   heavyChargeThreshold: 0.55
   sheathVisualDelay: 1
   combatLingerSeconds: 15
+  sheathAfterPeaceSeconds: 0
   combatFaceRange: 10
   parryWindow: 0.25
   parryCooldown: 0.25
@@ -822,19 +825,9 @@ MonoBehaviour:
   lungeInputDot: 0.5
   movementDamageCoefficient: 0.02
   spacingIdealFraction: 0.72
-  spacingThrustFraction: 0.95
   spacingDeadzone: 0.28
-  spacingMaxStep: 1.15
-  spacingHeavyStep: 1.73
-  spacingApproachRange: 6.2
-  spacingApproachMaxSteps: 4
-  spacingSideBlend: 0.55
-  spacingSideStep: 0.65
-  spacingOrbitStep: 1.35
-  spacingDuration: 0.18
-  targetMagnetRange: 3
-  targetMagnetSpeed: 5.5
-  targetMagnetOrbit: 3.2
+  attackDashReach: 3.5
+  attackDashStandoff: 0.55
   infightHoldFraction: 0.92
   infightElbowWindup: 0.55
   infightPommelWindup: 0.48
@@ -858,9 +851,7 @@ MonoBehaviour:
   sweepHitAt: 0.6
   stanceEnterWindup: 0.22
   chainWindupMult: 0.62
-  autoHeavyReachPad: 0.35
   slashFaceOutward: 25
-  safeHoldPad: 1.35
   EnemyLayers:
     serializedVersion: 2
     m_Bits: 0
@@ -1180,6 +1171,7 @@ MonoBehaviour:
   cueLifetime: 8
   hearUncertainty: 7
   sightUncertainty: 1.2
+  noticeSoundCap: 0.7
   drawGizmos: 1
   gizmoSegments: 48
   gizmoY: 0.12
@@ -2075,6 +2067,7 @@ MonoBehaviour:
   cueLifetime: 8
   hearUncertainty: 7
   sightUncertainty: 1.2
+  noticeSoundCap: 0.7
   drawGizmos: 1
   gizmoSegments: 48
   gizmoY: 0.12
@@ -2776,7 +2769,6 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   heightSource: {fileID: 1950520784}
   chunkedBuilder: {fileID: 1950520777}
-  seamlessBuilder: {fileID: 1950520776}
   fogPrefab: {fileID: 418428478413586072, guid: 04ff3010d7b80b9448f16a1a4e74ed5c,
     type: 3}
   parent: {fileID: 0}
@@ -3086,23 +3078,18 @@ MonoBehaviour:
   liveRadius: 15
   liveExitExtra: 10
   useVisionFade: 1
-  fadeZoneRadius: 1.8
-  fadeCursorRadius: 1
-  fadeCorridorHalf: 1.5
   fadeEdgeMeters: 2.2
   fadeKeepHeight: 2.3
+  fadeKeepRadius: 1.8
+  fadeKeepFalloff: 1
   fadePale: 0.45
-  occlusionRayRadius: 0
-  fadeCornerCount: 8
-  fadeSeconds: 0.18
-  fadeReturnDelay: 2
+  fadeRestoreDelay: 0.4
+  fadeRestoreTime: 0.7
   fadeMaterial: {fileID: 2100000, guid: fc357d90650695b47a3717717d8a08bc, type: 2}
   liveCheckEveryNFrames: 4
   liveRoot: {fileID: 0}
   streamCheckEveryNFrames: 8
   fadeCheckEveryNFrames: 5
-  drawFadeGizmos: 1
-  fadeGizmoColor: {r: 1, g: 0.15, b: 0.1, a: 1}
   drawTreeLetters: 1
   treeLetterColor: {r: 0.2, g: 0.85, b: 0.25, a: 1}
   treeLetterFadedColor: {r: 1, g: 0.82, b: 0.12, a: 1}
@@ -3113,7 +3100,7 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1950520764}
-  m_Enabled: 1
+  m_Enabled: 0
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 6ab0c2576d64e0948bd20bc861d0ce46, type: 3}
   m_Name: 
@@ -3140,6 +3127,8 @@ MonoBehaviour:
   screenPad: 1.05
   player: {fileID: 0}
   drawRadius: 28
+  matchTreeRadius: 1
+  natureRenderer: {fileID: 0}
   pushRadius: 1.8
   pushStrength: 1.15
   recoverSeconds: 1.35
@@ -3166,6 +3155,7 @@ GameObject:
   m_Component:
   - component: {fileID: 1984545283}
   - component: {fileID: 1984545282}
+  - component: {fileID: 1984545284}
   m_Layer: 0
   m_Name: Pack Manager
   m_TagString: Untagged
@@ -3192,6 +3182,10 @@ MonoBehaviour:
   spawnCount: 12
   spawnRadius: 25
   spawnCenter: {fileID: 1224455447}
+  heraldTransform: {fileID: 0}
+  squadMergeMeters: 8
+  alphaBurnDistance: 25
+  alphaBurnSeconds: 10
   autoHowlOnStart: 0
   howlDelay: 2
   alphaTransform: {fileID: 1224455447}
@@ -3233,6 +3227,29 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &1984545284
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1984545281}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 39003a44accdea74e990f21d00ceaf99, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  packRank: 0
+  clips:
+  - {fileID: 8300000, guid: 1611ef5672f4bb341bb16b89dcca1cf9, type: 3}
+  - {fileID: 8300000, guid: f3ea7d498235b714ca0205672746c086, type: 3}
+  - {fileID: 8300000, guid: d9e58ca75644b304ea6d1884e7060beb, type: 3}
+  - {fileID: 8300000, guid: 9c7a3fc716d0746469d6785e10cce0a4, type: 3}
+  howlRange: 900
+  answerDelay: 0.35
+  howlCooldown: 8
+  beaterEveryMeters: 100
+  heraldClearMeters: 70
 --- !u!4 &2057484379 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: -8679921383154817045, guid: 0be3360d1aa2ca04880b03e0d21c146d,

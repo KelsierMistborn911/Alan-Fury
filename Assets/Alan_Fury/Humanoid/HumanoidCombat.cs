@@ -28,6 +28,8 @@ public class HumanoidCombat : MonoBehaviour
     [Header("Управление боем")]
     public float sheathVisualDelay = 1f;
     public float combatLingerSeconds = 15f;
+    [Tooltip("Секунд после сброса боя до авто-ножен. 0 = не убирать. Игрок = 60.")]
+    public float sheathAfterPeaceSeconds = 0f;
     public float combatFaceRange = 10f;
 
     [Header("Парирование")]
@@ -44,26 +46,13 @@ public class HumanoidCombat : MonoBehaviour
     [Range(0f, 1f)] public float lungeInputDot = 0.5f;
     public float movementDamageCoefficient = 0.02f;
 
-    [Header("Подшаг к дистанции удара")]
+    [Header("Сближение к удару")]
     [Range(0.4f, 1f)] public float spacingIdealFraction = 1f;
-    [Range(0.5f, 1.2f)] public float spacingThrustFraction = 0.95f;
     public float spacingDeadzone = 0.28f;
-    public float spacingMaxStep = 1.73f;
-    public float spacingHeavyStep = 1.73f;
-    [Tooltip("С какой нехватки дистанции уже начинать боевые шаги к удару.")]
-    public float spacingApproachRange = 6.2f;
-    [Tooltip("Сколько боевых шагов максимум добить до дистанции удара.")]
-    public int spacingApproachMaxSteps = 1;
-    [Range(0f, 1.2f)] public float spacingSideBlend = 1.05f;
-    [Tooltip("Боковой вынос на SlashLeft/Right и локоть, поверх шага к цели.")]
-    public float spacingSideStep = 0.65f;
-    [Tooltip("Дуга обхода вокруг врага на слэше с отходом.")]
-    public float spacingOrbitStep = 1.35f;
-    public float spacingDuration = 0.18f;
-    public float targetMagnetRange = 7.2f;
-    public float targetMagnetSpeed = 6.5f;
-    [Tooltip("Касательная на кольце, когда слэш/обход.")]
-    public float targetMagnetOrbit = 3.2f;
+    [Tooltip("С какой дистанции за кольцом стартует рывок. Он же потолок пролёта.")]
+    public float attackDashReach = 10f;
+    [Tooltip("Остановка снаружи кольца.")]
+    public float attackDashStandoff = 0.55f;
 
     [Header("Клинч")]
     [Tooltip("Держать это расстояние, пока нет умышленного входа.")]
@@ -102,13 +91,8 @@ public class HumanoidCombat : MonoBehaviour
     public float stanceEnterWindup = 0.22f;
     [Tooltip("Множитель замаха, когда бьём из High/Low: клинок уже сбоку.")]
     [Range(0.35f, 1f)] public float chainWindupMult = 0.62f;
-    [Tooltip("Запас к Reach: внутри — удержание само пускает серию заряженных.")]
-    public float autoHeavyReachPad = 0.35f;
     [Tooltip("Старт слэша: корпус чуть наружу от линии на врага.")]
     public float slashFaceOutward = 25f;
-    [Tooltip("Дистанция после Alt-отхода. С неё надо снова подшагивать к удару.")]
-    public float safeHoldPad = 1.35f;
-
     public bool IsWindingUp { get; protected set; }
     public bool IsAttacking { get; protected set; }
     public bool IsBlocking { get; protected set; }
@@ -132,7 +116,7 @@ public class HumanoidCombat : MonoBehaviour
     public Transform AutoTarget { get; set; }
     /// <summary>Мировое горизонтальное направление прицела, если цели нет.</summary>
     public Vector3 AimDirection { get; set; }
-    /// <summary>Драйвер держит ЛКМ. Серия заряженных, пока цель в Reach.</summary>
+    /// <summary>Драйвер держит ЛКМ. Сам по себе удар не пускает — только зарядка до отпускания.</summary>
     public bool AttackHeld { get; set; }
     public LayerMask EnemyLayers;
     public Vector3 AttackFaceDir
@@ -185,11 +169,9 @@ public class HumanoidCombat : MonoBehaviour
     protected bool isHoldingAttack;
     protected int _combo;
     protected float _comboExpire;
-    protected int _approachLeft;
     protected bool _approachFromBlock;
     protected AttackForm? _approachForm;
     protected float? _approachWindupOverride;
-    protected float _approachDeadline;
     protected HumanoidLocomotion movement;
 
     protected bool _dodgeAttackPerfectFlag;
@@ -226,6 +208,7 @@ public class HumanoidCombat : MonoBehaviour
     protected AttackMoveMode _attackMoveMode;
 
     protected float _combatLingerUntil;
+    protected float _sheathAfterPeaceAt;
     protected float _nextShieldRamTime;
     protected float _noRadialPushUntil;
     protected float _shockUntil;
@@ -285,19 +268,6 @@ public class HumanoidCombat : MonoBehaviour
         if (Mathf.Abs(spacingIdealFraction - 0.72f) < 0.02f
             || Mathf.Abs(spacingIdealFraction - 0.96f) < 0.02f)
             spacingIdealFraction = 1f;
-        if (Mathf.Abs(targetMagnetRange - 3f) < 0.02f
-            || Mathf.Abs(targetMagnetRange - 4.2f) < 0.02f)
-            targetMagnetRange = 7.2f;
-        if (Mathf.Abs(targetMagnetSpeed - 5.5f) < 0.02f)
-            targetMagnetSpeed = 6.5f;
-        if (Mathf.Abs(spacingMaxStep - 0.86f) < 0.02f
-            || Mathf.Abs(spacingMaxStep - 1.15f) < 0.02f
-            || Mathf.Abs(spacingMaxStep - 3.45f) < 0.02f)
-            spacingMaxStep = 1.73f;
-        if (spacingHeavyStep <= 0.01f || Mathf.Abs(spacingHeavyStep - 3.45f) < 0.02f)
-            spacingHeavyStep = 1.73f;
-        if (Mathf.Abs(spacingSideBlend - 0.55f) < 0.02f)
-            spacingSideBlend = 1.05f;
     }
 
     void OnDestroy()
@@ -396,8 +366,6 @@ public class HumanoidCombat : MonoBehaviour
 
         if (IsParrying && Time.time >= _parryEndTime) IsParrying = false;
 
-        if (UsesAttackApproach)
-            TickTargetMagnet();
         TickShieldRam();
 
         if (IsApproaching)
@@ -420,7 +388,6 @@ public class HumanoidCombat : MonoBehaviour
                 else
                 {
                     EndAttack();
-                    TryFollowHeldAttack();
                 }
             }
             return;
@@ -442,12 +409,6 @@ public class HumanoidCombat : MonoBehaviour
 
             if (ChargePercent >= heavyChargeThreshold)
                 DropChargeToLow();
-
-            if (AttackHeld && ChargePercent >= heavyChargeThreshold && InAutoHeavyRange())
-            {
-                ReleaseAttack();
-                return;
-            }
 
             if (currentWeapon != null && currentWeapon.maxHoldTime > 0
                 && Time.time - chargeStartTime >= currentWeapon.maxHoldTime)
@@ -663,16 +624,10 @@ public class HumanoidCombat : MonoBehaviour
         return 0f;
     }
 
-    protected virtual bool AllowTargetMagnet() => true;
-
-    protected virtual bool HasManualMoveInput()
+    void BeginWindupThenAttack(bool fromBlock, AttackForm? forcedForm = null, float? windupOverride = null, bool allowApproach = true)
     {
-        return movement != null && movement.DesiredMoveDir.sqrMagnitude > 0.02f;
-    }
-
-    void BeginWindupThenAttack(bool fromBlock, AttackForm? forcedForm = null, float? windupOverride = null)
-    {
-        if (UsesAttackApproach && !fromBlock && !IsApproaching && CanAltMagnet())
+        if (allowApproach && UsesAttackApproach && !fromBlock && !IsApproaching && CanAltMagnet()
+            && !WantsRetreatStrike())
         {
             StartAttackApproach(fromBlock, forcedForm, windupOverride);
             return;
@@ -1068,13 +1023,8 @@ public class HumanoidCombat : MonoBehaviour
                 damage += movement.CurrentSpeed * (resources != null ? resources.mass : 80f) * movementDamageCoefficient * (_pendingStepBoost ? 1.5f : 1f);
 
             ApplyAttackMoveMode();
-            bool stepped = false;
-            if (!UsesAttackApproach)
-            {
-                stepped = ApplyFootworkStep(form);
-                if (_isHeavyAttack && !fromBlock && !stepped)
-                    TryLunge();
-            }
+            if (!UsesAttackApproach && _isHeavyAttack && !fromBlock)
+                TryLunge();
 
             BodyZone zone = _pendingZone;
             if (!_isHeavyAttack)
@@ -1272,91 +1222,19 @@ public class HumanoidCombat : MonoBehaviour
         return side >= 0f ? AttackForm.SlashRight : AttackForm.SlashLeft;
     }
 
-    void TickTargetMagnet()
-    {
-        return;
-        if (!IsArmed || ForcePeace) return;
-        if (targetMagnetRange <= 0f || targetMagnetSpeed <= 0f) return;
-        if (movement.IsDodging || movement.IsWeaponStuck) return;
-        if (!AllowTargetMagnet()) return;
-
-        Transform focus = MagnetFocus();
-        if (focus == null) return;
-
-        Vector3 to = focus.position - transform.position;
-        to.y = 0f;
-        float dist = to.magnitude;
-        if (dist < 0.05f || dist > targetMagnetRange) return;
-
-        Vector3 radial = to / dist;
-        Vector3 input = movement.DesiredMoveDir;
-        bool hasInput = input.sqrMagnitude > 0.04f;
-        if (hasInput && Vector3.Dot(input.normalized, radial) < -0.25f)
-            return;
-
-        bool pressIn = PressingToward(focus);
-        bool cling = WerewolfCombat.FindClingingTo(transform) != null;
-        float ideal = CurrentIdealDistance();
-        float desired = (cling || pressIn)
-            ? CombatRangeTable.Default.Outer(CombatRange.Clinch) * infightHoldFraction
-            : ideal;
-        float error = dist - desired;
-        float dead = spacingDeadzone;
-
-        Vector3 assist = Vector3.zero;
-        bool mayClose = pressIn || cling || IsCharging || IsInAttackPipeline
-            || Time.time <= _comboExpire;
-        if (error > dead && mayClose)
-        {
-            float span = Mathf.Max(0.35f, targetMagnetRange - desired);
-            float t = Mathf.Clamp01(error / span);
-            assist += radial * (targetMagnetSpeed * (0.45f + 0.55f * t));
-        }
-        else if (error < -dead && !cling && !pressIn)
-        {
-            float span = Mathf.Max(0.35f, desired);
-            float t = Mathf.Clamp01((-error) / span);
-            float push = targetMagnetSpeed * (0.55f + 0.45f * t);
-            if (IsAttacking) push *= 0.7f;
-            assist += -radial * push;
-        }
-
-        if (IsApproaching || movement.IsStepping) return;
-        if (Mathf.Abs(error) <= dead * 1.4f) return;
-
-        if (assist.sqrMagnitude > 0.0001f)
-        {
-            float travel = Mathf.Min(Mathf.Abs(error), FootworkCap());
-            movement.TryCombatStep(assist, travel);
-        }
-    }
-
     Transform MagnetFocus()
     {
         if (IsUsableTarget(CommandTarget))
         {
             Vector3 to = CommandTarget.position - transform.position;
             to.y = 0f;
-            if (to.sqrMagnitude <= targetMagnetRange * targetMagnetRange)
+            float reach = AltMagnetReach();
+            if (to.sqrMagnitude <= reach * reach)
                 return CommandTarget;
         }
         if (IsInAttackPipeline || IsCharging || IsBlocking || Time.time <= _comboExpire)
             return ResolveAttackFocus();
         return IsUsableTarget(AutoTarget) ? AutoTarget : null;
-    }
-
-    float MagnetOrbitSign()
-    {
-        if (targetMagnetOrbit <= 0.01f) return 0f;
-        AttackForm form = IsAttacking || IsWindingUp ? _lastForm : AttackForm.Thrust;
-        if (IsLateralForm(form) || form == AttackForm.Shoulder)
-            return (form == AttackForm.SlashLeft || form == AttackForm.Elbow) ? -1f : 1f;
-        if (_pendingIntent == HitIntent.Bypass && _stepCount > 0)
-        {
-            StepSample last = _stepCount >= 2 ? _step1 : _step0;
-            return Vector3.Dot(last.dir, transform.right) >= 0f ? 1f : -1f;
-        }
-        return 0f;
     }
 
     void TickShieldRam()
@@ -1435,128 +1313,16 @@ public class HumanoidCombat : MonoBehaviour
         return FindNearestInRadius(face);
     }
 
-    bool ApplyFootworkStep(AttackForm form)
-    {
-        return false;
-
-        Transform focus = ResolveAttackFocus();
-        float dur = spacingDuration > 0.05f ? spacingDuration : 0.18f;
-        float cap = FootworkCap();
-        float approachCap = Mathf.Max(cap * 2f, spacingApproachRange);
-
-        if (focus == null)
-        {
-            if (HasManualMoveInput() && !IsLateralForm(form) && !_isHeavyAttack)
-                return false;
-            Vector3 aim = GetAttackDirection();
-            if (aim.sqrMagnitude < 0.01f) return false;
-            Vector3 lone = FootworkDir(form, aim) * cap;
-            if (lone.sqrMagnitude < 0.0001f) return false;
-            return movement.TryCombatStep(lone, Mathf.Min(lone.magnitude, approachCap));
-        }
-
-        AutoTarget = focus;
-        Vector3 to = focus.position - transform.position;
-        to.y = 0f;
-        float dist = to.magnitude;
-        if (dist < 0.05f) return false;
-
-        Vector3 radial = to / dist;
-        bool closeIn = WantsCloseIn(focus);
-        if (PressingAway(focus) && !closeIn)
-            return false;
-
-        float reach = currentWeapon != null
-            ? currentWeapon.ScaledRange
-            : 2f * WeaponData.RangeScale;
-        float ideal = reach * (form == AttackForm.Pommel
-            ? spacingThrustFraction
-            : spacingIdealFraction);
-        float desired = closeIn
-            ? CombatRangeTable.Default.Outer(CombatRange.Clinch) * infightHoldFraction
-            : ideal;
-        float error = dist - desired;
-        Vector3 move;
-        float travel;
-        bool rush = false;
-
-        if (!closeIn && error <= spacingDeadzone * 1.6f)
-        {
-            Vector3 tangent = LateralDir(form, radial);
-            if (tangent.sqrMagnitude < 0.0001f)
-                tangent = Vector3.Cross(Vector3.up, radial).normalized;
-            float arc = Mathf.Max(spacingOrbitStep, combatWalkStep() * 0.9f);
-            if (form == AttackForm.Thrust || form == AttackForm.Pommel)
-                arc *= 0.7f;
-            move = tangent * arc;
-            if (error < -spacingDeadzone)
-                move += -radial * Mathf.Min(-error, cap);
-            travel = move.magnitude;
-        }
-        else
-            return false;
-
-        if (HasManualMoveInput() && !closeIn)
-        {
-            Vector3 input = movement.DesiredMoveDir;
-            if (input.sqrMagnitude > 0.04f && Vector3.Dot(input.normalized, move.normalized) < -0.25f)
-                return false;
-        }
-
-        return movement.TryCombatStep(move, travel, rush);
-    }
-
-    float combatWalkStep()
-    {
-        return movement != null ? Mathf.Max(0.8f, movement.CombatStepLength) : 2.15f;
-    }
-
-    float ApproachGap()
-    {
-        Transform focus = ResolveAttackFocus();
-        if (focus == null) focus = MagnetFocus();
-        if (focus == null) focus = FindNearestInRadius(Mathf.Max(combatFaceRange, targetMagnetRange));
-        if (focus == null) return 0f;
-        Vector3 to = focus.position - transform.position;
-        to.y = 0f;
-        float dist = to.magnitude;
-        float reach = currentWeapon != null
-            ? currentWeapon.ScaledRange
-            : 2f * WeaponData.RangeScale;
-        float ideal = reach * spacingIdealFraction;
-        return Mathf.Max(0f, dist - ideal - spacingDeadzone);
-    }
-
-    float ApproachWindupExtra()
-    {
-        float gap = ApproachGap();
-        float stepLen = Mathf.Max(1.1f, spacingMaxStep);
-        _approachLeft = gap <= 0.01f ? 0 : 1;
-        int extra = Mathf.Max(0, _approachLeft - 1);
-        return extra * 0.22f;
-    }
-
-    bool StillNeedsApproach()
-    {
-        if (ApproachGap() <= spacingDeadzone * 0.5f) return false;
-        Transform focus = ResolveAttackFocus();
-        if (focus == null) focus = MagnetFocus();
-        if (focus != null && PressingAway(focus)) return false;
-        return true;
-    }
-
     void StartAttackApproach(bool fromBlock, AttackForm? forcedForm, float? windupOverride)
     {
         IsApproaching = true;
         _approachFromBlock = fromBlock;
         _approachForm = forcedForm ?? PreviewInfightForm(forcedForm);
         _approachWindupOverride = windupOverride;
-        _approachLeft = 1;
-        _approachDeadline = Time.time + 0.4f;
         if (!MagnetToIdeal())
         {
             IsApproaching = false;
-            BeginWindupThenAttack(fromBlock, forcedForm, windupOverride);
+            BeginWindupThenAttack(fromBlock, forcedForm, windupOverride, allowApproach: false);
         }
     }
 
@@ -1569,19 +1335,14 @@ public class HumanoidCombat : MonoBehaviour
         }
 
         Transform focus = AltMagnetFocus();
-        if (focus != null && PressingAway(focus))
+        bool retreatNow = focus != null && WantsRetreatStrike(focus);
+        if (focus != null && PressingAway(focus) && !retreatNow)
         {
             CancelApproach();
             return;
         }
 
-        if (HasManualMoveInput())
-        {
-            CancelApproach();
-            return;
-        }
-
-        if (movement != null && movement.IsAltDashing)
+        if (!retreatNow && movement != null && (movement.IsAltDashing || movement.IsCombatStepLocked))
             return;
 
         AttackForm? form = _approachForm;
@@ -1589,13 +1350,12 @@ public class HumanoidCombat : MonoBehaviour
         float? windup = _approachWindupOverride;
         IsApproaching = false;
         _approachForm = null;
-        BeginWindupThenAttack(fromBlock, form, windup);
+        BeginWindupThenAttack(fromBlock, form, windup, allowApproach: false);
     }
 
     void CancelApproach()
     {
         IsApproaching = false;
-        _approachLeft = 0;
         _approachForm = null;
         _approachWindupOverride = null;
     }
@@ -1605,56 +1365,6 @@ public class HumanoidCombat : MonoBehaviour
         return form == AttackForm.SlashLeft
             || form == AttackForm.SlashRight
             || form == AttackForm.Elbow;
-    }
-
-    static Vector3 LateralDir(AttackForm form, Vector3 forward)
-    {
-        float sign = 0f;
-        if (form == AttackForm.SlashLeft || form == AttackForm.Elbow) sign = -1f;
-        else if (form == AttackForm.SlashRight) sign = 1f;
-        if (sign == 0f) return Vector3.zero;
-        forward.y = 0f;
-        if (forward.sqrMagnitude < 0.0001f) return Vector3.zero;
-        Vector3 right = Vector3.Cross(Vector3.up, forward.normalized);
-        if (right.sqrMagnitude < 0.0001f) return Vector3.zero;
-        return right.normalized * sign;
-    }
-
-    float FootworkCap()
-    {
-        return _isHeavyAttack ? spacingHeavyStep : spacingMaxStep;
-    }
-
-    Vector3 FootworkDir(AttackForm form, Vector3 forward)
-    {
-        forward.y = 0f;
-        if (forward.sqrMagnitude < 0.0001f) return transform.forward;
-        forward.Normalize();
-
-        float side = 0f;
-        switch (form)
-        {
-            case AttackForm.SlashLeft:
-            case AttackForm.Elbow:
-                side = -1f;
-                break;
-            case AttackForm.SlashRight:
-                side = 1f;
-                break;
-            case AttackForm.Shoulder:
-                side = 0.25f;
-                break;
-            default:
-                return forward;
-        }
-
-        Vector3 right = Vector3.Cross(Vector3.up, forward);
-        if (right.sqrMagnitude < 0.0001f) return forward;
-        right.Normalize();
-        float blend = Mathf.Clamp(spacingSideBlend, 0f, 1.2f);
-        Vector3 dir = forward + right * (side * blend);
-        dir.y = 0f;
-        return dir.sqrMagnitude > 0.0001f ? dir.normalized : forward;
     }
 
     float CurrentIdealDistance()
@@ -1679,7 +1389,7 @@ public class HumanoidCombat : MonoBehaviour
 
     float AltMagnetReach()
     {
-        return CurrentIdealDistance() + 2f;
+        return CurrentIdealDistance() + Mathf.Max(0.5f, attackDashReach);
     }
 
     Transform AltMagnetFocus()
@@ -1699,7 +1409,7 @@ public class HumanoidCombat : MonoBehaviour
         float dist = to.magnitude;
         float ideal = CurrentIdealDistance();
         if (dist > AltMagnetReach()) return false;
-        return dist > ideal + spacingDeadzone;
+        return dist > ideal + AttackDashStop();
     }
 
     public bool MagnetToIdeal()
@@ -1718,14 +1428,23 @@ public class HumanoidCombat : MonoBehaviour
 
         float ideal = CurrentIdealDistance();
         float error = dist - ideal;
-        if (Mathf.Abs(error) <= spacingDeadzone) return false;
+        float stop = AttackDashStop();
+        if (error > 0f && error <= stop) return false;
+        if (error < 0f && Mathf.Abs(error) <= spacingDeadzone) return false;
 
         Vector3 dir = error > 0f ? to / dist : -(to / dist);
-        float travel = Mathf.Abs(error);
-        if (error > 0f)
-            travel = Mathf.Max(0.2f, error - 0.35f);
-        travel = Mathf.Min(travel, 2f);
+        float travel = error > 0f ? error - stop : Mathf.Abs(error);
+        float cap = Mathf.Max(0.5f, attackDashReach);
+        if (travel < 0.12f) return false;
+        travel = Mathf.Min(travel, cap);
+        if (IsInCombat)
+            return movement.TryCombatStep(dir, travel);
         return movement.TryAltDash(dir, travel);
+    }
+
+    float AttackDashStop()
+    {
+        return Mathf.Max(spacingDeadzone, attackDashStandoff);
     }
 
     bool PressingToward(Transform focus)
@@ -1748,6 +1467,29 @@ public class HumanoidCombat : MonoBehaviour
         to.y = 0f;
         if (to.sqrMagnitude < 0.01f) return false;
         return Vector3.Dot(input.normalized, to.normalized) < -0.25f;
+    }
+
+    bool IsParterre(Transform focus)
+    {
+        if (focus == null) return false;
+        Vector3 to = focus.position - transform.position;
+        to.y = 0f;
+        return CombatRangeTable.Default.Band(to.magnitude) <= CombatRange.Clinch;
+    }
+
+    bool WantsRetreatStrike()
+    {
+        return WantsRetreatStrike(AltMagnetFocus());
+    }
+
+    bool WantsRetreatStrike(Transform focus)
+    {
+        if (focus == null || !PressingAway(focus) || IsParterre(focus)) return false;
+        float dist = Vector3.ProjectOnPlane(focus.position - transform.position, Vector3.up).magnitude;
+        float reach = currentWeapon != null
+            ? currentWeapon.Reach()
+            : CombatRangeTable.Default.Outer(CombatRange.Mid);
+        return dist <= reach + 0.35f;
     }
 
     bool WantsCloseIn(Transform focus)
@@ -1878,7 +1620,6 @@ public class HumanoidCombat : MonoBehaviour
         ResetTrig("ShieldBash");
         ResetTrig("ShieldBashBlock");
         AutoTarget = null;
-        _approachLeft = 0;
         IsApproaching = false;
         _canStickThisAttack = false;
         if (hitbox != null && hitbox.visual != null) hitbox.visual.HideWindup();
@@ -1901,18 +1642,6 @@ public class HumanoidCombat : MonoBehaviour
         if (CurrentStance == CombatStance.Neutral)
             stance.Enter(CombatStance.Mid);
         stance.Enter(CombatStance.Low);
-    }
-
-    bool InAutoHeavyRange()
-    {
-        Transform focus = ResolveAttackFocus();
-        if (focus == null) return false;
-        Vector3 to = focus.position - transform.position;
-        to.y = 0f;
-        float reach = currentWeapon != null
-            ? currentWeapon.Reach()
-            : 2f * WeaponData.RangeScale;
-        return to.magnitude <= reach + Mathf.Max(0f, autoHeavyReachPad);
     }
 
     float PlaceSectorYaw(AttackForm form, HitZoneShape shape, float cone, float fallback)
@@ -1954,36 +1683,9 @@ public class HumanoidCombat : MonoBehaviour
         return yaw;
     }
 
-    void TryFollowHeldAttack()
-    {
-        if (!AttackHeld || IsInShock) return;
-        if (!IsArmed || ForcePeace) return;
-        currentWeapon = loadout != null ? loadout.GetMainWeapon() : currentWeapon;
-        if (currentWeapon == null || currentWeapon.isRanged) return;
-        if (resources != null && !resources.HasStamina(currentWeapon.staminaCost * 0.5f))
-            return;
+    protected virtual bool ChaseStillOn => false;
 
-        if (!InAutoHeavyRange())
-        {
-            StartHoldAttack();
-            if (currentWeapon.chargeDuration > 0.01f)
-                chargeStartTime = Time.time - currentWeapon.chargeDuration * heavyChargeThreshold;
-            ChargePercent = heavyChargeThreshold;
-            DropChargeToLow();
-            return;
-        }
-
-        float cost = Mathf.Lerp(currentWeapon.staminaCost * 0.5f, currentWeapon.staminaCost, 1f);
-        if (resources != null) resources.SpendStamina(cost);
-        ChargePercent = 1f;
-        _isHeavyAttack = true;
-        _fromLowStance = true;
-        DropChargeToLow();
-        SampleAttackMoveMode();
-        BeginWindupThenAttack(fromBlock: false);
-    }
-
-    void TickCombatState()
+    protected virtual void TickCombatState()
     {
         if (ForcePeace)
         {
@@ -1992,11 +1694,34 @@ public class HumanoidCombat : MonoBehaviour
             return;
         }
 
-        bool active = IsArmed && (NearTarget != null || IsInAttackPipeline || IsBlocking);
-        if (active)
+        bool contact = IsArmed && (NearTarget != null || IsInAttackPipeline || IsBlocking);
+        if (contact)
             _combatLingerUntil = Time.time + combatLingerSeconds;
 
+        bool chase = contact || ChaseStillOn;
+        if (chase)
+        {
+            IsInCombat = IsArmed;
+            _sheathAfterPeaceAt = 0f;
+            return;
+        }
+
         IsInCombat = IsArmed && Time.time < _combatLingerUntil;
+        TickAutoSheath();
+    }
+
+    protected void TickAutoSheath()
+    {
+        if (sheathAfterPeaceSeconds <= 0f) return;
+        if (!IsArmed) { _sheathAfterPeaceAt = 0f; return; }
+        if (IsInCombat) { _sheathAfterPeaceAt = 0f; return; }
+        if (_sheathAfterPeaceAt <= 0f)
+            _sheathAfterPeaceAt = Time.time + sheathAfterPeaceSeconds;
+        if (Time.time >= _sheathAfterPeaceAt)
+        {
+            _sheathAfterPeaceAt = 0f;
+            SheathAll();
+        }
     }
 
     public void EnterForcePeace()

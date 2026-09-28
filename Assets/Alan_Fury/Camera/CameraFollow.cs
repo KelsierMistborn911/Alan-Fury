@@ -1,4 +1,4 @@
-﻿using UnityEngine;
+using UnityEngine;
 
 public class CameraFollow : MonoBehaviour
 {
@@ -262,9 +262,9 @@ public class CameraFollow : MonoBehaviour
 
         film = new Vector3[4];
         film[0] = o + r * -hw + u * -hh;
-        film[1] = o + r * hw + u * -hh;
-        film[2] = o + r * hw + u * hh;
-        film[3] = o + r * -hw + u * hh;
+        film[1] = o + r *  hw + u * -hh;
+        film[2] = o + r *  hw + u *  hh;
+        film[3] = o + r * -hw + u *  hh;
 
         ground = new Vector3[4];
         for (int i = 0; i < 4; i++)

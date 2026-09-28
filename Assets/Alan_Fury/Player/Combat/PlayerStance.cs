@@ -1,11 +1,10 @@
-﻿using UnityEngine;
+using UnityEngine;
 
 public enum CombatStance { Neutral, High, Low, Mid }
 
 /// <summary>
 /// Neutral — мир. Mid — боевой покой. High — после лёгкого. Low — задняя, после заряда.
 /// High/Low через stanceDuration сгорают в Mid. Mid в бою не сбрасывается.
-/// После удара poseHold держит конечный кадр, потом пишет Stance 1/2.
 /// Animator: int Stance 0 Neutral / 1 High / 2 Low / 3 Mid;
 /// triggers EnterNeutral, EnterHigh, EnterLow, EnterMid.
 /// </summary>
@@ -16,14 +15,10 @@ public class PlayerStance : MonoBehaviour
     public Animator animator;
     [Tooltip("Сколько держать High / заднюю Low, прежде чем вернуть Mid.")]
     public float stanceDuration = 2f;
-    [Tooltip("Пауза на последнем кадре удара перед входом в High / Low.")]
-    public float poseHold = 0.5f;
 
     public CombatStance Current { get; private set; } = CombatStance.Neutral;
 
     private float _stanceTimer;
-    private float _poseHoldUntil;
-    private bool _poseHoldPending;
     private System.Collections.Generic.HashSet<string> _animParams;
 
     void Awake()
@@ -55,7 +50,6 @@ public class PlayerStance : MonoBehaviour
         return animator != null && _animParams != null && _animParams.Contains(name);
     }
 
-    /// <summary>High/Low сгорают в Mid, только если сейчас не бьём.</summary>
     public void Tick(bool isInCombat, bool isArmed, bool attackHold = false)
     {
         if (!isArmed || !isInCombat)
@@ -64,9 +58,6 @@ public class PlayerStance : MonoBehaviour
                 ResetToNeutral();
             return;
         }
-
-        if (_poseHoldPending && Time.time >= _poseHoldUntil)
-            ReleasePoseHold();
 
         if (attackHold) return;
         if (Current != CombatStance.High && Current != CombatStance.Low)
@@ -77,20 +68,12 @@ public class PlayerStance : MonoBehaviour
             Enter(CombatStance.Mid);
     }
 
-    /// <summary>Конец удара: полсекунды держим кадр, потом Stance + EnterHigh/EnterLow.</summary>
     public void PulseCurrent()
     {
-        if (Current != CombatStance.High && Current != CombatStance.Low)
-        {
-            WriteStance((int)Current);
-            FireTrig(Current);
-            return;
-        }
-
-        WriteStance(0);
-        _poseHoldPending = true;
-        _poseHoldUntil = Time.time + Mathf.Max(0f, poseHold);
-        _stanceTimer = stanceDuration;
+        WriteStance((int)Current);
+        FireTrig(Current);
+        if (Current == CombatStance.High || Current == CombatStance.Low)
+            _stanceTimer = stanceDuration;
     }
 
     public void Enter(CombatStance s)
@@ -104,23 +87,10 @@ public class PlayerStance : MonoBehaviour
 
         Current = s;
         _stanceTimer = (s == CombatStance.High || s == CombatStance.Low) ? stanceDuration : 0f;
-
-        if (s == CombatStance.High || s == CombatStance.Low)
-        {
-            WriteStance(0);
-            return;
-        }
-
-        _poseHoldPending = false;
         WriteStance((int)s);
-        FireTrig(s);
-    }
 
-    void ReleasePoseHold()
-    {
-        _poseHoldPending = false;
-        WriteStance((int)Current);
-        FireTrig(Current);
+        if (s != CombatStance.High && s != CombatStance.Low)
+            FireTrig(s);
     }
 
     void FireTrig(CombatStance s)
@@ -144,8 +114,6 @@ public class PlayerStance : MonoBehaviour
 
     public void ResetToNeutral()
     {
-        _poseHoldPending = false;
-        _poseHoldUntil = 0f;
         if (Current == CombatStance.Neutral)
         {
             _stanceTimer = 0f;

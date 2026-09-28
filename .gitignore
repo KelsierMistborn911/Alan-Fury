@@ -14,3 +14,7 @@
 *.user
 *.tmp
 .DS_Store
+
+# Asset Store grass package (keep local)
+/Assets/Dynamic Grass FX/
+/Assets/Dynamic Grass FX.meta

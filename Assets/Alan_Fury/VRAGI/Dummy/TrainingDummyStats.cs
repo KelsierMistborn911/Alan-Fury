@@ -1,26 +1,26 @@
 using UnityEngine;
 
 /// <summary>
-/// HP манекена. Игрок бьёт как обычного IDamageable.
-/// Удары самого манекена — preview: цифра есть, HP цели нет
-/// (см. WeaponHitbox.ApplyHit).
+/// HP РјР°РЅРµРєРµРЅР°. РРіСЂРѕРє Р±СЊС‘С‚ РєР°Рє РѕР±С‹С‡РЅРѕРіРѕ IDamageable.
+/// РЈРґР°СЂС‹ СЃР°РјРѕРіРѕ РјР°РЅРµРєРµРЅР° вЂ” preview: С†РёС„СЂР° РµСЃС‚СЊ, HP С†РµР»Рё РЅРµС‚
+/// (СЃРј. WeaponHitbox.ApplyHit).
 /// </summary>
 public class TrainingDummyStats : MonoBehaviour, IDamageable
 {
-    [Header("Здоровье")]
+    [Header("Р—РґРѕСЂРѕРІСЊРµ")]
     public float maxHealth = 999f;
     public float healthRegenPerSecond = 6f;
 
-    [Header("Масса / отброс")]
-    [Tooltip("Как PlayerResources.mass. Тяжелее — меньше отброс.")]
+    [Header("РњР°СЃСЃР° / РѕС‚Р±СЂРѕСЃ")]
+    [Tooltip("РљР°Рє PlayerResources.mass. РўСЏР¶РµР»РµРµ вЂ” РјРµРЅСЊС€Рµ РѕС‚Р±СЂРѕСЃ.")]
     public float mass = 90f;
 
-    [Header("Удары манекена")]
-    [Tooltip("Попадания манекена не режут HP, только цифра + лёгкий отброс.")]
+    [Header("РЈРґР°СЂС‹ РјР°РЅРµРєРµРЅР°")]
+    [Tooltip("РџРѕРїР°РґР°РЅРёСЏ РјР°РЅРµРєРµРЅР° РЅРµ СЂРµР¶СѓС‚ HP, С‚РѕР»СЊРєРѕ С†РёС„СЂР° + Р»С‘РіРєРёР№ РѕС‚Р±СЂРѕСЃ.")]
     public bool previewHits = true;
     [Range(0f, 1.5f)] public float previewKnockback = 0.55f;
 
-    [Header("Прерывание своего замаха")]
+    [Header("РџСЂРµСЂС‹РІР°РЅРёРµ СЃРІРѕРµРіРѕ Р·Р°РјР°С…Р°")]
     public float interruptMinDamage = 8f;
     public float interruptMinStagger = 3.5f;
 

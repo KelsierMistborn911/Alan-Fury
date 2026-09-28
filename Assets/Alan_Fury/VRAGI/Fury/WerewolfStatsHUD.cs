@@ -17,15 +17,15 @@ public class WerewolfStatsHUD : MonoBehaviour
     [Tooltip("Смещение HUD над волком (м).")]
     public Vector3 offset = new Vector3(0f, 2.4f, 0f);
     [Tooltip("Ширина полоски (м).")]
-    public float barWidth = 0.9f;
+    public float barWidth = 1.8f;
     [Tooltip("Высота полоски (м).")]
-    public float barHeight = 0.07f;
+    public float barHeight = 0.14f;
     [Tooltip("Зазор между полосками (м).")]
-    public float barSpacing = 0.03f;
+    public float barSpacing = 0.06f;
 
     [Header("Цифры")]
     [Tooltip("Размер цифр (characterSize у TextMesh).")]
-    public float textSize = 0.04f;
+    public float textSize = 0.08f;
 
     [Header("Цвета")]
     public Color healthColor = new Color(0.85f, 0.15f, 0.15f);

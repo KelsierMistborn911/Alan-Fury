@@ -477,6 +477,8 @@ MonoBehaviour:
   blockDamageMultiplier: 0.5
   blockArcAngle: 200
   mass: 80
+  interruptMinDamage: 8
+  interruptMinStagger: 3.5
 --- !u!114 &1000637426486226446
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -532,10 +534,17 @@ MonoBehaviour:
   spacingDeadzone: 0.28
   spacingMaxStep: 1.15
   spacingHeavyStep: 1.73
+  spacingApproachRange: 6.2
+  spacingApproachMaxSteps: 1
+  attackDashReach: 6
+  attackDashStandoff: 0.55
   spacingSideBlend: 0.55
+  spacingSideStep: 0.65
+  spacingOrbitStep: 1.35
   spacingDuration: 0.18
   targetMagnetRange: 3
   targetMagnetSpeed: 5.5
+  targetMagnetOrbit: 3.2
   infightHoldFraction: 0.92
   infightElbowWindup: 0.55
   infightPommelWindup: 0.48
@@ -555,9 +564,16 @@ MonoBehaviour:
   dodgeAttackMinWindup: 0.08
   dodgeAttackBufferAfter: 0.2
   dodgeAttackPerfectTolerance: 0.08
+  strikeLead: 0.08
+  sweepHitAt: 0.6
+  stanceEnterWindup: 0.22
+  chainWindupMult: 0.62
+  slashFaceOutward: 25
+  safeHoldPad: 1.35
   EnemyLayers:
     serializedVersion: 2
     m_Bits: 512
+  lockNamedForms: 0
   shockLight: 0.22
   shockHeavy: 0.26
   targeting: {fileID: 0}
@@ -622,10 +638,14 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   coneHalfAngle: 60
   showZoneMesh: 1
+  showStrikeMesh: 1
   debugZoneY: 0.05
   sweepBladePad: 8
+  strikeBladeLength: 0.45
   telegraphColor: {r: 1, g: 0.85, b: 0.15, a: 0.22}
   sweepColor: {r: 1, g: 0.12, b: 0.08, a: 0.42}
+  strikeColor: {r: 1, g: 0.92, b: 0.55, a: 0.92}
+  strikeWindupColor: {r: 1, g: 0.85, b: 0.2, a: 0.35}
   debugShowZone: 1
   visual: {fileID: 2635667669542674056}
 --- !u!120 &4663724128358875171
@@ -920,7 +940,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d5a57f767e5e46a458fc5d3c628d0cbb, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  GlobalObjectIdHash: 532751515
+  GlobalObjectIdHash: 1352778639
   InScenePlacedSourceGlobalObjectIdHash: 0
   AlwaysReplicateAsRoot: 0
   SynchronizeTransform: 1
@@ -1015,6 +1035,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   animator: {fileID: 7929764488447070920}
   stanceDuration: 5
+  poseHold: 0.5
 --- !u!114 &6681406382610746132
 MonoBehaviour:
   m_ObjectHideFlags: 0

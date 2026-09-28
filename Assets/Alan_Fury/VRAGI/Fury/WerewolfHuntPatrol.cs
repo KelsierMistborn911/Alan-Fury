@@ -1,43 +1,43 @@
 using UnityEngine;
 
 /// <summary>
-/// Охотничий патруль. Только точки маршрута + смотреть по сторонам + бросок на остановке.
-/// Не читает живую позицию игрока. След пишет в NpcPerception.ReportCue.
-/// Вешается на любого волка. Без Brain работает, если enabled.
+/// РћС…РѕС‚РЅРёС‡РёР№ РїР°С‚СЂСѓР»СЊ. РўРѕР»СЊРєРѕ С‚РѕС‡РєРё РјР°СЂС€СЂСѓС‚Р° + СЃРјРѕС‚СЂРµС‚СЊ РїРѕ СЃС‚РѕСЂРѕРЅР°Рј + Р±СЂРѕСЃРѕРє РЅР° РѕСЃС‚Р°РЅРѕРІРєРµ.
+/// РќРµ С‡РёС‚Р°РµС‚ Р¶РёРІСѓСЋ РїРѕР·РёС†РёСЋ РёРіСЂРѕРєР°. РЎР»РµРґ РїРёС€РµС‚ РІ NpcPerception.ReportCue.
+/// Р’РµС€Р°РµС‚СЃСЏ РЅР° Р»СЋР±РѕРіРѕ РІРѕР»РєР°. Р‘РµР· Brain СЂР°Р±РѕС‚Р°РµС‚, РµСЃР»Рё enabled.
 /// </summary>
 [RequireComponent(typeof(NpcPerception))]
 [RequireComponent(typeof(WerewolfLocomotion))]
 public class WerewolfHuntPatrol : MonoBehaviour
 {
-    [Header("Ссылки")]
+    [Header("РЎСЃС‹Р»РєРё")]
     public NpcPerception perception;
     public WerewolfLocomotion locomotion;
     public WerewolfWaypointRoute waypointRoute;
 
-    [Header("Ход")]
-    [Tooltip("Тихий шаг патруля (м/с). Ниже boundEnterSpeed.")]
+    [Header("РҐРѕРґ")]
+    [Tooltip("РўРёС…РёР№ С€Р°Рі РїР°С‚СЂСѓР»СЏ (Рј/СЃ). РќРёР¶Рµ boundEnterSpeed.")]
     public float walkSpeed = 2.2f;
-    [Tooltip("Прибытие в точку маршрута (м).")]
+    [Tooltip("РџСЂРёР±С‹С‚РёРµ РІ С‚РѕС‡РєСѓ РјР°СЂС€СЂСѓС‚Р° (Рј).")]
     public float arriveDistance = 2f;
 
-    [Header("Смотреть по сторонам")]
-    [Tooltip("Полуугол веера взгляда в движении (град).")]
+    [Header("РЎРјРѕС‚СЂРµС‚СЊ РїРѕ СЃС‚РѕСЂРѕРЅР°Рј")]
+    [Tooltip("РџРѕР»СѓСѓРіРѕР» РІРµРµСЂР° РІР·РіР»СЏРґР° РІ РґРІРёР¶РµРЅРёРё (РіСЂР°Рґ).")]
     public float lookWeaveAngle = 35f;
-    [Tooltip("Частота веера (Гц).")]
+    [Tooltip("Р§Р°СЃС‚РѕС‚Р° РІРµРµСЂР° (Р“С†).")]
     public float lookWeaveHz = 0.35f;
 
-    [Header("Остановка и бросок")]
-    [Tooltip("Интервал между остановками (сек).")]
+    [Header("РћСЃС‚Р°РЅРѕРІРєР° Рё Р±СЂРѕСЃРѕРє")]
+    [Tooltip("РРЅС‚РµСЂРІР°Р» РјРµР¶РґСѓ РѕСЃС‚Р°РЅРѕРІРєР°РјРё (СЃРµРє).")]
     public float stopInterval = 6f;
-    [Tooltip("Разброс интервала (±сек).")]
+    [Tooltip("Р Р°Р·Р±СЂРѕСЃ РёРЅС‚РµСЂРІР°Р»Р° (В±СЃРµРє).")]
     public float stopJitter = 2f;
-    [Tooltip("Сколько стоять и мести мордой (сек).")]
+    [Tooltip("РЎРєРѕР»СЊРєРѕ СЃС‚РѕСЏС‚СЊ Рё РјРµСЃС‚Рё РјРѕСЂРґРѕР№ (СЃРµРє).")]
     public float stopDuration = 1.6f;
-    [Tooltip("Радиус броска «кто-то там» (м).")]
+    [Tooltip("Р Р°РґРёСѓСЃ Р±СЂРѕСЃРєР° В«РєС‚Рѕ-С‚Рѕ С‚Р°РјВ» (Рј).")]
     public float scanRadius = 18f;
-    [Tooltip("Базовый шанс на ближней дистанции при Noticeability=1.")]
+    [Tooltip("Р‘Р°Р·РѕРІС‹Р№ С€Р°РЅСЃ РЅР° Р±Р»РёР¶РЅРµР№ РґРёСЃС‚Р°РЅС†РёРё РїСЂРё Noticeability=1.")]
     [Range(0f, 1f)] public float scanBaseChance = 0.35f;
-    [Tooltip("Неопределённость следа после броска (м).")]
+    [Tooltip("РќРµРѕРїСЂРµРґРµР»С‘РЅРЅРѕСЃС‚СЊ СЃР»РµРґР° РїРѕСЃР»Рµ Р±СЂРѕСЃРєР° (Рј).")]
     public float scanCueRadius = 8f;
 
     private WerewolfBrain _brain;
@@ -45,8 +45,39 @@ public class WerewolfHuntPatrol : MonoBehaviour
     private float _stopLeft;
     private bool _rolledThisStop;
     private float _lookPhase;
+    private bool _spread;
 
     public void BindBrain(WerewolfBrain brain) => _brain = brain;
+
+    Vector3 ScatterGoal()
+    {
+        var pack = WerewolfPackManager.Instance;
+        Vector3 home = transform.position;
+        if (pack != null)
+        {
+            if (pack.alphaTransform != null) home = pack.alphaTransform.position;
+            else if (pack.spawnCenter != null) home = pack.spawnCenter.position;
+            else home = pack.transform.position;
+        }
+        int i = pack != null ? pack.WolfOrder(transform) : 0;
+        float ang = i * 67f;
+        float rad = pack != null ? Mathf.Max(16f, pack.spawnRadius * 1.6f) : 16f;
+        Vector3 dir = Quaternion.AngleAxis(ang, Vector3.up) * Vector3.forward;
+        Vector3 goal = home + dir * rad;
+        if (_brain != null) return _brain.ClampGoal(goal);
+        return goal;
+    }
+
+    void TrySpread()
+    {
+        if (_spread) return;
+        var wr = waypointRoute != null ? waypointRoute : GetComponent<WerewolfWaypointRoute>();
+        if (wr == null || !wr.HasPoints) return;
+        _spread = true;
+        var pack = WerewolfPackManager.Instance;
+        int salt = pack != null ? pack.WolfOrder(transform) : GetInstanceID();
+        wr.SpreadFrom(salt * 3);
+    }
 
     void Awake()
     {
@@ -62,15 +93,20 @@ public class WerewolfHuntPatrol : MonoBehaviour
         _rolledThisStop = false;
         IWerewolfRoute r = Route;
         if (r != null && r.HasPoints) r.ResetToNearest(transform.position);
+        _spread = false;
+        TrySpread();
     }
 
     void Update()
     {
         float dt = Time.deltaTime;
+        TrySpread();
         IWerewolfRoute r = Route;
         if (r == null || !r.HasPoints)
         {
-            SweepLook(transform.forward, lookWeaveAngle, dt);
+            Vector3 scatter = ScatterGoal();
+            Follow(scatter, walkSpeed, dt);
+            SweepLook(scatter - transform.position, lookWeaveAngle, dt);
             return;
         }
 
@@ -108,6 +144,32 @@ public class WerewolfHuntPatrol : MonoBehaviour
 
         if (arrived || FlatDist(transform.position, goal) <= arriveDistance)
             r.Advance();
+
+        PassIntel(dt);
+    }
+
+    float _passTimer;
+
+    void PassIntel(float dt)
+    {
+        _passTimer -= dt;
+        if (_passTimer > 0f) return;
+        _passTimer = 2.2f;
+        if (perception == null || !perception.HasCue) return;
+        var selfHowl = GetComponent<WerewolfHowl>();
+        if (selfHowl != null && !selfHowl.IsSquadController) return;
+
+        const float shareR = 14f;
+        var others = FindObjectsOfType<WerewolfHuntPatrol>();
+        for (int i = 0; i < others.Length; i++)
+        {
+            var other = others[i];
+            if (other == null || other == this || other.perception == null) continue;
+            if (FlatDist(transform.position, other.transform.position) > shareR) continue;
+            if (other.perception.HasCue && other.perception.CueAge < perception.CueAge)
+                continue;
+            other.perception.ReportCue(perception.CuePos, perception.CueRadius);
+        }
     }
 
     private void SweepLook(Vector3 axis, float halfAngle, float dt)
@@ -159,6 +221,7 @@ public class WerewolfHuntPatrol : MonoBehaviour
     private bool Follow(Vector3 goal, float speed, float dt)
     {
         if (_brain != null) return _brain.FollowGoal(goal, speed, dt);
+        if (locomotion == null) locomotion = GetComponent<WerewolfLocomotion>();
         if (locomotion == null) return false;
         return locomotion.MoveTo(goal, speed, dt);
     }

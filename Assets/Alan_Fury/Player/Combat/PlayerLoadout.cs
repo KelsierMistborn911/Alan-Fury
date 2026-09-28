@@ -2,16 +2,16 @@ using UnityEngine;
 
 public class PlayerLoadout : MonoBehaviour
 {
-    [Header("Руки")]
+    [Header("Р СѓРєРё")]
     public WeaponData rightHandWeapon;
     public WeaponData leftHandWeapon;
 
-    [Header("Магия в руках")]
+    [Header("РњР°РіРёСЏ РІ СЂСѓРєР°С…")]
     public bool rightHandMagic;
     public bool leftHandMagic;
 
-    [Header("Прочность щита (runtime)")]
-    [Tooltip("Текущая прочность экипированного щита. При смене щита сбрасывается на max.")]
+    [Header("РџСЂРѕС‡РЅРѕСЃС‚СЊ С‰РёС‚Р° (runtime)")]
+    [Tooltip("РўРµРєСѓС‰Р°СЏ РїСЂРѕС‡РЅРѕСЃС‚СЊ СЌРєРёРїРёСЂРѕРІР°РЅРЅРѕРіРѕ С‰РёС‚Р°. РџСЂРё СЃРјРµРЅРµ С‰РёС‚Р° СЃР±СЂР°СЃС‹РІР°РµС‚СЃСЏ РЅР° max.")]
     public float currentShieldDurability = 100f;
 
     public WeaponData GetMainWeapon() => rightHandWeapon;
@@ -22,6 +22,11 @@ public class PlayerLoadout : MonoBehaviour
         var w = rightHandWeapon != null ? rightHandWeapon : leftHandWeapon;
         return w != null && w.OccupiesBothHands
             && rightHandWeapon == leftHandWeapon;
+    }
+
+    public bool HasRangedArmed()
+    {
+        return HasTwoHandWeapon() && rightHandWeapon != null && rightHandWeapon.isRanged;
     }
 
     public bool HasShield()
@@ -43,7 +48,7 @@ public class PlayerLoadout : MonoBehaviour
         }
     }
 
-    /// <summary>Нанести урон прочности щита. Возвращает true, если щит ещё жив.</summary>
+    /// <summary>РќР°РЅРµСЃС‚Рё СѓСЂРѕРЅ РїСЂРѕС‡РЅРѕСЃС‚Рё С‰РёС‚Р°. Р’РѕР·РІСЂР°С‰Р°РµС‚ true, РµСЃР»Рё С‰РёС‚ РµС‰С‘ Р¶РёРІ.</summary>
     public bool DamageShield(float amount)
     {
         if (!HasShield()) return false;
@@ -51,7 +56,7 @@ public class PlayerLoadout : MonoBehaviour
         return currentShieldDurability > 0f;
     }
 
-    /// <summary>Восстановить прочность до максимума (при экипировке нового щита и т.п.).</summary>
+    /// <summary>Р’РѕСЃСЃС‚Р°РЅРѕРІРёС‚СЊ РїСЂРѕС‡РЅРѕСЃС‚СЊ РґРѕ РјР°РєСЃРёРјСѓРјР° (РїСЂРё СЌРєРёРїРёСЂРѕРІРєРµ РЅРѕРІРѕРіРѕ С‰РёС‚Р° Рё С‚.Рї.).</summary>
     public void ResetShieldDurability()
     {
         if (leftHandWeapon != null && leftHandWeapon.type == WeaponData.WeaponType.Shield)

@@ -1,8 +1,8 @@
 using UnityEngine;
 
 /// <summary>
-/// Рантайм-набор: лук, арбалет, стрелы, болты.
-/// Ассетов в проекте нет — инстансы живут сессию и кладутся в Inventory.
+/// Р Р°РЅС‚Р°Р№Рј-РЅР°Р±РѕСЂ: Р»СѓРє, Р°СЂР±Р°Р»РµС‚, СЃС‚СЂРµР»С‹, Р±РѕР»С‚С‹.
+/// РђСЃСЃРµС‚РѕРІ РІ РїСЂРѕРµРєС‚Рµ РЅРµС‚ вЂ” РёРЅСЃС‚Р°РЅСЃС‹ Р¶РёРІСѓС‚ СЃРµСЃСЃРёСЋ Рё РєР»Р°РґСѓС‚СЃСЏ РІ Inventory.
 /// </summary>
 public static class RangedKit
 {
@@ -20,12 +20,12 @@ public static class RangedKit
     {
         if (_ready) return;
 
-        Arrows = MakeResource("Стрелы", 99);
-        Bolts = MakeResource("Болты", 99);
+        Arrows = MakeResource("РЎС‚СЂРµР»С‹", 99, "arrows", 1, 2);
+        Bolts = MakeResource("Р‘РѕР»С‚С‹", 99, "bolts", 1, 2);
 
         BowWeapon = MakeWeapon(
             WeaponData.WeaponType.Bow,
-            "Лук",
+            "Р›СѓРє",
             damage: 9f,
             stagger: 3f,
             penetration: 1.5f,
@@ -40,7 +40,7 @@ public static class RangedKit
 
         CrossbowWeapon = MakeWeapon(
             WeaponData.WeaponType.Crossbow,
-            "Арбалет",
+            "РђСЂР±Р°Р»РµС‚",
             damage: 14f,
             stagger: 5f,
             penetration: 2.5f,
@@ -53,8 +53,8 @@ public static class RangedKit
             ammo: Bolts,
             reload: 2f);
 
-        Bow = MakeEquipment("Лук", BowWeapon);
-        Crossbow = MakeEquipment("Арбалет", CrossbowWeapon);
+        Bow = MakeEquipment("Р›СѓРє", BowWeapon, "bow", 8, 2);
+        Crossbow = MakeEquipment("РђСЂР±Р°Р»РµС‚", CrossbowWeapon, "crossbow", 6, 2);
 
         _ready = true;
     }
@@ -75,17 +75,21 @@ public static class RangedKit
         if (needBolts > 0) inventory.Add(Bolts, needBolts);
     }
 
-    static ItemData MakeResource(string name, int stack)
+    static ItemData MakeResource(string name, int stack, string iconKey, int w, int h)
     {
         var item = ScriptableObject.CreateInstance<ItemData>();
         item.name = name;
         item.itemName = name;
         item.type = ItemData.ItemType.Resource;
         item.maxStack = stack;
+        item.iconResource = iconKey;
+        item.width = w;
+        item.height = h;
+        ItemIcons.Resolve(item);
         return item;
     }
 
-    static ItemData MakeEquipment(string name, WeaponData weapon)
+    static ItemData MakeEquipment(string name, WeaponData weapon, string iconKey, int w, int h)
     {
         var item = ScriptableObject.CreateInstance<ItemData>();
         item.name = name;
@@ -93,6 +97,10 @@ public static class RangedKit
         item.type = ItemData.ItemType.Equipment;
         item.maxStack = 1;
         item.weapon = weapon;
+        item.iconResource = iconKey;
+        item.width = w;
+        item.height = h;
+        ItemIcons.Resolve(item);
         return item;
     }
 

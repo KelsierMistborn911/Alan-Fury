@@ -1,4 +1,4 @@
-﻿using UnityEngine;
+using UnityEngine;
 using System.Collections.Generic;
 
 /// <summary>
@@ -345,7 +345,6 @@ public class GhostHost : MonoBehaviour
             if (vis == null) vis = go.AddComponent<NpcPerception>();
             vis.ApplyScout();
 
-            f.role = GhostFlyer.Role.Scout;
             f.pathfinder = pathfinder;
             f.heightSource = heightSource;
             f.chunkedBuilder = chunkedBuilder;

@@ -118,10 +118,6 @@ public class WerewolfAttackBrain : MonoBehaviour, WerewolfPackManager.IPackAgent
     [Range(1.1f, 2f)] public float outerDistanceMult = 1.33f;
     [Tooltip("Высота дуги прыжка-захода с дальнего кольца к игроку.")]
     public float commitLeapArc = 0.85f;
-    [Tooltip("Случайный разброс радиуса облёта (±м).")]
-    public float orbitRadiusJitter = 0.8f;
-    [Tooltip("Как часто менять разброс радиуса (сек).")]
-    public float jitterInterval = 0.7f;
 
     [Header("Осторожность: удар после атаки игрока")]
     [Tooltip("Окно после конца атаки игрока, когда волк охотно бьёт (сек). Осторожная ступень бьёт ТОЛЬКО в нём.")]
@@ -170,7 +166,7 @@ public class WerewolfAttackBrain : MonoBehaviour, WerewolfPackManager.IPackAgent
     public float separationStrength = 3.5f;
 
     // ---- состояние роли/токена ----
-    private WerewolfPackManager.PackRole _role = WerewolfPackManager.PackRole.Surround;
+    private WerewolfPackManager.PackRole _role = WerewolfPackManager.PackRole.Idle;
     private bool _avoidFront;
     private bool _hasToken;
 
@@ -192,8 +188,6 @@ public class WerewolfAttackBrain : MonoBehaviour, WerewolfPackManager.IPackAgent
     private float _opportunityUntil; // окно «игрок только что отмахал» для осторожных
     private bool _wasCombatBusy;
     private float _postAttackLockUntil; // после своей атаки нельзя сразу увернуться
-    private float _radiusJitter;     // текущий разброс радиуса облёта
-    private float _nextJitterTime;
     private float _sectorTimer;      // сколько волк держится в разрешённом секторе (ступени 1–2)
     private int _hitsLeft;           // сколько ударов осталось в текущей серии
     private bool _reserveDodge;      // держать ли запас стамины на уворот (все, кроме ярости)
@@ -234,9 +228,15 @@ public class WerewolfAttackBrain : MonoBehaviour, WerewolfPackManager.IPackAgent
             else
                 _phase = AttackPhase.Approach;
         }
-        else
+        else if (role == WerewolfPackManager.PackRole.Surround)
         {
             if (surroundBrain != null) surroundBrain.enabled = true;
+            _path.Clear();
+            enabled = false;
+        }
+        else
+        {
+            if (surroundBrain != null) surroundBrain.enabled = false;
             _path.Clear();
             enabled = false;
         }
@@ -272,6 +272,13 @@ public class WerewolfAttackBrain : MonoBehaviour, WerewolfPackManager.IPackAgent
         if (combat != null) combat.OnHitLanded += HandleHitLanded;
         if (stats != null) stats.OnDeath += HandleDeath;
 
+        if (GetComponent<WerewolfHowl>() == null)
+            gameObject.AddComponent<WerewolfHowl>();
+        if (GetComponent<EnemyPresence>() == null)
+            gameObject.AddComponent<EnemyPresence>();
+        if (GetComponent<WerewolfBrain>() == null)
+            gameObject.AddComponent<WerewolfBrain>();
+
         _manager = WerewolfPackManager.Instance;
         if (_manager != null)
         {
@@ -283,8 +290,8 @@ public class WerewolfAttackBrain : MonoBehaviour, WerewolfPackManager.IPackAgent
             Debug.LogWarning("WerewolfAttackBrain: нет WerewolfPackManager на сцене — остаюсь в окружении.");
         }
 
-        // По умолчанию — окружение (ровно один мозг активен, пока менеджер не назначит роль).
-        SetRole(WerewolfPackManager.PackRole.Surround, false);
+        // По умолчанию — Idle: патруль ведёт WerewolfBrain, слоты молчат.
+        SetRole(WerewolfPackManager.PackRole.Idle, false);
     }
 
     void OnDestroy()

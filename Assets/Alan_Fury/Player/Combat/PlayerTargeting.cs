@@ -1,41 +1,41 @@
 using UnityEngine;
 
 /// <summary>
-/// Захват и удержание цели игрока: lock, hold, close-switch, cone search, маркер.
-/// Вынесено из CombatController3D. Логика не менялась.
+/// Р—Р°С…РІР°С‚ Рё СѓРґРµСЂР¶Р°РЅРёРµ С†РµР»Рё РёРіСЂРѕРєР°: lock, hold, close-switch, cone search, РјР°СЂРєРµСЂ.
+/// Р’С‹РЅРµСЃРµРЅРѕ РёР· CombatController3D. Р›РѕРіРёРєР° РЅРµ РјРµРЅСЏР»Р°СЃСЊ.
 /// </summary>
 public class PlayerTargeting : MonoBehaviour
 {
-    [Header("Захват цели")]
+    [Header("Р—Р°С…РІР°С‚ С†РµР»Рё")]
     public float targetLockRange = 15f;
-    [Tooltip("Дальше этой дистанции лок сбрасывается (перехват на ближайшего в targetLockRange). До неё держится метка.")]
+    [Tooltip("Р”Р°Р»СЊС€Рµ СЌС‚РѕР№ РґРёСЃС‚Р°РЅС†РёРё Р»РѕРє СЃР±СЂР°СЃС‹РІР°РµС‚СЃСЏ (РїРµСЂРµС…РІР°С‚ РЅР° Р±Р»РёР¶Р°Р№С€РµРіРѕ РІ targetLockRange). Р”Рѕ РЅРµС‘ РґРµСЂР¶РёС‚СЃСЏ РјРµС‚РєР°.")]
     public float targetHoldRange = 30f;
-    [Tooltip("Боевая зона: ближе — автолок, доворот корпуса и удары в цель. Дальше — только метка, всё по мыши.")]
+    [Tooltip("Р‘РѕРµРІР°СЏ Р·РѕРЅР°: Р±Р»РёР¶Рµ вЂ” Р°РІС‚РѕР»РѕРє, РґРѕРІРѕСЂРѕС‚ РєРѕСЂРїСѓСЃР° Рё СѓРґР°СЂС‹ РІ С†РµР»СЊ. Р”Р°Р»СЊС€Рµ вЂ” С‚РѕР»СЊРєРѕ РјРµС‚РєР°, РІСЃС‘ РїРѕ РјС‹С€Рё.")]
     public float combatFaceRange = 10f;
-    [Tooltip("Внутри этого радиуса лок перехватывает тот враг, что ближе к курсору.")]
+    [Tooltip("Р’РЅСѓС‚СЂРё СЌС‚РѕРіРѕ СЂР°РґРёСѓСЃР° Р»РѕРє РїРµСЂРµС…РІР°С‚С‹РІР°РµС‚ С‚РѕС‚ РІСЂР°Рі, С‡С‚Рѕ Р±Р»РёР¶Рµ Рє РєСѓСЂСЃРѕСЂСѓ.")]
     public float closeSwitchRange = 6f;
-    [Tooltip("На сколько градусов кандидат должен выигрывать у текущей цели, чтобы отобрать лок. Больше — реже мигает.")]
+    [Tooltip("РќР° СЃРєРѕР»СЊРєРѕ РіСЂР°РґСѓСЃРѕРІ РєР°РЅРґРёРґР°С‚ РґРѕР»Р¶РµРЅ РІС‹РёРіСЂС‹РІР°С‚СЊ Сѓ С‚РµРєСѓС‰РµР№ С†РµР»Рё, С‡С‚РѕР±С‹ РѕС‚РѕР±СЂР°С‚СЊ Р»РѕРє. Р‘РѕР»СЊС€Рµ вЂ” СЂРµР¶Рµ РјРёРіР°РµС‚.")]
     public float closeSwitchAngleMargin = 20f;
-    [Tooltip("Сколько юнитов дистанции стоит 1° отклонения от курсора при автолоке. 0 — чисто ближайший.")]
+    [Tooltip("РЎРєРѕР»СЊРєРѕ СЋРЅРёС‚РѕРІ РґРёСЃС‚Р°РЅС†РёРё СЃС‚РѕРёС‚ 1В° РѕС‚РєР»РѕРЅРµРЅРёСЏ РѕС‚ РєСѓСЂСЃРѕСЂР° РїСЂРё Р°РІС‚РѕР»РѕРєРµ. 0 вЂ” С‡РёСЃС‚Рѕ Р±Р»РёР¶Р°Р№С€РёР№.")]
     public float aimAnglePenalty = 0.1f;
     public LayerMask enemyLayers;
-    [Tooltip("Дуга перед игроком (град.), в которой ищутся цели для Tab и автонаведения.")]
+    [Tooltip("Р”СѓРіР° РїРµСЂРµРґ РёРіСЂРѕРєРѕРј (РіСЂР°Рґ.), РІ РєРѕС‚РѕСЂРѕР№ РёС‰СѓС‚СЃСЏ С†РµР»Рё РґР»СЏ Tab Рё Р°РІС‚РѕРЅР°РІРµРґРµРЅРёСЏ.")]
     [Range(0f, 360f)] public float aimConeAngle = 200f;
 
-    [Header("Метка цели")]
-    [Tooltip("Высота красного маркера над таргетом (м).")]
+    [Header("РњРµС‚РєР° С†РµР»Рё")]
+    [Tooltip("Р’С‹СЃРѕС‚Р° РєСЂР°СЃРЅРѕРіРѕ РјР°СЂРєРµСЂР° РЅР°Рґ С‚Р°СЂРіРµС‚РѕРј (Рј).")]
     public float targetMarkerHeight = 2.2f;
-    [Tooltip("Размер маркера (м).")]
+    [Tooltip("Р Р°Р·РјРµСЂ РјР°СЂРєРµСЂР° (Рј).")]
     public float targetMarkerSize = 0.35f;
     [ColorUsage(true, true)]
-    [Tooltip("HDR-цвет квадрата. Intensity выше 1 даёт блум.")]
+    [Tooltip("HDR-С†РІРµС‚ РєРІР°РґСЂР°С‚Р°. Intensity РІС‹С€Рµ 1 РґР°С‘С‚ Р±Р»СѓРј.")]
     public Color targetMarkerColor = new Color(2.4f, 0.14f, 0.08f, 1f);
-    [Tooltip("Доп. множитель яркости в шейдер. 1 = как цвет, 2–4 = сильнее свечение.")]
+    [Tooltip("Р”РѕРї. РјРЅРѕР¶РёС‚РµР»СЊ СЏСЂРєРѕСЃС‚Рё РІ С€РµР№РґРµСЂ. 1 = РєР°Рє С†РІРµС‚, 2вЂ“4 = СЃРёР»СЊРЅРµРµ СЃРІРµС‡РµРЅРёРµ.")]
     public float targetMarkerBloom = 2.5f;
 
-    // --- Публичное состояние ---
+    // --- РџСѓР±Р»РёС‡РЅРѕРµ СЃРѕСЃС‚РѕСЏРЅРёРµ ---
     public Transform CurrentTarget { get; private set; }
-    /// <summary>Временная цель при заряде, когда NearTarget нет (мягкий авто-aim).</summary>
+    /// <summary>Р’СЂРµРјРµРЅРЅР°СЏ С†РµР»СЊ РїСЂРё Р·Р°СЂСЏРґРµ, РєРѕРіРґР° NearTarget РЅРµС‚ (РјСЏРіРєРёР№ Р°РІС‚Рѕ-aim).</summary>
     public Transform AutoTarget { get; private set; }
 
     public bool HasTarget => CurrentTarget != null;
@@ -51,7 +51,7 @@ public class PlayerTargeting : MonoBehaviour
         }
     }
 
-    // --- Внутреннее ---
+    // --- Р’РЅСѓС‚СЂРµРЅРЅРµРµ ---
     private readonly Collider[] _enemyBuffer = new Collider[32];
     private Transform _shiftSavedTarget;
     private Transform _targetMarker;
@@ -114,7 +114,7 @@ public class PlayerTargeting : MonoBehaviour
         UpdateTargetMarker();
     }
 
-    // ---------- Логика (без изменений) ----------
+    // ---------- Р›РѕРіРёРєР° (Р±РµР· РёР·РјРµРЅРµРЅРёР№) ----------
 
     void MaintainLockTarget()
     {
@@ -288,7 +288,7 @@ public class PlayerTargeting : MonoBehaviour
         return IsValidEnemy(cling.transform) ? cling.transform : null;
     }
 
-    /// <summary>Живой враг: волк, призрак, скелет. Игроков реестра не берём.</summary>
+    /// <summary>Р–РёРІРѕР№ РІСЂР°Рі: РІРѕР»Рє, РїСЂРёР·СЂР°Рє, СЃРєРµР»РµС‚. РРіСЂРѕРєРѕРІ СЂРµРµСЃС‚СЂР° РЅРµ Р±РµСЂС‘Рј.</summary>
     public bool IsValidEnemy(Transform t)
     {
         if (t == null || !t.gameObject.activeInHierarchy) return false;

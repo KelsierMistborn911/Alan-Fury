@@ -1,4 +1,4 @@
-﻿using UnityEngine;
+using UnityEngine;
 
 /// <summary>
 /// Раны v1: зона → пробитие → урон → ступень. Эффект — только кровотечение на зону.

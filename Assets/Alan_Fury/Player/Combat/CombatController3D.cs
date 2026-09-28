@@ -1,4 +1,4 @@
-﻿using UnityEngine;
+using UnityEngine;
 
 /// <summary>
 /// Ввод игрока → HumanoidCombat.
@@ -8,6 +8,33 @@
 public class CombatController3D : HumanoidCombat
 {
     protected override bool UsesAttackApproach => true;
+
+    protected override void Awake()
+    {
+        if (sheathAfterPeaceSeconds <= 0f) sheathAfterPeaceSeconds = 60f;
+        combatLingerSeconds = 0.35f;
+        if (targeting == null) targeting = GetComponent<PlayerTargeting>();
+        _composer = GetComponent<SpellComposer>();
+        _spellSlots = GetComponent<SpellSlots>();
+        _spells = GetComponent<SpellController>();
+        base.Awake();
+        _mainCamera = Camera.main;
+        if (targeting == null)
+            Debug.LogError("[CombatController3D] Нет PlayerTargeting на объекте. Добавь компонент.");
+        if (stance == null)
+            Debug.LogError("[CombatController3D] Нет PlayerStance на объекте. Добавь компонент.");
+        if (targeting != null && EnemyLayers.value == 0)
+            EnemyLayers = targeting.enemyLayers;
+    }
+
+    protected override bool ChaseStillOn
+    {
+        get
+        {
+            var pack = WerewolfPackManager.Instance;
+            return pack != null && pack.IsHunting(transform);
+        }
+    }
 
     [Header("Игрок: захват цели")]
     public PlayerTargeting targeting;
@@ -24,22 +51,6 @@ public class CombatController3D : HumanoidCombat
     private SpellComposer _composer;
     private SpellSlots _spellSlots;
     private SpellController _spells;
-
-    protected override void Awake()
-    {
-        if (targeting == null) targeting = GetComponent<PlayerTargeting>();
-        _composer = GetComponent<SpellComposer>();
-        _spellSlots = GetComponent<SpellSlots>();
-        _spells = GetComponent<SpellController>();
-        base.Awake();
-        _mainCamera = Camera.main;
-        if (targeting == null)
-            Debug.LogError("[CombatController3D] Нет PlayerTargeting на объекте. Добавь компонент.");
-        if (stance == null)
-            Debug.LogError("[CombatController3D] Нет PlayerStance на объекте. Добавь компонент.");
-        if (targeting != null && EnemyLayers.value == 0)
-            EnemyLayers = targeting.enemyLayers;
-    }
 
     public override void ClearTarget()
     {
@@ -175,18 +186,6 @@ public class CombatController3D : HumanoidCombat
         if (_dodgeAttackPerfectFlag && movement != null) return movement.DodgeSpeedValue;
         if (Input.GetKey(KeyCode.LeftShift) && movement != null) return movement.CurrentSpeed;
         return 0f;
-    }
-
-    protected override bool AllowTargetMagnet()
-    {
-        return !Input.GetKey(KeyCode.LeftShift);
-    }
-
-    protected override bool HasManualMoveInput()
-    {
-        float h = Input.GetAxisRaw("Horizontal");
-        float v = Input.GetAxisRaw("Vertical");
-        return Mathf.Abs(h) > 0.15f || Mathf.Abs(v) > 0.15f;
     }
 
     bool IsComposing()

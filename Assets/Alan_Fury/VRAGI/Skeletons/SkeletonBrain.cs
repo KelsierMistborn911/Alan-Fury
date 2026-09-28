@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
@@ -24,8 +24,13 @@ public class SkeletonBrain : MonoBehaviour
     public SkeletonSquad squad;
 
     [Header("Обнаружение")]
-    public float aggroRadius = 16f;
-    public float loseRadius = 24f;
+    public float aggroRadius = 28f;
+    public float loseRadius = 42f;
+    [Tooltip("Ближе — рыцарь сам бьёт. Дальше в агро — только командует залпом.")]
+    public float meleeEngage = 4.6f;
+    [Tooltip("Зрение командира (м). Пишется в NpcPerception.")]
+    public float captainSight = 32f;
+    [Range(0f, 180f)] public float captainViewHalf = 80f;
     public bool drawVisionGizmo = true;
     public bool drawVisionAlways = false;
 
@@ -114,6 +119,7 @@ public class SkeletonBrain : MonoBehaviour
         if (perception == null)
             perception = gameObject.AddComponent<NpcPerception>();
         perception.ApplyHumanoid();
+        ApplyCaptainSight();
         if (squad == null) squad = GetComponent<SkeletonSquad>();
     }
 
@@ -265,7 +271,8 @@ public class SkeletonBrain : MonoBehaviour
             else if (squad.CanVolley)
                 squad.OrderVolley(CurrentTarget);
 
-            if (dist <= reach + 1.8f)
+            float melee = Mathf.Max(meleeEngage, reach + 1.2f);
+            if (dist <= melee)
             {
                 TickCombat(dt);
                 return;
@@ -362,7 +369,7 @@ public class SkeletonBrain : MonoBehaviour
         }
 
         if (pathfinder != null && pathfinder.IsReady)
-            _goal = pathfinder.NearestWalkableWorld(_goal, out _);
+            _goal = pathfinder.NearestRoadWorld(_goal, out _);
         ClearPath();
     }
 
@@ -520,8 +527,8 @@ public class SkeletonBrain : MonoBehaviour
             {
                 _repathTimer = repathInterval;
                 _lastGoal = worldPoint;
-                dest = pathfinder.NearestWalkableWorld(worldPoint, out _);
-                if (pathfinder.TryFindPath(transform.position, dest, _path))
+                dest = pathfinder.NearestRoadWorld(worldPoint, out _);
+                if (pathfinder.TryFindPath(transform.position, dest, _path, avoidRoads: false, preferRoads: true))
                     _pathIndex = 0;
                 else
                     _path.Clear();
@@ -754,6 +761,15 @@ public class SkeletonBrain : MonoBehaviour
     void UnregisterTarget()
     {
         Alive.Remove(this);
+    }
+
+    void ApplyCaptainSight()
+    {
+        if (perception == null) return;
+        perception.sightRange = Mathf.Max(perception.sightRange, captainSight);
+        perception.viewHalfAngle = Mathf.Max(perception.viewHalfAngle, captainViewHalf);
+        perception.useSight = true;
+        perception.omnidirectional = false;
     }
 
     bool CanSee(Transform t)

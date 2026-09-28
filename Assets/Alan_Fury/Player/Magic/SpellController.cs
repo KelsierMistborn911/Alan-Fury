@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
@@ -32,15 +32,9 @@ public class SpellController : MonoBehaviour
     public bool IsAiming { get; private set; }
     public SpellChannel AimChannel { get; private set; }
 
-    public static Material CellMarkMaterial { get; private set; }
-
     Camera _cam;
     Animator _anim;
     Vector2Int[] _preview = new Vector2Int[0];
-    static Mesh _quad;
-    readonly List<Transform> _marks = new List<Transform>();
-    Transform _aimGhost;
-    LineRenderer _ring;
     Mesh _aimMesh;
     Material _aimMat;
     readonly List<Vector3> _aimVerts = new List<Vector3>(64);
@@ -57,8 +51,6 @@ public class SpellController : MonoBehaviour
         if (mapGrid == null) mapGrid = FindObjectOfType<MapGrid>();
         _cam = Camera.main;
         _anim = GetComponent<Animator>();
-        EnsureMarkMat();
-        if (_quad == null) _quad = BuildQuad();
     }
 
     public bool BlocksMelee =>
@@ -94,7 +86,6 @@ public class SpellController : MonoBehaviour
     {
         IsAiming = false;
         _preview = new Vector2Int[0];
-        if (_aimGhost != null) _aimGhost.gameObject.SetActive(false);
     }
 
     void TryAutoAim(SpellChannel ch)
@@ -165,16 +156,7 @@ public class SpellController : MonoBehaviour
 
     void LateUpdate()
     {
-        HideOldAimActors();
         DrawAimFrames();
-    }
-
-    void HideOldAimActors()
-    {
-        for (int i = 0; i < _marks.Count; i++)
-            if (_marks[i] != null) _marks[i].gameObject.SetActive(false);
-        if (_aimGhost != null) _aimGhost.gameObject.SetActive(false);
-        if (_ring != null) _ring.enabled = false;
     }
 
     void DrawAimFrames()
@@ -408,41 +390,5 @@ public class SpellController : MonoBehaviour
             if (r.material.HasProperty("_BaseColor")) r.material.SetColor("_BaseColor", color);
         }
         Object.Destroy(go, life);
-    }
-
-    static void EnsureMarkMat()
-    {
-        if (CellMarkMaterial != null) return;
-        var sh = Shader.Find("Universal Render Pipeline/Unlit");
-        if (sh == null) sh = Shader.Find("Unlit/Color");
-        if (sh == null) return;
-        CellMarkMaterial = new Material(sh);
-        var c = new Color(1f, 0.84f, 0.22f, 0.8f);
-        CellMarkMaterial.color = c;
-        if (CellMarkMaterial.HasProperty("_BaseColor"))
-            CellMarkMaterial.SetColor("_BaseColor", c);
-        if (CellMarkMaterial.HasProperty("_Surface"))
-        {
-            CellMarkMaterial.SetFloat("_Surface", 1f);
-            CellMarkMaterial.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
-            CellMarkMaterial.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.One);
-            CellMarkMaterial.SetInt("_ZWrite", 0);
-            CellMarkMaterial.renderQueue = 3000;
-        }
-    }
-
-    static Mesh BuildQuad()
-    {
-        var m = new Mesh();
-        m.vertices = new[]
-        {
-            new Vector3(-0.5f, -0.5f, 0f),
-            new Vector3(0.5f, -0.5f, 0f),
-            new Vector3(0.5f, 0.5f, 0f),
-            new Vector3(-0.5f, 0.5f, 0f)
-        };
-        m.triangles = new[] { 0, 2, 1, 0, 3, 2 };
-        m.RecalculateBounds();
-        return m;
     }
 }

@@ -78,6 +78,9 @@ public class PlayerResources : MonoBehaviour, IDamageable
         _loco = GetComponent<HumanoidLocomotion>();
     }
 
+    void OnEnable() => WeaponHitbox.Register(this);
+    void OnDisable() => WeaponHitbox.Unregister(this);
+
     void Update()
     {
         RegenHealth();

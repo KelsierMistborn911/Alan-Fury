@@ -54,6 +54,8 @@ public class NpcPerception : MonoBehaviour
     public float cueLifetime = 8f;
     public float hearUncertainty = 7f;
     public float sightUncertainty = 1.2f;
+    [Tooltip("Потолок шкалы от звука. 1 только от взгляда или удара.")]
+    [Range(0.2f, 0.95f)] public float noticeSoundCap = 0.7f;
 
     [Header("Гизмо")]
     public bool drawGizmos = true;
@@ -311,6 +313,16 @@ public class NpcPerception : MonoBehaviour
         _forcedHunt = false;
     }
 
+    /// <summary>Удар / свой контакт: шкала в 1 и lock.</summary>
+    public void ReportAttackContact(Transform t)
+    {
+        if (t == null) return;
+        BindPlayer(t);
+        Notice01 = 1f;
+        IsLocked = true;
+        ReportCue(t.position, Mathf.Max(0.5f, sightUncertainty));
+    }
+
     void BindPlayer(Transform t)
     {
         player = t;
@@ -463,6 +475,7 @@ public class NpcPerception : MonoBehaviour
         {
             Notice01 = 0f;
             IsLocked = false;
+            ClearCue();
             return;
         }
 
@@ -474,7 +487,7 @@ public class NpcPerception : MonoBehaviour
             float near = 1f - Mathf.Clamp01(dist / Mathf.Max(0.01f, sightRange));
             Notice01 = Mathf.Min(1f, Notice01 + noticeFillPerSecond * notice * Mathf.Lerp(0.35f, 1f, near) * dt);
             ReportCue(seen.position, sightUncertainty);
-            if (Notice01 >= 1f) IsLocked = true;
+            IsLocked = Notice01 >= 1f || _forcedHunt;
         }
         else
         {
@@ -483,6 +496,9 @@ public class NpcPerception : MonoBehaviour
             {
                 float range = hearRangeAtNoise1 * Mathf.Max(0.01f, heardNoise);
                 float u = Mathf.Max(2f, hearUncertainty * Mathf.Clamp01(heardDist / range));
+                float cap = Mathf.Clamp(noticeSoundCap, 0.2f, 0.95f);
+                Notice01 = Mathf.Min(cap, Notice01 + noticeFillPerSecond * heardNoise * 0.55f * dt);
+                u = Mathf.Max(1.5f, u * (1f - Notice01 * 0.6f));
                 if (!_cueValid || FlatDist(_cuePos, heard.position) > u + 3f)
                 {
                     Vector3 j = heard.position - transform.position; j.y = 0f;
@@ -495,6 +511,7 @@ public class NpcPerception : MonoBehaviour
                 else
                     _cueAge = 0f;
             }
+            IsLocked = _forcedHunt;
         }
 
         if (_forcedHunt && player != null)
@@ -508,10 +525,6 @@ public class NpcPerception : MonoBehaviour
             _cueAge += dt;
             if (_cueAge > cueLifetime)
                 ClearCue();
-        }
-        else
-        {
-            IsLocked = false;
         }
     }
 

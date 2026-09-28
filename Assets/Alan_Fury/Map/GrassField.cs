@@ -46,8 +46,10 @@ public class GrassField : MonoBehaviour
 
     [Header("Игрок")]
     public Transform player;
-    [Tooltip("Строить и рисовать только в этом радиусе от игрока.")]
-    public float drawRadius = 252f;
+    [Tooltip("Как NatureRenderer.drawRadius, если matchTreeRadius.")]
+    public float drawRadius = 55f;
+    public bool matchTreeRadius = true;
+    public NatureRenderer natureRenderer;
     public float pushRadius = 1.35f;
     public float pushStrength = 1.05f;
     public float recoverSeconds = 1.35f;
@@ -323,6 +325,11 @@ public class GrassField : MonoBehaviour
         _block.SetFloat("_WindSpeed", windSpeed);
         _block.SetFloat("_PushRadius", pushRadius);
         _block.SetFloat("_PushStrength", pushStrength);
+        if (matchTreeRadius)
+        {
+            if (natureRenderer == null) natureRenderer = GetComponent<NatureRenderer>();
+            if (natureRenderer != null) drawRadius = natureRenderer.drawRadius;
+        }
         Vector3 p = player != null ? player.position : new Vector3(9999f, 0f, 9999f);
         _block.SetVector("_PlayerPos", p);
         _block.SetFloat("_DrawRadius", drawRadius);
@@ -484,6 +491,7 @@ public class GrassField : MonoBehaviour
         if (terrainBuilder == null) terrainBuilder = GetComponent<ChunkedTerrainBuilder>();
         if (mapGrid == null) mapGrid = GetComponent<MapGrid>();
         if (naturePlacement == null) naturePlacement = GetComponent<NaturePlacement>();
+        if (natureRenderer == null) natureRenderer = GetComponent<NatureRenderer>();
         if (roadGenerator == null) roadGenerator = GetComponent<RoadGenerator>();
 
         if (heightSource == null || !heightSource.isGenerated)

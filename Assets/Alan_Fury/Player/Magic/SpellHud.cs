@@ -1,4 +1,4 @@
-﻿using UnityEngine;
+using UnityEngine;
 
 /// <summary>
 /// Экранная таблица справа сверху: язык знаков, слоты, текущий набор.

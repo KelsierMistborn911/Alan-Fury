@@ -78,6 +78,29 @@ public class WeaponHitbox : MonoBehaviour
     static readonly List<WeaponHitbox> LiveList = new List<WeaponHitbox>(16);
     public static IReadOnlyList<WeaponHitbox> Live => LiveList;
 
+    static readonly List<WerewolfStats> KnownWolves = new List<WerewolfStats>(16);
+    static readonly List<PlayerResources> KnownBodies = new List<PlayerResources>(8);
+
+    public static void Register(WerewolfStats stats)
+    {
+        if (stats != null && !KnownWolves.Contains(stats)) KnownWolves.Add(stats);
+    }
+
+    public static void Unregister(WerewolfStats stats)
+    {
+        if (stats != null) KnownWolves.Remove(stats);
+    }
+
+    public static void Register(PlayerResources body)
+    {
+        if (body != null && !KnownBodies.Contains(body)) KnownBodies.Add(body);
+    }
+
+    public static void Unregister(PlayerResources body)
+    {
+        if (body != null) KnownBodies.Remove(body);
+    }
+
     public bool IsTelegraphing => _telegraphing;
     public bool IsSweeping => isActive;
     public bool IsLive => _telegraphing || isActive;
@@ -351,18 +374,26 @@ public class WeaponHitbox : MonoBehaviour
                 TryDirect(origin, players[i]);
         }
 
-        var wolves = FindObjectsOfType<WerewolfStats>();
-        for (int i = 0; i < wolves.Length; i++)
+        for (int i = KnownWolves.Count - 1; i >= 0; i--)
         {
-            if (wolves[i] != null && wolves[i].IsAlive)
-                TryDirect(origin, wolves[i].transform);
+            var wolf = KnownWolves[i];
+            if (wolf == null)
+            {
+                KnownWolves.RemoveAt(i);
+                continue;
+            }
+            if (wolf.IsAlive) TryDirect(origin, wolf.transform);
         }
 
-        var resources = FindObjectsOfType<PlayerResources>();
-        for (int i = 0; i < resources.Length; i++)
+        for (int i = KnownBodies.Count - 1; i >= 0; i--)
         {
-            if (resources[i] != null && resources[i].IsAlive)
-                TryDirect(origin, resources[i].transform);
+            var body = KnownBodies[i];
+            if (body == null)
+            {
+                KnownBodies.RemoveAt(i);
+                continue;
+            }
+            if (body.IsAlive) TryDirect(origin, body.transform);
         }
     }
 
@@ -512,36 +543,36 @@ public class WeaponHitbox : MonoBehaviour
         switch (_shape)
         {
             case HitZoneShape.Capsule:
-                {
-                    float len = Mathf.Max(0.12f, range * Mathf.Max(u, 0.02f));
-                    Vector3 end = origin + direction * len;
-                    return PointToSegment(target, origin, end) <= radius;
-                }
+            {
+                float len = Mathf.Max(0.12f, range * Mathf.Max(u, 0.02f));
+                Vector3 end = origin + direction * len;
+                return PointToSegment(target, origin, end) <= radius;
+            }
             case HitZoneShape.Ellipse:
-                {
-                    if (dist < 0.0001f) return u > 0.02f;
-                    Quaternion inv = Quaternion.Inverse(Quaternion.LookRotation(direction));
-                    Vector3 local = inv * flat;
-                    float nx = radius > 0.01f ? local.x / radius : local.x;
-                    float nz = range > 0.01f ? local.z / range : local.z;
-                    float reach = Mathf.Max(0.08f, u);
-                    return nx * nx + nz * nz <= reach * reach;
-                }
+            {
+                if (dist < 0.0001f) return u > 0.02f;
+                Quaternion inv = Quaternion.Inverse(Quaternion.LookRotation(direction));
+                Vector3 local = inv * flat;
+                float nx = radius > 0.01f ? local.x / radius : local.x;
+                float nz = range > 0.01f ? local.z / range : local.z;
+                float reach = Mathf.Max(0.08f, u);
+                return nx * nx + nz * nz <= reach * reach;
+            }
             case HitZoneShape.Sector:
-                {
-                    if (dist > range + 0.15f) return false;
-                    if (dist < 0.0001f) return true;
-                    Vector3 fwd = Quaternion.Euler(0f, _yawOffset, 0f) * direction;
-                    float ang = Vector3.SignedAngle(fwd, flat, Vector3.up);
-                    return AngleInSweep(ang, u);
-                }
+            {
+                if (dist > range + 0.15f) return false;
+                if (dist < 0.0001f) return true;
+                Vector3 fwd = Quaternion.Euler(0f, _yawOffset, 0f) * direction;
+                float ang = Vector3.SignedAngle(fwd, flat, Vector3.up);
+                return AngleInSweep(ang, u);
+            }
             default:
-                {
-                    if (dist > range + 0.01f) return false;
-                    if (dist < 0.0001f) return true;
-                    float ang = Vector3.SignedAngle(direction, flat, Vector3.up);
-                    return AngleInSweep(ang, u);
-                }
+            {
+                if (dist > range + 0.01f) return false;
+                if (dist < 0.0001f) return true;
+                float ang = Vector3.SignedAngle(direction, flat, Vector3.up);
+                return AngleInSweep(ang, u);
+            }
         }
     }
 

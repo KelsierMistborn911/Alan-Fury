@@ -162,7 +162,6 @@ public class WerewolfCombat : MonoBehaviour
     private Transform _clingVictim;
     private IDamageable _clingDamageable;
     private HumanoidLocomotion _clingLoco;
-    private HumanoidCombat _clingCombat;
     private float _nextGnawTime;
     private static readonly System.Collections.Generic.List<WerewolfCombat> Live
         = new System.Collections.Generic.List<WerewolfCombat>(8);
@@ -466,7 +465,6 @@ public class WerewolfCombat : MonoBehaviour
         _clingVictim = victim;
         _clingDamageable = victim.GetComponent<IDamageable>();
         _clingLoco = victim.GetComponent<HumanoidLocomotion>();
-        _clingCombat = victim.GetComponent<HumanoidCombat>();
         _nextGnawTime = Time.time + clingGnawInterval * 0.35f;
         _phase = Phase.Idle;
         if (melee != null) melee.Stop();
@@ -484,7 +482,6 @@ public class WerewolfCombat : MonoBehaviour
         _clingVictim = null;
         _clingDamageable = null;
         _clingLoco = null;
-        _clingCombat = null;
     }
 
     void TickCling(float dt)

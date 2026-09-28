@@ -221,6 +221,8 @@ public class TerrainManager : MonoBehaviour
             if (grassField.naturePlacement == null) grassField.naturePlacement = naturePlacement;
             if (grassField.roadGenerator == null) grassField.roadGenerator = roadGenerator;
         }
+        if (natureRenderer != null && natureRenderer.placement == null)
+            natureRenderer.placement = naturePlacement;
     }
 
     private bool ValidateComponents()

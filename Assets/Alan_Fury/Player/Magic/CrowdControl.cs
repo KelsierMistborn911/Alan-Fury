@@ -1,7 +1,7 @@
 using UnityEngine;
 
 /// <summary>
-/// Короткий стан / ослепление. Мозги сами делают early-out по IsStunned.
+/// РљРѕСЂРѕС‚РєРёР№ СЃС‚Р°РЅ / РѕСЃР»РµРїР»РµРЅРёРµ. РњРѕР·РіРё СЃР°РјРё РґРµР»Р°СЋС‚ early-out РїРѕ IsStunned.
 /// </summary>
 public class CrowdControl : MonoBehaviour
 {

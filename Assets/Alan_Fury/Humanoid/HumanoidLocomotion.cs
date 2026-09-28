@@ -321,8 +321,8 @@ public class HumanoidLocomotion : MonoBehaviour
         if (_stuckTimer > 0f) return false;
         dir.y = 0f;
         if (dir.sqrMagnitude < 0.01f) return false;
-        meters = Mathf.Clamp(meters, 0.2f, 2f);
-        float dur = 0.26f;
+        meters = Mathf.Clamp(meters, 0.12f, 10f);
+        float dur = Mathf.Clamp(meters / (2f / 0.26f), 0.22f, 0.70f);
         _step.Cancel();
         _combatStepLock = false;
         _altDash = true;
@@ -330,7 +330,26 @@ public class HumanoidLocomotion : MonoBehaviour
         return true;
     }
 
+    Vector3 AltDashStrafeDelta()
+    {
+        Vector3 input = DesiredMoveDir;
+        input.y = 0f;
+        if (input.sqrMagnitude < 0.04f) return Vector3.zero;
+        Vector3 dash = _velocity;
+        dash.y = 0f;
+        if (dash.sqrMagnitude < 0.01f) return Vector3.zero;
+        Vector3 dashN = dash.normalized;
+        if (Vector3.Dot(input.normalized, dashN) < -0.25f)
+            return Vector3.zero;
+        Vector3 lateral = input - dashN * Vector3.Dot(input, dashN);
+        lateral.y = 0f;
+        if (lateral.sqrMagnitude < 0.0001f) return Vector3.zero;
+        float speed = Mathf.Max(4f, combatWalk.speed);
+        return lateral.normalized * speed * Time.deltaTime;
+    }
+
     public bool IsStepping => _step != null && _step.IsActive;
+    public bool IsCombatStepLocked => _combatStepLock && _step != null && _step.IsActive;
     public float CombatStepLength => Mathf.Max(0.8f, combatWalk.stepDistance);
     private bool _combatStepLock;
 
@@ -350,7 +369,7 @@ public class HumanoidLocomotion : MonoBehaviour
         }
 
         if (_step.IsActive)
-            return false;
+            _step.Cancel();
 
         DesiredMoveDir = worldDir;
         _cmdSet = true;
@@ -473,6 +492,8 @@ public class HumanoidLocomotion : MonoBehaviour
         if (Combat != null && Combat.IsCharging) return false;
         worldDir.y = 0f;
         if (worldDir.sqrMagnitude < 0.01f) return false;
+        _altDash = false;
+        _lungeLeft = 0f;
         _maneuverDir = worldDir.normalized;
         float speed = dodgeSpeed;
         _dodgeAssisted = ResolveDodgeAssist(ref _maneuverDir, ref speed);
@@ -759,6 +780,7 @@ public class HumanoidLocomotion : MonoBehaviour
         _maneuverSpeed = speed;
         _velocity = _maneuverDir * speed;
         _step.Cancel();
+        _combatStepLock = false;
     }
 
     const float DodgeTravelFactor = 0.77f;
@@ -1053,7 +1075,10 @@ public class HumanoidLocomotion : MonoBehaviour
         if (_lungeLeft > 0f)
         {
             _lungeLeft -= Time.deltaTime;
-            MoveHorizontal(_velocity * Time.deltaTime);
+            Vector3 dashDelta = _velocity * Time.deltaTime;
+            if (_altDash)
+                dashDelta += AltDashStrafeDelta();
+            MoveHorizontal(dashDelta);
             HandleRotation(_velocity.sqrMagnitude > 0.01f ? _velocity : default);
             ConsumePlanarAssist();
             if (_lungeLeft <= 0f)

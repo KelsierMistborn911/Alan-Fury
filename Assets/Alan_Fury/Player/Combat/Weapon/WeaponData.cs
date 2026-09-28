@@ -1,4 +1,4 @@
-﻿using UnityEngine;
+using UnityEngine;
 
 [CreateAssetMenu(fileName = "NewWeapon", menuName = "Combat/Weapon Data")]
 public class WeaponData : ScriptableObject
@@ -100,16 +100,6 @@ public class WeaponData : ScriptableObject
 
     [Header("Стамина")]
     public float staminaCost = 15f;
-
-    [Header("Вторичная атака (устарело для меча+щит)")]
-    [Tooltip("Есть ли у оружия вторичная функция. У меча+щит укол теперь авто.")]
-    public bool hasSecondary = false;
-    public string secondaryTrigger = "Thrust";
-    public float secondaryDamageMult = 1f;
-    public float secondaryRangeMult = 1.3f;
-    public float secondaryRadiusMult = 0.35f;
-    public float secondaryConeHalfAngle = 15f;
-    public float secondaryStaminaMult = 1f;
 
     [Header("Щит")]
     [Tooltip("Максимальная прочность щита. 0 = бесконечная.")]

@@ -25,7 +25,9 @@ public class WerewolfPackManager : MonoBehaviour
 {
     public static WerewolfPackManager Instance { get; private set; }
 
-    public enum PackRole { Surround, Attack, Orbit }
+    public enum PackRole { Idle, Surround, Attack, Orbit }
+
+    public enum PackPhase { Patrol, Alert, Hunt }
 
     /// <summary>Что менеджер требует от мозга волка. Реализует WerewolfAttackBrain.</summary>
     public interface IPackAgent
@@ -65,12 +67,22 @@ public class WerewolfPackManager : MonoBehaviour
     [Tooltip("Точка, вокруг которой спавнятся волки. Пусто — вокруг самого менеджера.")]
     public Transform spawnCenter;
 
+    [Header("Старшинство")]
+    [Tooltip("Глашатай. Пусто — первый волк стаи, который не альфа.")]
+    public Transform heraldTransform;
+    [Tooltip("Дистанция слияния отрядов (м).")]
+    public float squadMergeMeters = 8f;
+    [Tooltip("Альфу спалили: игрок видит его ближе (м).")]
+    public float alphaBurnDistance = 25f;
+    [Tooltip("Альфу спалили: столько секунд взаимного зрения.")]
+    public float alphaBurnSeconds = 10f;
+
     [Header("Вой (авто-спавн)")]
     [Tooltip("Если true — через howlDelay после старта автоматически вызывается SpawnPack(). Обычно false: призыв идёт с объекта WolfSummonPoint.")]
     public bool autoHowlOnStart = false;
     [Tooltip("Через сколько секунд после старта альфа 'воет' и поднимает стаю (разово).")]
     public float howlDelay = 2f;
-    [Tooltip("Альфа в сцене. Если задана — волки выходят веером с дальней от игрока стороны альфы.")]
+    [Tooltip("Альфа. Ранг 10 выдаёт менеджер. Пусто — альфы нет, глашатай всё равно назначается.")]
     public Transform alphaTransform;
     [Tooltip("Полуугол веера выхода из-за альфы (град). 40 = узкий веер 'выбегают из-за неё'.")]
     public float spawnArcHalfAngle = 40f;
@@ -246,6 +258,9 @@ public class WerewolfPackManager : MonoBehaviour
     // Вой: одноразовый авто-спавн через howlDelay после старта.
     private float _howlTimer;
     private bool _howled;
+    private PackPhase _phase = PackPhase.Patrol;
+
+    public PackPhase Phase => _phase;
 
     void Awake()
     {
@@ -256,6 +271,14 @@ public class WerewolfPackManager : MonoBehaviour
             return;
         }
         Instance = this;
+        if (GetComponent<WerewolfHowl>() == null)
+            gameObject.AddComponent<WerewolfHowl>();
+
+        if (FindObjectOfType<EnemyPresenceManager>() == null)
+        {
+            var go = new GameObject("EnemyPresenceManager");
+            go.AddComponent<EnemyPresenceManager>();
+        }
 
         player = PlayerRegistry.ResolvePrimary();
         ResolvePathfinder();
@@ -283,6 +306,19 @@ public class WerewolfPackManager : MonoBehaviour
     public void Register(IPackAgent wolf)
     {
         if (wolf != null && !_wolves.Contains(wolf)) _wolves.Add(wolf);
+    }
+
+    public int WolfOrder(Transform t)
+    {
+        if (t == null) return 0;
+        int n = 0;
+        for (int i = 0; i < _wolves.Count; i++)
+        {
+            if (_wolves[i] == null || _wolves[i].Transform == null) continue;
+            if (_wolves[i].Transform == t) return n;
+            n++;
+        }
+        return t.GetInstanceID();
     }
 
     public void Unregister(IPackAgent wolf)
@@ -343,14 +379,14 @@ public class WerewolfPackManager : MonoBehaviour
             // Волк сам зарегистрируется в Awake.
         }
 
-        // Сразу раздать слоты, не дожидаясь таймера.
+        _phase = PackPhase.Patrol;
         UpdateSlots();
-        Log($"Стая поднята: {_wolves.Count} волков, слотов атаки {maxAttackers}.");
+        Log($"Стая поднята: {_wolves.Count} волков, патруль. Слоты только после lock.");
     }
 
     /// <summary>
     /// Один волк на кольце distance метров от hunter.
-    /// Сразу знает игрока и идёт в Attack.
+    /// Ищет источник звука (cue), без lock и без боя.
     /// </summary>
     public GameObject SpawnAwareWolf(Transform hunter, float distance = 50f)
     {
@@ -402,17 +438,12 @@ public class WerewolfPackManager : MonoBehaviour
         var go = Instantiate(wolfPrefab, pos, rot);
 
         var perc = go.GetComponent<NpcPerception>();
-        if (perc != null) perc.ForceKnowAndHunt(hunter);
-
-        var preBrain = go.GetComponent<WerewolfBrain>();
-        if (preBrain != null) preBrain.RequestCombat();
-
-        var attack = go.GetComponent<WerewolfAttackBrain>();
-        if (attack != null) attack.SetRole(PackRole.Attack, false);
+        if (perc != null)
+            perc.ReportCue(origin, Mathf.Max(2f, perc.hearUncertainty));
 
         if (player == null) player = hunter;
         UpdateSlots();
-        Log("Рог стаи: волк в " + distance.ToString("0") + " м, знает цель.");
+        Log("Рог стаи: волк в " + distance.ToString("0") + " м, ищет звук.");
         return go;
     }
 
@@ -459,6 +490,9 @@ public class WerewolfPackManager : MonoBehaviour
 
         UpdateFrontToken();
         TickOrbitRotation();
+        TickIntel(Time.deltaTime);
+        TickSquads();
+        TickAlphaBurn(Time.deltaTime);
     }
 
     int OrbitSlotIndex => maxAttackers >= 3 ? maxAttackers - 1 : -1;
@@ -525,6 +559,8 @@ public class WerewolfPackManager : MonoBehaviour
         reason = null;
         if (w == null || !w.IsAlive) { reason = "мёртв"; return false; }
         if (_packScattering) { reason = "срыв стаи"; return false; }
+        if (IsAlphaTransform(w.Transform)) { reason = "альфа"; return false; }
+        if (!InContactFight(w)) { reason = "нет lock"; return false; }
         if (w.HealthPercent < attackMinHealth) { reason = "ранен"; return false; }
         if (w.Fear01 > attackMaxFear) { reason = "страх"; return false; }
         return true;
@@ -595,10 +631,14 @@ public class WerewolfPackManager : MonoBehaviour
             Assign(cand, i);
         }
 
-        // Все, кто не в слотах, — в окружение.
         for (int i = 0; i < _wolves.Count; i++)
-            if (!_attackSlots.Contains(_wolves[i]))
+        {
+            if (_attackSlots.Contains(_wolves[i])) continue;
+            if (InContactFight(_wolves[i]))
                 _wolves[i].SetRole(PackRole.Surround, false);
+            else
+                _wolves[i].SetRole(PackRole.Idle, false);
+        }
 
         AssignSectors();
     }
@@ -910,6 +950,319 @@ public class WerewolfPackManager : MonoBehaviour
 
         _nextJumpAllowed = Time.time + packJumpInterval;
         return true;
+    }
+
+    // ===================== Intel / howl / squads =====================
+
+    public struct PackSignal
+    {
+        public WerewolfHowl.Type Type;
+        public Vector3 Pos;
+        public float Radius;
+        public float Time;
+        public WerewolfHowl Source;
+        public int ConsumedTick;
+    }
+
+    public bool AlphaBurned => _alphaBurned;
+    public PackSignal LastSignal => _lastSignal;
+
+    private readonly List<WerewolfHowl> _howlers = new List<WerewolfHowl>();
+    private readonly List<WerewolfSquad> _squads = new List<WerewolfSquad>();
+    private PackSignal _lastSignal;
+    private bool _hasSignal;
+    private readonly Dictionary<int, int> _heardTick = new Dictionary<int, int>();
+    private int _signalSerial;
+    private bool _alphaBurned;
+    private float _alphaSeenAcc;
+    private int _nextSquadId = 1;
+    private WerewolfHowl _herald;
+
+    public void RegisterHowler(WerewolfHowl h)
+    {
+        if (h != null && !_howlers.Contains(h)) _howlers.Add(h);
+        SyncRanks();
+    }
+
+    public void UnregisterHowler(WerewolfHowl h)
+    {
+        _howlers.Remove(h);
+        if (_herald == h) _herald = null;
+        for (int i = _squads.Count - 1; i >= 0; i--)
+            _squads[i].Remove(h);
+        SyncRanks();
+    }
+
+    public WerewolfHowl Herald => _herald;
+
+    public bool IsAlphaWolf(WerewolfHowl h)
+    {
+        if (h == null || alphaTransform == null) return false;
+        Transform t = h.transform;
+        return t == alphaTransform || t.IsChildOf(alphaTransform) || alphaTransform.IsChildOf(t);
+    }
+
+    public bool IsHeraldWolf(WerewolfHowl h) => h != null && h == _herald;
+
+    void SyncRanks()
+    {
+        PruneHowlers();
+        if (heraldTransform != null)
+        {
+            var pinned = HowlOn(heraldTransform);
+            if (pinned != null && !IsAlphaWolf(pinned)) _herald = pinned;
+        }
+        if (_herald != null && (!_herald || !_howlers.Contains(_herald) || IsAlphaWolf(_herald)))
+            _herald = null;
+        if (_herald == null)
+        {
+            for (int i = 0; i < _howlers.Count; i++)
+            {
+                var h = _howlers[i];
+                if (h == null || IsAlphaWolf(h)) continue;
+                _herald = h;
+                if (heraldTransform == null) heraldTransform = h.transform;
+                break;
+            }
+        }
+
+        for (int i = 0; i < _howlers.Count; i++)
+        {
+            var h = _howlers[i];
+            if (h == null) continue;
+            if (IsAlphaWolf(h)) h.packRank = 10;
+            else if (h == _herald) h.packRank = 5;
+            else h.packRank = 0;
+        }
+    }
+
+    void PruneHowlers()
+    {
+        for (int i = _howlers.Count - 1; i >= 0; i--)
+            if (_howlers[i] == null) _howlers.RemoveAt(i);
+    }
+
+    public bool IsHunting(Transform prey)
+    {
+        if (_phase == PackPhase.Hunt) return true;
+        for (int i = 0; i < _howlers.Count; i++)
+        {
+            var h = _howlers[i];
+            if (h == null) continue;
+            var p = h.GetComponent<NpcPerception>();
+            if (p != null && p.IsLocked) return true;
+        }
+        return false;
+    }
+
+    public bool IsAlphaTransform(Transform t)
+    {
+        if (t == null || alphaTransform == null) return false;
+        return t == alphaTransform || t.IsChildOf(alphaTransform) || alphaTransform.IsChildOf(t);
+    }
+
+    public bool InContactFight(IPackAgent w)
+    {
+        if (w == null || w.Transform == null || !w.IsAlive) return false;
+        if (IsAlphaTransform(w.Transform)) return false;
+        var perc = w.Transform.GetComponent<NpcPerception>();
+        if (perc == null || !perc.IsLocked) return false;
+        var brain = w.Transform.GetComponent<WerewolfBrain>();
+        if (brain != null && !brain.CombatRequested) return false;
+        return true;
+    }
+
+    public void NotifyLocalContact()
+    {
+        UpdateSlots();
+    }
+
+    public void BeginHunt()
+    {
+        if (_phase == PackPhase.Hunt) return;
+        _phase = PackPhase.Hunt;
+        Log("Охота: альфа ответил на Contact.");
+    }
+
+    void EnterAlert()
+    {
+        if (_phase == PackPhase.Patrol)
+            _phase = PackPhase.Alert;
+    }
+
+    public void OnHowl(WerewolfHowl src, WerewolfHowl.Type type, Vector3 at)
+    {
+        if (src == null) return;
+        if (IsAlphaOrder(type) && src.packRank < 5 && !_alphaBurned)
+            return;
+
+        _signalSerial++;
+        _lastSignal = new PackSignal
+        {
+            Type = type,
+            Pos = at,
+            Radius = 6f,
+            Time = Time.time,
+            Source = src,
+            ConsumedTick = _signalSerial
+        };
+        _hasSignal = true;
+
+        var bank = GetComponent<WerewolfHowl>();
+        float range = bank != null && bank.howlRange > 1f ? bank.howlRange : 600f;
+        float r2 = range * range;
+        for (int i = 0; i < _howlers.Count; i++)
+        {
+            var h = _howlers[i];
+            if (h == null || h == src) continue;
+            Vector3 d = h.transform.position - at;
+            d.y = 0f;
+            if (d.sqrMagnitude > r2) continue;
+            h.Hear(type, at, src);
+        }
+
+        if (type == WerewolfHowl.Type.Contact)
+        {
+            EnterAlert();
+            TryAlphaAnswer(src, at, range);
+        }
+        else if (type == WerewolfHowl.Type.OrderPursue || type == WerewolfHowl.Type.OrderAttack)
+            BeginHunt();
+    }
+
+    void TryAlphaAnswer(WerewolfHowl src, Vector3 at, float range)
+    {
+        if (_phase == PackPhase.Hunt) return;
+        if (src != null && IsAlphaWolf(src))
+        {
+            BeginHunt();
+            return;
+        }
+        if (alphaTransform == null) return;
+        Vector3 d = alphaTransform.position - at;
+        d.y = 0f;
+        if (d.sqrMagnitude > range * range) return;
+
+        BeginHunt();
+        var ah = HowlOn(alphaTransform);
+        if (ah != null && ah != src)
+            ah.TryEmit(WerewolfHowl.Type.OrderPursue, ah.transform.position, true);
+    }
+
+    public bool TryConsumeSignal(WerewolfBrain brain, out WerewolfHowl.Type type, out Vector3 at, out float rad)
+    {
+        type = WerewolfHowl.Type.Contact;
+        at = Vector3.zero;
+        rad = 4f;
+        if (!_hasSignal || brain == null) return false;
+        int id = brain.GetInstanceID();
+        if (_heardTick.TryGetValue(id, out int tick) && tick == _signalSerial)
+            return false;
+        _heardTick[id] = _signalSerial;
+        type = _lastSignal.Type;
+        at = _lastSignal.Pos;
+        rad = _lastSignal.Radius;
+        return true;
+    }
+
+    public void IssueAlphaOrder(WerewolfHowl.Type type)
+    {
+        if (!IsAlphaOrder(type)) return;
+        SyncRanks();
+        WerewolfHowl herald = _herald;
+        if (_alphaBurned)
+        {
+            WerewolfHowl alphaHowl = HowlOn(alphaTransform);
+            if (alphaHowl != null) { alphaHowl.TryEmit(type, alphaHowl.transform.position, true); return; }
+        }
+        if (herald != null) herald.BeginHerald(type);
+    }
+
+    static bool IsAlphaOrder(WerewolfHowl.Type t)
+    {
+        return t == WerewolfHowl.Type.Assemble
+            || t == WerewolfHowl.Type.OrderAttack
+            || t == WerewolfHowl.Type.OrderPursue
+            || t == WerewolfHowl.Type.OrderRetreat
+            || t == WerewolfHowl.Type.OrderRejoin
+            || t == WerewolfHowl.Type.Morale
+            || t == WerewolfHowl.Type.HeraldSpeak;
+    }
+
+    static WerewolfHowl HowlOn(Transform t)
+    {
+        return t != null ? t.GetComponent<WerewolfHowl>() : null;
+    }
+
+    void TickIntel(float dt)
+    {
+        SyncRanks();
+        if (_hasSignal && Time.time - _lastSignal.Time > 45f)
+            _hasSignal = false;
+    }
+
+    void TickAlphaBurn(float dt)
+    {
+        if (_alphaBurned || alphaTransform == null || player == null) return;
+        float dist = Vector3.Distance(
+            new Vector3(alphaTransform.position.x, 0f, alphaTransform.position.z),
+            new Vector3(player.position.x, 0f, player.position.z));
+        if (dist > alphaBurnDistance) { _alphaSeenAcc = 0f; return; }
+
+        var vis = FindObjectOfType<PlayerVision>();
+        bool playerSees = vis != null && vis.IsPointVisible(alphaTransform.position);
+        var ap = alphaTransform.GetComponent<NpcPerception>();
+        bool alphaSees = ap != null && ap.SeesPlayer;
+        if (playerSees && alphaSees) _alphaSeenAcc += dt;
+        else _alphaSeenAcc = 0f;
+        if (_alphaSeenAcc >= alphaBurnSeconds)
+            _alphaBurned = true;
+    }
+
+    void TickSquads()
+    {
+        float merge = squadMergeMeters * squadMergeMeters;
+        for (int i = 0; i < _howlers.Count; i++)
+        {
+            var a = _howlers[i];
+            if (a == null) continue;
+            if (a.SquadId == 0) EnsureSoloSquad(a);
+            for (int j = i + 1; j < _howlers.Count; j++)
+            {
+                var b = _howlers[j];
+                if (b == null) continue;
+                Vector3 d = a.transform.position - b.transform.position;
+                d.y = 0f;
+                if (d.sqrMagnitude > merge) continue;
+                MergeSquads(a, b);
+            }
+        }
+    }
+
+    void EnsureSoloSquad(WerewolfHowl h)
+    {
+        var s = new WerewolfSquad { Id = _nextSquadId++ };
+        s.Add(h);
+        _squads.Add(s);
+    }
+
+    void MergeSquads(WerewolfHowl a, WerewolfHowl b)
+    {
+        WerewolfSquad sa = SquadOf(a);
+        WerewolfSquad sb = SquadOf(b);
+        if (sa == null) { EnsureSoloSquad(a); sa = SquadOf(a); }
+        if (sb == null) { EnsureSoloSquad(b); sb = SquadOf(b); }
+        if (sa == null || sb == null || sa == sb) return;
+        sa.MergeFrom(sb);
+        _squads.Remove(sb);
+    }
+
+    WerewolfSquad SquadOf(WerewolfHowl h)
+    {
+        if (h == null) return null;
+        for (int i = 0; i < _squads.Count; i++)
+            if (_squads[i].Members.Contains(h)) return _squads[i];
+        return null;
     }
 
 #if UNITY_EDITOR

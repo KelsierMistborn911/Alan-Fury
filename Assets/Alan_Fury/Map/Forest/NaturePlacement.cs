@@ -1,4 +1,4 @@
-﻿using UnityEngine;
+using UnityEngine;
 using System.Collections.Generic;
 
 /// <summary>
@@ -437,33 +437,67 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
     private void UnloadSector(int sx, int sz)
     {
         var key = new Vector2Int(sx, sz);
-        int w = heightSource != null ? heightSource.width : 0;
-        int d = heightSource != null ? heightSource.depth : 0;
-        int x0 = sx * sectorSize;
-        int z0 = sz * sectorSize;
-        int x1 = Mathf.Min(w, x0 + sectorSize);
-        int z1 = Mathf.Min(d, z0 + sectorSize);
+        bool gridOk = mapGrid != null && mapGrid.IsReady;
+        int bx0 = int.MaxValue, bz0 = int.MaxValue, bx1 = int.MinValue, bz1 = int.MinValue;
+        bool any = false;
 
         for (int vi = 0; vi < allVariants.Count; vi++)
         {
             var v = allVariants[vi];
             var layer = variantLayer[vi];
-            if (v.sectorLists != null) v.sectorLists.Remove(key);
-            if (v.sectors != null) v.sectors.Remove(key);
-
-            if (layer.IsTree && mapGrid != null && mapGrid.IsReady)
+            if (gridOk && layer.IsTree)
             {
                 int fp = Mathf.Max(1, layer.footprint);
-                int half = fp / 2;
-                for (int x = Mathf.Max(0, x0 - half); x < Mathf.Min(w, x1 + half); x++)
+                if (v.sectorLists != null && v.sectorLists.TryGetValue(key, out var list) && list != null)
                 {
-                    for (int z = Mathf.Max(0, z0 - half); z < Mathf.Min(d, z1 + half); z++)
+                    for (int i = 0; i < list.Count; i++)
+                        ClearTreeFootprint(list[i], fp, ref any, ref bx0, ref bz0, ref bx1, ref bz1);
+                }
+                else if (v.sectors != null && v.sectors.TryGetValue(key, out var batches) && batches != null)
+                {
+                    for (int b = 0; b < batches.Length; b++)
                     {
-                        mapGrid.ClearOccupancy(x, z, 1, 1, MapGrid.OccupancyFlags.Tree, anchorCenter: false);
-                        mapGrid.ClearSightCover(x, z, 1, 1, anchorCenter: false);
+                        var batch = batches[b];
+                        if (batch == null) continue;
+                        for (int i = 0; i < batch.Length; i++)
+                            ClearTreeFootprint(batch[i], fp, ref any, ref bx0, ref bz0, ref bx1, ref bz1);
                     }
                 }
             }
+
+            if (v.sectorLists != null) v.sectorLists.Remove(key);
+            if (v.sectors != null) v.sectors.Remove(key);
+        }
+
+        if (gridOk && any)
+            mapGrid.RebuildAggregatesInBounds(bx0, bz0, bx1, bz1);
+    }
+
+    private void ClearTreeFootprint(Matrix4x4 m, int fp,
+        ref bool any, ref int bx0, ref int bz0, ref int bx1, ref int bz1)
+    {
+        Vector3 p = m.GetColumn(3);
+        mapGrid.WorldToCell(p, out int cx, out int cz);
+        mapGrid.ClearOccupancy(cx, cz, fp, fp, MapGrid.OccupancyFlags.Tree, anchorCenter: true, rebuild: false);
+        mapGrid.ClearSightCover(cx, cz, fp, fp, anchorCenter: true);
+
+        int hx = fp / 2;
+        int hz = fp / 2;
+        int x0 = cx - hx;
+        int z0 = cz - hz;
+        int x1 = x0 + fp - 1;
+        int z1 = z0 + fp - 1;
+        if (!any)
+        {
+            bx0 = x0; bz0 = z0; bx1 = x1; bz1 = z1;
+            any = true;
+        }
+        else
+        {
+            if (x0 < bx0) bx0 = x0;
+            if (z0 < bz0) bz0 = z0;
+            if (x1 > bx1) bx1 = x1;
+            if (z1 > bz1) bz1 = z1;
         }
     }
 

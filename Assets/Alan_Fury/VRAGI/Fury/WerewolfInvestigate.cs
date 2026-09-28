@@ -1,4 +1,4 @@
-﻿using UnityEngine;
+using UnityEngine;
 using System.Collections.Generic;
 
 /// <summary>
@@ -88,16 +88,18 @@ public class WerewolfInvestigate : MonoBehaviour
         float rad = Mathf.Max(0.5f, perception.CueRadius) + arriveSlack;
         Face(cue, dt);
 
+        bool hunt = PackHunting();
+        float speed = hunt ? retreatSpeed : sneakSpeed;
+
         float dist = FlatDist(transform.position, cue);
         if (dist > rad)
         {
             _inspectLeft = inspectSeconds;
-            Follow(cue, sneakSpeed, dt);
+            Follow(cue, speed, dt);
             return;
         }
 
-        // В диске: топчемся, смотрим, ждём освежения следа.
-        Follow(cue, sneakSpeed * 0.4f, dt);
+        Follow(cue, speed * 0.4f, dt);
         if (perception.CueAge < 0.4f)
             _inspectLeft = inspectSeconds;
         else
@@ -105,6 +107,11 @@ public class WerewolfInvestigate : MonoBehaviour
 
         if (_inspectLeft <= 0f)
         {
+            if (hunt && RefreshHuntCue())
+            {
+                _inspectLeft = inspectSeconds;
+                return;
+            }
             perception.ClearCue();
             BeginRetreat();
         }
@@ -218,5 +225,21 @@ public class WerewolfInvestigate : MonoBehaviour
     {
         float dx = a.x - b.x, dz = a.z - b.z;
         return Mathf.Sqrt(dx * dx + dz * dz);
+    }
+
+    bool PackHunting()
+    {
+        var pack = WerewolfPackManager.Instance;
+        return pack != null && pack.Phase == WerewolfPackManager.PackPhase.Hunt;
+    }
+
+    bool RefreshHuntCue()
+    {
+        var pack = WerewolfPackManager.Instance;
+        if (pack == null || pack.Phase != WerewolfPackManager.PackPhase.Hunt) return false;
+        var sig = pack.LastSignal;
+        if (sig.Time <= 0f || Time.time - sig.Time > 20f) return false;
+        perception.ReportCue(sig.Pos, Mathf.Max(4f, sig.Radius));
+        return true;
     }
 }

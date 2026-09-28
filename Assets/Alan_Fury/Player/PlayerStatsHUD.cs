@@ -10,22 +10,22 @@ public class PlayerStatsHUD : MonoBehaviour
     [Header("Источник")]
     [Tooltip("Пусто → ищется PlayerResources на этом объекте.")]
     public PlayerResources resources;
-    [Tooltip("Пусто → ищется CombatController3D на этом объекте.")]
-    public CombatController3D combat;
+    [Tooltip("Пусто → ищется HumanoidCombat на этом объекте.")]
+    public HumanoidCombat combat;
 
     [Header("Размещение")]
     [Tooltip("Смещение HUD над игроком (м).")]
     public Vector3 offset = new Vector3(0f, 2.6f, 0f);
     [Tooltip("Ширина полоски (м).")]
-    public float barWidth = 0.9f;
+    public float barWidth = 1.8f;
     [Tooltip("Высота полоски (м).")]
-    public float barHeight = 0.07f;
+    public float barHeight = 0.14f;
     [Tooltip("Зазор между полосками (м).")]
-    public float barSpacing = 0.03f;
+    public float barSpacing = 0.06f;
 
     [Header("Цифры")]
     [Tooltip("Размер цифр (characterSize у TextMesh).")]
-    public float textSize = 0.04f;
+    public float textSize = 0.08f;
 
     [Header("Цвета")]
     public Color healthColor = new Color(0.85f, 0.15f, 0.15f);
@@ -38,14 +38,14 @@ public class PlayerStatsHUD : MonoBehaviour
     public Color blockReadyColor = new Color(0.25f, 0.85f, 0.3f);
     public Color blockActiveColor = new Color(0.95f, 0.85f, 0.2f);
     [Tooltip("Зазор между кружком и полосками (м).")]
-    public float blockCircleGap = 0.05f;
+    public float blockCircleGap = 0.1f;
 
     [Header("Индикатор заряда атаки")]
     public Color chargeIdleColor = new Color(0.9f, 0.2f, 0.15f, 0.85f);   // красный
     public Color chargeProgressColor = new Color(0.95f, 0.85f, 0.2f, 0.9f); // жёлтый
     public Color chargeHeavyColor = new Color(0.25f, 0.55f, 1f, 0.95f);     // синий
     [Tooltip("Зазор между кружком блока и индикатором заряда.")]
-    public float chargeGap = 0.04f;
+    public float chargeGap = 0.08f;
 
     private Transform _root;
     private Bar[] _bars;
@@ -63,7 +63,7 @@ public class PlayerStatsHUD : MonoBehaviour
     void Start()
     {
         if (resources == null) resources = GetComponent<PlayerResources>();
-        if (combat == null) combat = GetComponent<CombatController3D>();
+        if (combat == null) combat = GetComponent<HumanoidCombat>();
 
         _root = new GameObject("PlayerStatsHUD").transform;
         _root.SetParent(transform, false);
@@ -153,7 +153,7 @@ public class PlayerStatsHUD : MonoBehaviour
 
     void LateUpdate()
     {
-        if (resources == null || _root == null) return;
+        if (resources == null || _root == null || _bars == null) return;
 
         UpdateBar(_bars[0], resources.HealthPercent, resources.CurrentHealth);
         UpdateBar(_bars[1], resources.StaminaPercent, resources.CurrentStamina);
@@ -238,11 +238,13 @@ public class PlayerStatsHUD : MonoBehaviour
 
     private void UpdateBar(Bar bar, float percent, float value)
     {
+        if (bar.fill == null) return;
         percent = Mathf.Clamp01(percent);
         Vector3 s = bar.fill.localScale;
         s.x = barWidth * percent;
         bar.fill.localScale = s;
         bar.fill.localPosition = new Vector3(-(barWidth - s.x) * 0.5f, 0f, 0f);
-        bar.text.text = Mathf.RoundToInt(value).ToString();
+        if (bar.text != null)
+            bar.text.text = Mathf.RoundToInt(value).ToString();
     }
 }

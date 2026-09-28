@@ -1,4 +1,4 @@
-﻿using UnityEngine;
+using UnityEngine;
 using System;
 using System.Collections.Generic;
 
@@ -171,7 +171,7 @@ public class MapGrid : MonoBehaviour
 
     /// <summary>Снять флаги с клеток (по умолчанию все).</summary>
     public void ClearOccupancy(int cx, int cz, int sizeX, int sizeZ,
-        OccupancyFlags flags = (OccupancyFlags)0xFF, bool anchorCenter = true)
+        OccupancyFlags flags = (OccupancyFlags)0xFF, bool anchorCenter = true, bool rebuild = true)
     {
         if (!_ready) return;
         GetBounds(cx, cz, sizeX, sizeZ, anchorCenter, out int x0, out int z0, out int x1, out int z1);
@@ -184,10 +184,12 @@ public class MapGrid : MonoBehaviour
                 _flags[i] &= ~flags;
             }
         }
-        // Простой пересчёт затронутых sector/region
-        RebuildAggregatesInBounds(
-            Mathf.Max(0, x0), Mathf.Max(0, z0),
-            Mathf.Min(_w - 1, x1), Mathf.Min(_d - 1, z1));
+        if (rebuild)
+        {
+            RebuildAggregatesInBounds(
+                Mathf.Max(0, x0), Mathf.Max(0, z0),
+                Mathf.Min(_w - 1, x1), Mathf.Min(_d - 1, z1));
+        }
     }
 
     public void SetCost(int cx, int cz, float cost)
@@ -512,7 +514,7 @@ public class MapGrid : MonoBehaviour
             _regionBlocked[rx * _rd + rz] = true;
     }
 
-    private void RebuildAggregatesInBounds(int x0, int z0, int x1, int z1)
+    public void RebuildAggregatesInBounds(int x0, int z0, int x1, int z1)
     {
         int ss = Mathf.Max(1, sectorSize);
         int rs = Mathf.Max(1, regionSize);
@@ -520,30 +522,30 @@ public class MapGrid : MonoBehaviour
         int rx0 = x0 / rs, rz0 = z0 / rs, rx1 = x1 / rs, rz1 = z1 / rs;
 
         for (int sx = sx0; sx <= sx1; sx++)
-            for (int sz = sz0; sz <= sz1; sz++)
-            {
-                if (sx < 0 || sz < 0 || sx >= _sw || sz >= _sd) continue;
-                bool blocked = false;
-                int bx0 = sx * ss, bz0 = sz * ss;
-                int bx1 = Mathf.Min(_w, bx0 + ss), bz1 = Mathf.Min(_d, bz0 + ss);
-                for (int x = bx0; x < bx1 && !blocked; x++)
-                    for (int z = bz0; z < bz1 && !blocked; z++)
-                        if (IsBlocked(x, z)) blocked = true;
-                _sectorBlocked[sx * _sd + sz] = blocked;
-            }
+        for (int sz = sz0; sz <= sz1; sz++)
+        {
+            if (sx < 0 || sz < 0 || sx >= _sw || sz >= _sd) continue;
+            bool blocked = false;
+            int bx0 = sx * ss, bz0 = sz * ss;
+            int bx1 = Mathf.Min(_w, bx0 + ss), bz1 = Mathf.Min(_d, bz0 + ss);
+            for (int x = bx0; x < bx1 && !blocked; x++)
+                for (int z = bz0; z < bz1 && !blocked; z++)
+                    if (IsBlocked(x, z)) blocked = true;
+            _sectorBlocked[sx * _sd + sz] = blocked;
+        }
 
         for (int rx = rx0; rx <= rx1; rx++)
-            for (int rz = rz0; rz <= rz1; rz++)
-            {
-                if (rx < 0 || rz < 0 || rx >= _rw || rz >= _rd) continue;
-                bool blocked = false;
-                int bx0 = rx * rs, bz0 = rz * rs;
-                int bx1 = Mathf.Min(_w, bx0 + rs), bz1 = Mathf.Min(_d, bz0 + rs);
-                for (int x = bx0; x < bx1 && !blocked; x++)
-                    for (int z = bz0; z < bz1 && !blocked; z++)
-                        if (IsBlocked(x, z)) blocked = true;
-                _regionBlocked[rx * _rd + rz] = blocked;
-            }
+        for (int rz = rz0; rz <= rz1; rz++)
+        {
+            if (rx < 0 || rz < 0 || rx >= _rw || rz >= _rd) continue;
+            bool blocked = false;
+            int bx0 = rx * rs, bz0 = rz * rs;
+            int bx1 = Mathf.Min(_w, bx0 + rs), bz1 = Mathf.Min(_d, bz0 + rs);
+            for (int x = bx0; x < bx1 && !blocked; x++)
+                for (int z = bz0; z < bz1 && !blocked; z++)
+                    if (IsBlocked(x, z)) blocked = true;
+            _regionBlocked[rx * _rd + rz] = blocked;
+        }
     }
 
     // ============ Gizmos ============

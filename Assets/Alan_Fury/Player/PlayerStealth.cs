@@ -1,8 +1,8 @@
-﻿using UnityEngine;
+using UnityEngine;
 
 /// <summary>
 /// Заметность и шум персонажа. Данные для восприятия AI (зрение/обоняние позже).
-/// IsSneaking и gait живут в PlayerMovement3D — отсюда только читаем.
+/// IsSneaking и gait живут в HumanoidLocomotion — отсюда только читаем.
 /// Множители и условия расширяются по мере стелса (туман, раны, атаки…).
 /// </summary>
 public class PlayerStealth : MonoBehaviour
@@ -39,13 +39,13 @@ public class PlayerStealth : MonoBehaviour
     /// <summary>Итоговая заметность (пока = base; позже статы, баффы, раны).</summary>
     public float Noticeability => baseNoticeability;
 
-    private PlayerMovement3D _movement;
-    private CombatController3D _combat;
+    private HumanoidLocomotion _movement;
+    private HumanoidCombat _combat;
 
     void Awake()
     {
-        _movement = GetComponent<PlayerMovement3D>();
-        _combat = GetComponent<CombatController3D>();
+        _movement = GetComponent<HumanoidLocomotion>();
+        _combat = GetComponent<HumanoidCombat>();
     }
 
     void Update()

@@ -2,42 +2,42 @@ using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
-/// Отряд лучников при рыцаре (SkeletonBrain на том же объекте).
-/// Маршрут точками, не приклеен к рыцарю. Шеренга на врага. Залп по команде.
-/// Смерть рыцаря — Disband, лучники сами и криво.
+/// РћС‚СЂСЏРґ Р»СѓС‡РЅРёРєРѕРІ РїСЂРё СЂС‹С†Р°СЂРµ (SkeletonBrain РЅР° С‚РѕРј Р¶Рµ РѕР±СЉРµРєС‚Рµ).
+/// РњР°СЂС€СЂСѓС‚ С‚РѕС‡РєР°РјРё, РЅРµ РїСЂРёРєР»РµРµРЅ Рє СЂС‹С†Р°СЂСЋ. РЁРµСЂРµРЅРіР° РЅР° РІСЂР°РіР°. Р—Р°Р»Рї РїРѕ РєРѕРјР°РЅРґРµ.
+/// РЎРјРµСЂС‚СЊ СЂС‹С†Р°СЂСЏ вЂ” Disband, Р»СѓС‡РЅРёРєРё СЃР°РјРё Рё РєСЂРёРІРѕ.
 /// </summary>
 public class SkeletonSquad : MonoBehaviour
 {
     public enum Form { Column, Rank }
 
-    [Header("Состав")]
+    [Header("РЎРѕСЃС‚Р°РІ")]
     public GameObject archerPrefab;
     public int archerCount = 12;
     public Transform[] existingArchers;
 
-    [Header("Маршрут")]
+    [Header("РњР°СЂС€СЂСѓС‚")]
     public Transform[] orderPoints;
     public int marchGait = 1;
     public float waypointArrive = 2.4f;
 
-    [Header("Строй")]
+    [Header("РЎС‚СЂРѕР№")]
     public int columnFiles = 2;
     public float fileSpacing = 1.7f;
     public float rankSpacing = 1.85f;
     public float slotArrive = 0.75f;
-    [Tooltip("Если шеренга смотрит мимо врага больше этого угла — перестроить.")]
+    [Tooltip("Р•СЃР»Рё С€РµСЂРµРЅРіР° СЃРјРѕС‚СЂРёС‚ РјРёРјРѕ РІСЂР°РіР° Р±РѕР»СЊС€Рµ СЌС‚РѕРіРѕ СѓРіР»Р° вЂ” РїРµСЂРµСЃС‚СЂРѕРёС‚СЊ.")]
     public float reformAngle = 38f;
     public float escortSide = 2.4f;
     public float escortBack = 0.8f;
 
-    [Header("Залп")]
+    [Header("Р—Р°Р»Рї")]
     public float volleyDraw = 0.75f;
     public float volleyReload = 2.4f;
     public float volleyStagger = 0.04f;
-    public float engageRange = 20f;
-    public float loseRange = 28f;
+    public float engageRange = 28f;
+    public float loseRange = 42f;
 
-    [Header("Спавн без префаба")]
+    [Header("РЎРїР°РІРЅ Р±РµР· РїСЂРµС„Р°Р±Р°")]
     public float dummyHeight = 1.8f;
     public float dummyRadius = 0.28f;
     public Color dummyColor = new Color(0.82f, 0.8f, 0.72f, 1f);
@@ -375,12 +375,12 @@ public class SkeletonSquad : MonoBehaviour
             for (int i = 0; i < orderPoints.Length; i++)
             {
                 if (orderPoints[i] == null) continue;
-                _route.Add(Snap(orderPoints[i].position));
+                _route.Add(Snap(orderPoints[i].position, road: true));
             }
         }
         _routeIndex = 0;
         if (_route.Count == 0)
-            _route.Add(Snap(transform.position + transform.forward * 6f));
+            _route.Add(Snap(transform.position + transform.forward * 6f, road: true));
     }
 
     void AdvanceRoute()
@@ -421,10 +421,10 @@ public class SkeletonSquad : MonoBehaviour
             float x = (file - (files - 1) * 0.5f) * fileSpacing;
             float z = -row * rankSpacing;
             Vector3 p = Head + right * x + Forward * z;
-            _slots[i] = Snap(p);
+            _slots[i] = Snap(p, road: CurrentForm == Form.Column);
         }
 
-        EscortPoint = Head + right * escortSide - Forward * escortBack;
+        EscortPoint = Snap(Head + right * escortSide - Forward * escortBack, road: CurrentForm == Form.Column);
     }
 
     Vector3 RankOrigin()
@@ -437,7 +437,7 @@ public class SkeletonSquad : MonoBehaviour
             if (to.sqrMagnitude > 0.01f)
             {
                 float stand = Mathf.Clamp(to.magnitude - 12f, 4f, 16f);
-                return Snap(Threat.position - to.normalized * stand);
+                return Snap(Threat.position - to.normalized * stand, road: false);
             }
             return c;
         }
@@ -542,9 +542,14 @@ public class SkeletonSquad : MonoBehaviour
 
     Vector3 Snap(Vector3 p)
     {
-        if (_pathfinder != null && _pathfinder.IsReady)
-            return _pathfinder.NearestWalkableWorld(p, out _);
-        return p;
+        return Snap(p, road: CurrentForm == Form.Column);
+    }
+
+    Vector3 Snap(Vector3 p, bool road)
+    {
+        if (_pathfinder == null || !_pathfinder.IsReady) return p;
+        if (road) return _pathfinder.NearestRoadWorld(p, out _);
+        return _pathfinder.NearestWalkableWorld(p, out _);
     }
 
     static bool Live(SkeletonArcherBrain a)

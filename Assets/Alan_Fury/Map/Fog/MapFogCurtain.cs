@@ -18,8 +18,7 @@ public class MapFogCurtain : MonoBehaviour
 {
     [Header("Источники размеров")]
     public HeightMapGenerator heightSource;
-    public ChunkedTerrainBuilder chunkedBuilder;     // приоритетный источник tileSize
-    public SeamlessTerrainBuilder seamlessBuilder;   // запасной
+    public ChunkedTerrainBuilder chunkedBuilder;     // источник tileSize
 
     [Header("Префаб тумана (тот же, что на карте)")]
     public GameObject fogPrefab;
@@ -144,9 +143,18 @@ public class MapFogCurtain : MonoBehaviour
     private float GetTileSize()
     {
         if (chunkedBuilder != null) return chunkedBuilder.TileSize;
-        if (seamlessBuilder != null) return seamlessBuilder.tileSize;
         return 4f;
     }
 
-    void OnDestroy() => ClearCurtain();
+    void OnDestroy()
+    {
+        if (parent == null) return;
+        for (int i = parent.childCount - 1; i >= 0; i--)
+        {
+            var c = parent.GetChild(i).gameObject;
+            if (Application.isPlaying) Destroy(c);
+            else DestroyImmediate(c);
+        }
+        _placed.Clear();
+    }
 }

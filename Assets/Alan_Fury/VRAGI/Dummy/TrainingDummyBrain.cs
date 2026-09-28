@@ -1,4 +1,4 @@
-﻿using UnityEngine;
+using UnityEngine;
 
 /// <summary>
 /// Манекен: стоит на месте, смотрит на игрока, бьёт цикл
@@ -29,10 +29,6 @@ public class TrainingDummyBrain : MonoBehaviour
     public float attackCooldown = 1.35f;
     public DummyForm startForm = DummyForm.SlashLeft;
 
-    [Header("Стойка")]
-    [Tooltip("Не подшагивать и не уходить в клинч-формы.")]
-    public bool plantFeet = true;
-
     public Transform CurrentTarget { get; private set; }
     public DummyForm NextForm => _next;
 
@@ -54,12 +50,6 @@ public class TrainingDummyBrain : MonoBehaviour
             combat.loadout = loadout;
             combat.hitbox = hitbox;
             combat.lockNamedForms = true;
-            if (plantFeet)
-            {
-                combat.spacingMaxStep = 0f;
-                combat.spacingHeavyStep = 0f;
-                combat.targetMagnetRange = 0f;
-            }
         }
 
         EnsureWeapon();

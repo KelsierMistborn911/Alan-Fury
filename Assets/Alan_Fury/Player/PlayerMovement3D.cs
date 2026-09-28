@@ -107,15 +107,17 @@ public class PlayerMovement3D : HumanoidLocomotion
             return;
 
         bool hasMove = move.sqrMagnitude > 0.01f;
-        if (!hasMove && !HasDodgeThreat)
+        if (hasMove || HasDodgeThreat)
         {
-            if (Combat != null)
-                Combat.TryDisengageStep();
+            Vector3 dir = hasMove ? move : ComputeLookDirection();
+            TryDodge(dir);
             return;
         }
 
-        Vector3 dir = hasMove ? move : ComputeLookDirection();
-        TryDodge(dir);
+        if (Combat != null && Combat.TryDisengageStep())
+            return;
+
+        TryDodge(ComputeLookDirection());
     }
 
     Vector3 DirFromKey(KeyCode key)

@@ -1,4 +1,4 @@
-﻿using UnityEngine;
+using UnityEngine;
 
 /// <summary>
 /// Знак заметности над волком: жёлтый «!» → красный к Notice01=1.
@@ -13,7 +13,7 @@ public class WerewolfNoticeIndicator : MonoBehaviour
     [Header("Вид")]
     [Tooltip("Опциональный спрайт восклицательного знака. Пусто — цветной квад.")]
     public Sprite sprite;
-    public float size = 0.45f;
+    public float size = 0.9f;
     public float height = 2.55f;
     public Color yellow = new Color(1f, 0.88f, 0.15f, 0.92f);
     public Color red = new Color(0.95f, 0.12f, 0.1f, 0.95f);

@@ -1,24 +1,24 @@
 using UnityEngine;
 
 /// <summary>
-/// Переключает визуал оружия/щита между «в руке» и «в ножнах».
-/// Вызывается из CombatController3D при Draw / Sheath.
+/// РџРµСЂРµРєР»СЋС‡Р°РµС‚ РІРёР·СѓР°Р» РѕСЂСѓР¶РёСЏ/С‰РёС‚Р° РјРµР¶РґСѓ В«РІ СЂСѓРєРµВ» Рё В«РІ РЅРѕР¶РЅР°С…В».
+/// Р’С‹Р·С‹РІР°РµС‚СЃСЏ РёР· HumanoidCombat РїСЂРё Draw / Sheath.
 /// </summary>
 public class WeaponVisual : MonoBehaviour
 {
-    [Header("Меч")]
-    [Tooltip("Скинненный меч в руке (AKER SWORD). Включается когда меч достат.")]
+    [Header("РњРµС‡")]
+    [Tooltip("РЎРєРёРЅРЅРµРЅРЅС‹Р№ РјРµС‡ РІ СЂСѓРєРµ (AKER SWORD). Р’РєР»СЋС‡Р°РµС‚СЃСЏ РєРѕРіРґР° РјРµС‡ РґРѕСЃС‚Р°С‚.")]
     public GameObject combatSword;
-    [Tooltip("Жёсткая копия меча на бедре (AKER SWORD_Sheathed). Включается когда меч убран.")]
+    [Tooltip("Р–С‘СЃС‚РєР°СЏ РєРѕРїРёСЏ РјРµС‡Р° РЅР° Р±РµРґСЂРµ (AKER SWORD_Sheathed). Р’РєР»СЋС‡Р°РµС‚СЃСЏ РєРѕРіРґР° РјРµС‡ СѓР±СЂР°РЅ.")]
     public GameObject sheathedSword;
 
-    [Header("Щит")]
-    [Tooltip("Щит в руке / на предплечье.")]
+    [Header("Р©РёС‚")]
+    [Tooltip("Р©РёС‚ РІ СЂСѓРєРµ / РЅР° РїСЂРµРґРїР»РµС‡СЊРµ.")]
     public GameObject combatShield;
-    [Tooltip("Щит на спине.")]
+    [Tooltip("Р©РёС‚ РЅР° СЃРїРёРЅРµ.")]
     public GameObject sheathedShield;
 
-    // --- Меч ---
+    // --- РњРµС‡ ---
 
     public void SetSwordDrawn()
     {
@@ -32,7 +32,7 @@ public class WeaponVisual : MonoBehaviour
         if (sheathedSword != null) sheathedSword.SetActive(true);
     }
 
-    // --- Щит ---
+    // --- Р©РёС‚ ---
 
     public void SetShieldDrawn()
     {
@@ -46,7 +46,7 @@ public class WeaponVisual : MonoBehaviour
         if (sheathedShield != null) sheathedShield.SetActive(true);
     }
 
-    // --- Совместимость со старым API ---
+    // --- РЎРѕРІРјРµСЃС‚РёРјРѕСЃС‚СЊ СЃРѕ СЃС‚Р°СЂС‹Рј API ---
 
     public void SetDrawn()
     {

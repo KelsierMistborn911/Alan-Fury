@@ -95,11 +95,17 @@ public class Pathfinder : MonoBehaviour
     /// <summary>Заполняет result мировыми точками пути (стартовая клетка не включается). false, если пути нет.</summary>
     public bool TryFindPath(Vector3 from, Vector3 to, List<Vector3> result)
     {
-        return TryFindPath(from, to, result, avoidRoads: false);
+        return TryFindPath(from, to, result, avoidRoads: false, preferRoads: false);
     }
 
-    /// <summary>avoidRoads — клетка с флагом Road дороже, путь идёт рядом, не по полотну.</summary>
+    /// <summary>avoidRoads — клетка с флагом Road дороже, путь идёт рядом, не по полотну.
+    /// preferRoads — наоборот: лес дороже, маршрут тянется к полотну.</summary>
     public bool TryFindPath(Vector3 from, Vector3 to, List<Vector3> result, bool avoidRoads)
+    {
+        return TryFindPath(from, to, result, avoidRoads, preferRoads: false);
+    }
+
+    public bool TryFindPath(Vector3 from, Vector3 to, List<Vector3> result, bool avoidRoads, bool preferRoads)
     {
         result.Clear();
         if (!_ready) return false;
@@ -158,6 +164,7 @@ public class Pathfinder : MonoBehaviour
                 float stepBase = diag ? SQRT2 : 1f;
                 float cellCost = _cost[nIdx];
                 if (avoidRoads && IsRoadCell(nx, nz)) cellCost *= 12f;
+                if (preferRoads && !IsRoadCell(nx, nz)) cellCost *= 8f;
                 float nd = g[cur] + stepBase * cellCost;
                 if (nd < g[nIdx])
                 {
@@ -203,6 +210,40 @@ public class Pathfinder : MonoBehaviour
             return CellToWorld(wx, wz);
         }
         return pos;
+    }
+
+    public Vector3 NearestRoadWorld(Vector3 pos, out bool found)
+    {
+        found = false;
+        if (!_ready) return pos;
+        int cx, cz;
+        WorldToCell(pos, out cx, out cz);
+        if (InBounds(cx, cz) && _walkable[Idx(cx, cz)] && IsRoadCell(cx, cz))
+        {
+            found = true;
+            return CellToWorld(cx, cz);
+        }
+        int maxR = Mathf.Max(nearestSearchRadius, 48);
+        for (int r = 1; r <= maxR; r++)
+        {
+            for (int x = cx - r; x <= cx + r; x++)
+            {
+                for (int z = cz - r; z <= cz + r; z++)
+                {
+                    if (Mathf.Abs(x - cx) != r && Mathf.Abs(z - cz) != r) continue;
+                    if (!InBounds(x, z)) continue;
+                    if (!_walkable[Idx(x, z)] || !IsRoadCell(x, z)) continue;
+                    found = true;
+                    return CellToWorld(x, z);
+                }
+            }
+        }
+        return NearestWalkableWorld(pos, out found);
+    }
+
+    bool InBounds(int cx, int cz)
+    {
+        return cx >= 0 && cz >= 0 && cx < _w && cz < _d;
     }
 
     public bool IsWalkableWorld(Vector3 pos)

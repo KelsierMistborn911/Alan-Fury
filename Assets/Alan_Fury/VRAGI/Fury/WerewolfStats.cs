@@ -37,8 +37,6 @@ public class WerewolfStats : MonoBehaviour, IDamageable
     public float maxHealth = 30f;
     [Tooltip("Реген HP сразу, даже под ударом и кровотечением. 0 = выкл.")]
     public float healthRegenPerSecond = 1.5f;
-    [Tooltip("Устарело. Паузы регена больше нет.")]
-    public float healthRegenDelay = 0f;
 
     [Header("Стамина")]
     public float maxStamina = 60f;
@@ -195,6 +193,9 @@ public class WerewolfStats : MonoBehaviour, IDamageable
             _wounds = gameObject.AddComponent<WoundTracker>();
     }
 
+    void OnEnable() => WeaponHitbox.Register(this);
+    void OnDisable() => WeaponHitbox.Unregister(this);
+
     public void TakeDamage(float amount)
     {
         ApplyHealthDamage(amount, default, reportFear: true, showPopup: true);
@@ -208,7 +209,6 @@ public class WerewolfStats : MonoBehaviour, IDamageable
     bool ShouldInterrupt(HitInfo hit)
     {
         float dmg = hit.finalDamage > 0f ? hit.finalDamage : hit.rawDamage;
-        if (dmg >= 0.2f || hit.stagger >= 0.5f) return true;
         return dmg >= interruptMinDamage || hit.stagger >= interruptMinStagger;
     }
 

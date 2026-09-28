@@ -2,8 +2,8 @@ using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
-/// Лучник отряда. Слот и залп — только от SkeletonSquad.
-/// После Disband — сам, медленно и криво.
+/// Р›СѓС‡РЅРёРє РѕС‚СЂСЏРґР°. РЎР»РѕС‚ Рё Р·Р°Р»Рї вЂ” С‚РѕР»СЊРєРѕ РѕС‚ SkeletonSquad.
+/// РџРѕСЃР»Рµ Disband вЂ” СЃР°Рј, РјРµРґР»РµРЅРЅРѕ Рё РєСЂРёРІРѕ.
 /// </summary>
 [RequireComponent(typeof(HumanoidLocomotion))]
 [RequireComponent(typeof(NpcPerception))]
@@ -19,11 +19,11 @@ public class SkeletonArcherBrain : MonoBehaviour
     public Pathfinder pathfinder;
     public SkeletonSquad squad;
 
-    [Header("Слот")]
+    [Header("РЎР»РѕС‚")]
     public float arriveDistance = 0.7f;
     public int marchGait = 1;
 
-    [Header("Слом строя")]
+    [Header("РЎР»РѕРј СЃС‚СЂРѕСЏ")]
     public float brokenAggro = 18f;
     public float brokenLose = 28f;
     public float brokenIdeal = 11f;

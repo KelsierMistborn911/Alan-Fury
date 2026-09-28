@@ -140,6 +140,7 @@ MonoBehaviour:
   faceLockAfterHit: 0.32
   faceLockAfterLeap: 0.28
   arriveThreshold: 1.5
+  contactRadius: 1.35
   groundLayers:
     serializedVersion: 2
     m_Bits: 4294967295
@@ -302,21 +303,23 @@ MonoBehaviour:
   safetyMargin: 5
   outerDistanceMult: 1.33
   commitLeapArc: 0.85
-  orbitRadiusJitter: 0.8
-  jitterInterval: 0.7
   opportunityWindow: 0.8
   hitsCautious: 1
   hitsMid: 2
   hitsFierce: 3
   dodgeStaminaCost: 12
   threatRangeMargin: 2
-  dodgeThreatAngle: 60
   leapDodgeRange: 7
   sidestepImpulse: 7
-  dodgeDistance: 4
+  dodgeMin: 2
+  dodgeMax: 4
+  dodgeMargin: 0.45
   dodgeArc: 0.75
   dodgeCooldown: 0.5
   postAttackDodgeLock: 0.25
+  dodgeLandLock: 0.2
+  dodgeSlideSpeed: 3.8
+  fearHoldExtra: 3.5
   separationRadius: 3.5
   separationStrength: 3.5
 --- !u!114 &-5318893361700369184
@@ -364,8 +367,16 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   coneHalfAngle: 60
-  debugShowZone: 1
+  showZoneMesh: 0
+  showStrikeMesh: 1
   debugZoneY: 0.05
+  sweepBladePad: 8
+  strikeBladeLength: 0.45
+  telegraphColor: {r: 1, g: 0.85, b: 0.15, a: 0.22}
+  sweepColor: {r: 1, g: 0.12, b: 0.08, a: 0.42}
+  strikeColor: {r: 1, g: 0.92, b: 0.55, a: 0.92}
+  strikeWindupColor: {r: 1, g: 0.85, b: 0.2, a: 0.35}
+  debugShowZone: 1
   visual: {fileID: 0}
 --- !u!114 &-6138623223271072045
 MonoBehaviour:
@@ -381,7 +392,6 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   maxHealth: 60
   healthRegenPerSecond: 7
-  healthRegenDelay: 1
   maxStamina: 60
   staminaRegenPerSecond: 12
   staminaRegenDelay: 1
@@ -391,6 +401,8 @@ MonoBehaviour:
   fearRegenPerSecond: 3
   slowTickInterval: 1
   mass: 100
+  interruptMinDamage: 8
+  interruptMinStagger: 3.5
   target: {fileID: 0}
 --- !u!114 &5920791607548002130
 MonoBehaviour:
@@ -488,6 +500,7 @@ MonoBehaviour:
   cueLifetime: 8
   hearUncertainty: 7
   sightUncertainty: 1.2
+  noticeSoundCap: 0.7
   drawGizmos: 1
   gizmoSegments: 48
   gizmoY: 0.12

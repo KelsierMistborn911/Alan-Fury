@@ -1,4 +1,4 @@
-﻿using UnityEngine;
+using UnityEngine;
 using System.Collections.Generic;
 
 /// <summary>
@@ -120,6 +120,16 @@ public class PlayerVision : MonoBehaviour
         return mapGrid.HasSightLos(EyePosition, worldPos);
     }
 
+    /// <summary>
+    /// Кромка: расширенная форма на extraCells, но точка не видна.
+    /// Без LOS — контур на границе зрения, не за укрытием глубже формы.
+    /// </summary>
+    public bool InFringe(Vector3 worldPos, int extraCells)
+    {
+        if (IsPointVisible(worldPos)) return false;
+        return InShapeExpanded(worldPos, Mathf.Max(0, extraCells));
+    }
+
     /// <summary>Клетка видна: центр в круге + LOS. Требует MapGrid.</summary>
     public bool IsCellVisible(int cx, int cz)
     {
@@ -220,8 +230,11 @@ public class PlayerVision : MonoBehaviour
             outList.Add(c);
     }
 
-    public bool InShape(Vector3 worldPos)
+    public bool InShape(Vector3 worldPos) => InShapeExpanded(worldPos, 0);
+
+    public bool InShapeExpanded(Vector3 worldPos, int extraCells)
     {
+        int extra = Mathf.Max(0, extraCells);
         Vector3 origin = OriginTransform.position;
         origin.y = 0f;
         Vector3 p = worldPos;
@@ -231,10 +244,13 @@ public class PlayerVision : MonoBehaviour
         if (ts < 0.001f) return false;
         float localX = Vector3.Dot(rel, RightFlat) / ts;
         float localZ = Vector3.Dot(rel, ForwardFlat) / ts;
-        float ax = Mathf.Max(1, sideCells);
-        float az = Mathf.Max(1, RadiusCells);
-        float lx = localX / ax;
-        float lz = (localZ - OffsetCells) / az;
+        int side = Mathf.Max(1, sideCells) + extra;
+        int fwd = Mathf.Max(1, forwardCells) + extra;
+        int back = Mathf.Max(0, backCells) + extra;
+        float offset = (fwd - back) * 0.5f;
+        float radius = (fwd + back) * 0.5f;
+        float lx = localX / side;
+        float lz = (localZ - offset) / Mathf.Max(1f, radius);
         return lx * lx + lz * lz <= 1.0001f;
     }
 
@@ -264,6 +280,11 @@ public class PlayerVision : MonoBehaviour
     void Start()
     {
         EnsureMapGrid();
+        if (FindObjectOfType<EnemyPresenceManager>() == null)
+        {
+            var go = new GameObject("EnemyPresenceManager");
+            go.AddComponent<EnemyPresenceManager>();
+        }
     }
 
     public void EnsureMapGrid()

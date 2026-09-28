@@ -1,11 +1,11 @@
 using UnityEngine;
 
 /// <summary>
-/// HP летуна. Отдельно от WerewolfStats. Игрок бьёт через IDamageable / WeaponHitbox.
+/// HP Р»РµС‚СѓРЅР°. РћС‚РґРµР»СЊРЅРѕ РѕС‚ WerewolfStats. РРіСЂРѕРє Р±СЊС‘С‚ С‡РµСЂРµР· IDamageable / WeaponHitbox.
 /// </summary>
 public class GhostStats : MonoBehaviour, IDamageable
 {
-    [Header("Здоровье")]
+    [Header("Р—РґРѕСЂРѕРІСЊРµ")]
     public float maxHealth = 12f;
 
     public float Health => _health;

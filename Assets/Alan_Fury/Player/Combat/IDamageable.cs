@@ -5,13 +5,13 @@ public interface IDamageable
     bool IsAlive => true;
 
     void TakeDamage(float amount);
-    // Урон с позицией источника (для направленного откидывания).
-    // По умолчанию — тот же урон, направление использует только тот, кому нужно.
+    // РЈСЂРѕРЅ СЃ РїРѕР·РёС†РёРµР№ РёСЃС‚РѕС‡РЅРёРєР° (РґР»СЏ РЅР°РїСЂР°РІР»РµРЅРЅРѕРіРѕ РѕС‚РєРёРґС‹РІР°РЅРёСЏ).
+    // РџРѕ СѓРјРѕР»С‡Р°РЅРёСЋ вЂ” С‚РѕС‚ Р¶Рµ СѓСЂРѕРЅ, РЅР°РїСЂР°РІР»РµРЅРёРµ РёСЃРїРѕР»СЊР·СѓРµС‚ С‚РѕР»СЊРєРѕ С‚РѕС‚, РєРѕРјСѓ РЅСѓР¶РЅРѕ.
     void TakeDamage(float amount, Vector3 sourcePosition) => TakeDamage(amount);
 
     /// <summary>
-    /// Полный хит с зоной/пробитием. По умолчанию — просто finalDamage/rawDamage.
-    /// WoundTracker + WerewolfStats переопределяют.
+    /// РџРѕР»РЅС‹Р№ С…РёС‚ СЃ Р·РѕРЅРѕР№/РїСЂРѕР±РёС‚РёРµРј. РџРѕ СѓРјРѕР»С‡Р°РЅРёСЋ вЂ” РїСЂРѕСЃС‚Рѕ finalDamage/rawDamage.
+    /// WoundTracker + WerewolfStats РїРµСЂРµРѕРїСЂРµРґРµР»СЏСЋС‚.
     /// </summary>
     void TakeHit(HitInfo hit) => TakeDamage(hit.finalDamage > 0f ? hit.finalDamage : hit.rawDamage, hit.sourcePosition);
 

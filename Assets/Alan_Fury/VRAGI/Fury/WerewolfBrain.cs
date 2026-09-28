@@ -1,24 +1,24 @@
 using UnityEngine;
 
 /// <summary>
-/// Хозяин добоевых режимов оборотня. Вешается по желанию — без него старые мозги живут как раньше.
+/// РҐРѕР·СЏРёРЅ РґРѕР±РѕРµРІС‹С… СЂРµР¶РёРјРѕРІ РѕР±РѕСЂРѕС‚РЅСЏ. Р’РµС€Р°РµС‚СЃСЏ РїРѕ Р¶РµР»Р°РЅРёСЋ вЂ” Р±РµР· РЅРµРіРѕ СЃС‚Р°СЂС‹Рµ РјРѕР·РіРё Р¶РёРІСѓС‚ РєР°Рє СЂР°РЅСЊС€Рµ.
 ///
-/// Режимы:
-///   Patrol       — HuntPatrol
-///   Investigate  — след есть, lock нет
-///   Stalk        — lock (Notice дошёл до 1)
-///   Combat       — зарезервирован, вход через RequestCombat(); бой пока не привязан
+/// Р РµР¶РёРјС‹:
+///   Patrol       вЂ” HuntPatrol
+///   Investigate  вЂ” СЃР»РµРґ РµСЃС‚СЊ, lock РЅРµС‚
+///   Stalk        вЂ” lock (Notice РґРѕС€С‘Р» РґРѕ 1)
+///   Combat       вЂ” Р·Р°СЂРµР·РµСЂРІРёСЂРѕРІР°РЅ, РІС…РѕРґ С‡РµСЂРµР· RequestCombat(); Р±РѕР№ РїРѕРєР° РЅРµ РїСЂРёРІСЏР·Р°РЅ
 ///
-/// Одновременно включён один навесной скрипт. Скрипты только ходят и смотрят.
-/// AttackBrain / Surround сюда ещё не заведены.
+/// РћРґРЅРѕРІСЂРµРјРµРЅРЅРѕ РІРєР»СЋС‡С‘РЅ РѕРґРёРЅ РЅР°РІРµСЃРЅРѕР№ СЃРєСЂРёРїС‚. РЎРєСЂРёРїС‚С‹ С‚РѕР»СЊРєРѕ С…РѕРґСЏС‚ Рё СЃРјРѕС‚СЂСЏС‚.
+/// AttackBrain / Surround СЃСЋРґР° РµС‰С‘ РЅРµ Р·Р°РІРµРґРµРЅС‹.
 /// </summary>
 [RequireComponent(typeof(NpcPerception))]
 [RequireComponent(typeof(WerewolfLocomotion))]
 public class WerewolfBrain : MonoBehaviour
 {
-    public enum Mode { None, Patrol, Investigate, Stalk, Combat }
+    public enum Mode { None, Patrol, Investigate, Stalk, Combat, Herald, Assemble }
 
-    [Header("Ссылки (пусто — GetComponent)")]
+    [Header("РЎСЃС‹Р»РєРё (РїСѓСЃС‚Рѕ вЂ” GetComponent)")]
     public NpcPerception perception;
     public WerewolfLocomotion locomotion;
     public Pathfinder pathfinder;
@@ -28,14 +28,17 @@ public class WerewolfBrain : MonoBehaviour
     public WerewolfInvestigate investigate;
     public WerewolfAlphaStalker stalker;
 
-    [Header("Путь")]
+    [Header("РџСѓС‚СЊ")]
     public float pathRepathInterval = 0.4f;
 
     public Mode CurrentMode => _mode;
+    public bool CombatRequested => _combatRequested;
     public IWerewolfRoute Route => route ?? (IWerewolfRoute)waypointRoute;
 
     private Mode _mode = Mode.None;
     private bool _combatRequested;
+    private bool _heraldMission;
+    private bool _assembleMission;
 
     private readonly System.Collections.Generic.List<Vector3> _path = new System.Collections.Generic.List<Vector3>();
     private int _pathIndex;
@@ -48,9 +51,12 @@ public class WerewolfBrain : MonoBehaviour
         if (perception == null) perception = GetComponent<NpcPerception>();
         if (locomotion == null) locomotion = GetComponent<WerewolfLocomotion>();
         if (patrol == null) patrol = GetComponent<WerewolfHuntPatrol>();
+        if (patrol == null) patrol = gameObject.AddComponent<WerewolfHuntPatrol>();
         if (investigate == null) investigate = GetComponent<WerewolfInvestigate>();
+        if (investigate == null) investigate = gameObject.AddComponent<WerewolfInvestigate>();
         if (stalker == null) stalker = GetComponent<WerewolfAlphaStalker>();
         if (waypointRoute == null) waypointRoute = GetComponent<WerewolfWaypointRoute>();
+        if (waypointRoute == null) waypointRoute = gameObject.AddComponent<WerewolfWaypointRoute>();
         if (pathfinder == null && WerewolfPackManager.Instance != null)
             pathfinder = WerewolfPackManager.Instance.pathfinder;
     }
@@ -59,7 +65,7 @@ public class WerewolfBrain : MonoBehaviour
     {
         if (patrol != null) patrol.BindBrain(this);
         if (investigate != null) investigate.BindBrain(this);
-        ApplyMode(Mode.None, force: true);
+        ApplyMode(Mode.Patrol, force: true);
     }
 
     void Update()
@@ -67,11 +73,43 @@ public class WerewolfBrain : MonoBehaviour
         var cc = GetComponent<CrowdControl>();
         if (cc != null && cc.IsStunned) return;
 
+        if (IsSelfAlpha())
+            _combatRequested = false;
+        else if (perception != null && perception.IsLocked)
+            RequestCombat();
+        else if (perception != null && !perception.IsLocked)
+            ReleaseCombat();
+
         if (_combatRequested)
         {
             if (_mode != Mode.Combat) ApplyMode(Mode.Combat);
+            var atk = GetComponent<WerewolfAttackBrain>();
+            if (atk == null || !atk.enabled)
+            {
+                Vector3 goal = perception != null && perception.HasPlayer
+                    ? perception.PlayerPos
+                    : (perception != null && perception.HasCue ? perception.CuePos : transform.position);
+                Face(goal, Time.deltaTime);
+                FollowGoal(goal, 8f, Time.deltaTime);
+            }
             return;
         }
+
+        if (_heraldMission)
+        {
+            TickHeraldWalk(Time.deltaTime);
+            return;
+        }
+
+        if (_assembleMission)
+        {
+            TickAssemble(Time.deltaTime);
+            return;
+        }
+
+        var pack = WerewolfPackManager.Instance;
+        if (pack != null && pack.TryConsumeSignal(this, out WerewolfHowl.Type howl, out Vector3 at, out float rad))
+            ApplyPackSignal(howl, at, rad);
 
         if (perception == null) return;
 
@@ -89,18 +127,103 @@ public class WerewolfBrain : MonoBehaviour
         if (want != _mode) ApplyMode(want);
     }
 
-    /// <summary>Бой заберём сюда позже. Пока только глушит добоевые скрипты.</summary>
+    /// <summary>Р‘РѕР№ Р·Р°Р±РµСЂС‘Рј СЃСЋРґР° РїРѕР·Р¶Рµ. РџРѕРєР° С‚РѕР»СЊРєРѕ РіР»СѓС€РёС‚ РґРѕР±РѕРµРІС‹Рµ СЃРєСЂРёРїС‚С‹.</summary>
     public void RequestCombat()
     {
+        if (IsSelfAlpha()) return;
+        if (_combatRequested) return;
         _combatRequested = true;
+        var pack = WerewolfPackManager.Instance;
+        if (pack != null) pack.NotifyLocalContact();
     }
 
     public void ReleaseCombat()
     {
+        if (!_combatRequested) return;
         _combatRequested = false;
+        var pack = WerewolfPackManager.Instance;
+        if (pack != null) pack.NotifyLocalContact();
     }
 
-    /// <summary>Расследование закончило отход на маршрут.</summary>
+    public void BeginHerald()
+    {
+        _heraldMission = true;
+        ApplyMode(Mode.Herald);
+    }
+
+    public void EndHerald()
+    {
+        _heraldMission = false;
+    }
+
+    public void BeginAssemble()
+    {
+        _assembleMission = true;
+        ApplyMode(Mode.Assemble);
+    }
+
+    void ApplyPackSignal(WerewolfHowl.Type type, Vector3 at, float rad)
+    {
+        switch (type)
+        {
+            case WerewolfHowl.Type.Contact:
+            case WerewolfHowl.Type.Rally:
+            case WerewolfHowl.Type.Lost:
+            case WerewolfHowl.Type.BeaterPing:
+                if (perception != null) perception.ReportCue(at, Mathf.Max(4f, rad));
+                break;
+            case WerewolfHowl.Type.Assemble:
+                BeginAssemble();
+                break;
+            case WerewolfHowl.Type.OrderAttack:
+            case WerewolfHowl.Type.OrderPursue:
+            case WerewolfHowl.Type.OrderRejoin:
+                if (perception != null) perception.ReportCue(at, Mathf.Max(4f, rad));
+                break;
+            case WerewolfHowl.Type.OrderRetreat:
+                ReleaseCombat();
+                if (perception != null) perception.ClearCue();
+                break;
+        }
+    }
+
+    void TickHeraldWalk(float dt)
+    {
+        if (_mode != Mode.Herald) ApplyMode(Mode.Herald);
+        var pack = WerewolfPackManager.Instance;
+        if (pack == null || pack.player == null)
+        {
+            _heraldMission = false;
+            return;
+        }
+        Vector3 self = transform.position;
+        Vector3 player = pack.player.position;
+        Vector3 alpha = pack.alphaTransform != null ? pack.alphaTransform.position : self;
+        Vector3 away = self - player;
+        away.y = 0f;
+        if (away.sqrMagnitude < 0.01f) away = transform.forward;
+        away.Normalize();
+        Vector3 fromAlpha = self - alpha;
+        fromAlpha.y = 0f;
+        if (fromAlpha.sqrMagnitude > 0.01f) away = (away + fromAlpha.normalized).normalized;
+        Vector3 goal = ClampGoal(self + away * 8f);
+        FollowGoal(goal, 8f, dt);
+    }
+
+    void TickAssemble(float dt)
+    {
+        if (_mode != Mode.Assemble) ApplyMode(Mode.Assemble);
+        var pack = WerewolfPackManager.Instance;
+        Vector3 dest = pack != null && pack.alphaTransform != null
+            ? pack.alphaTransform.position
+            : transform.position;
+        dest = ClampGoal(dest);
+        Face(dest, dt);
+        if (FollowGoal(dest, 8f, dt) || FlatDist(transform.position, dest) <= 3f)
+            _assembleMission = false;
+    }
+
+    /// <summary>Р Р°СЃСЃР»РµРґРѕРІР°РЅРёРµ Р·Р°РєРѕРЅС‡РёР»Рѕ РѕС‚С…РѕРґ РЅР° РјР°СЂС€СЂСѓС‚.</summary>
     public void OnReturnedToRoute()
     {
         if (_combatRequested) return;
@@ -123,7 +246,7 @@ public class WerewolfBrain : MonoBehaviour
         if (b != null && b.enabled != on) b.enabled = on;
     }
 
-    // ——— движение для навесных режимов ———
+    // вЂ”вЂ”вЂ” РґРІРёР¶РµРЅРёРµ РґР»СЏ РЅР°РІРµСЃРЅС‹С… СЂРµР¶РёРјРѕРІ вЂ”вЂ”вЂ”
 
     public bool FollowGoal(Vector3 goal, float speed, float dt)
     {
@@ -144,10 +267,7 @@ public class WerewolfBrain : MonoBehaviour
         }
 
         if (_path.Count == 0)
-        {
-            float d = FlatDist(transform.position, goal);
-            return d <= 2f;
-        }
+            return locomotion.MoveTo(goal, speed, dt);
 
         Vector3 wp = _path[_pathIndex];
         if (locomotion.MoveTo(wp, speed, dt))
@@ -183,4 +303,10 @@ public class WerewolfBrain : MonoBehaviour
     }
 
     static float FlatDist(Vector3 a, Vector3 b) => Mathf.Sqrt(FlatSqr(a, b));
+
+    bool IsSelfAlpha()
+    {
+        var pack = WerewolfPackManager.Instance;
+        return pack != null && pack.IsAlphaTransform(transform);
+    }
 }

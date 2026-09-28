@@ -1,4 +1,4 @@
-﻿using UnityEngine;
+using UnityEngine;
 
 /// <summary>
 /// Зона тела. Порядок в каноне ран: сначала зона, потом пробитие.

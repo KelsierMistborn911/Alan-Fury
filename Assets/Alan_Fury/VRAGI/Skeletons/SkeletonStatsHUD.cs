@@ -1,23 +1,23 @@
 using UnityEngine;
 
 /// <summary>
-/// HUD над скелетом, как WerewolfStatsHUD: полоски HP / стамина / оборона блока.
-/// Источник — PlayerResources на том же объекте (блок уже в ресурсах игрока).
-/// Вешать рядом с SkeletonBrain или мозг добавит сам.
+/// HUD РЅР°Рґ СЃРєРµР»РµС‚РѕРј, РєР°Рє WerewolfStatsHUD: РїРѕР»РѕСЃРєРё HP / СЃС‚Р°РјРёРЅР° / РѕР±РѕСЂРѕРЅР° Р±Р»РѕРєР°.
+/// РСЃС‚РѕС‡РЅРёРє вЂ” PlayerResources РЅР° С‚РѕРј Р¶Рµ РѕР±СЉРµРєС‚Рµ (Р±Р»РѕРє СѓР¶Рµ РІ СЂРµСЃСѓСЂСЃР°С… РёРіСЂРѕРєР°).
+/// Р’РµС€Р°С‚СЊ СЂСЏРґРѕРј СЃ SkeletonBrain РёР»Рё РјРѕР·Рі РґРѕР±Р°РІРёС‚ СЃР°Рј.
 /// </summary>
 public class SkeletonStatsHUD : MonoBehaviour
 {
-    [Header("Источник")]
+    [Header("РСЃС‚РѕС‡РЅРёРє")]
     public PlayerResources resources;
 
-    [Header("Размещение")]
+    [Header("Р Р°Р·РјРµС‰РµРЅРёРµ")]
     public Vector3 offset = new Vector3(0f, 2.15f, 0f);
-    public float barWidth = 0.9f;
-    public float barHeight = 0.07f;
-    public float barSpacing = 0.03f;
-    public float textSize = 0.04f;
+    public float barWidth = 1.8f;
+    public float barHeight = 0.14f;
+    public float barSpacing = 0.06f;
+    public float textSize = 0.08f;
 
-    [Header("Цвета")]
+    [Header("Р¦РІРµС‚Р°")]
     public Color healthColor = new Color(0.85f, 0.15f, 0.15f);
     public Color staminaColor = new Color(0.9f, 0.8f, 0.2f);
     public Color guardColor = new Color(0.4f, 0.65f, 1f);

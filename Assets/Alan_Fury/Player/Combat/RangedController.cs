@@ -1,10 +1,10 @@
 using UnityEngine;
 
 /// <summary>
-/// Дальний бой отдельно от HumanoidCombat.
-/// Лук: зажать ЛКМ — натяг, отпустить — выстрел, Space — срыв.
-/// После полного натяга персонаж сам довводит до цели; точное окно шире, если курсор ближе.
-/// Арбалет: клик — выстрел, затем reloadDuration.
+/// Р”Р°Р»СЊРЅРёР№ Р±РѕР№ РѕС‚РґРµР»СЊРЅРѕ РѕС‚ HumanoidCombat.
+/// Р›СѓРє: Р·Р°Р¶Р°С‚СЊ Р›РљРњ вЂ” РЅР°С‚СЏРі, РѕС‚РїСѓСЃС‚РёС‚СЊ вЂ” РІС‹СЃС‚СЂРµР», Space вЂ” СЃСЂС‹РІ.
+/// РџРѕСЃР»Рµ РїРѕР»РЅРѕРіРѕ РЅР°С‚СЏРіР° РїРµСЂСЃРѕРЅР°Р¶ СЃР°Рј РґРѕРІРІРѕРґРёС‚ РґРѕ С†РµР»Рё; С‚РѕС‡РЅРѕРµ РѕРєРЅРѕ С€РёСЂРµ, РµСЃР»Рё РєСѓСЂСЃРѕСЂ Р±Р»РёР¶Рµ.
+/// РђСЂР±Р°Р»РµС‚: РєР»РёРє вЂ” РІС‹СЃС‚СЂРµР», Р·Р°С‚РµРј reloadDuration.
 /// </summary>
 public class RangedController : MonoBehaviour
 {
@@ -14,10 +14,10 @@ public class RangedController : MonoBehaviour
     public PlayerTargeting targeting;
     public LayerMask enemyLayers;
 
-    [Header("Наводка")]
-    [Tooltip("В этом угле курсор даёт полный бонус к попаданию / окну.")]
+    [Header("РќР°РІРѕРґРєР°")]
+    [Tooltip("Р’ СЌС‚РѕРј СѓРіР»Рµ РєСѓСЂСЃРѕСЂ РґР°С‘С‚ РїРѕР»РЅС‹Р№ Р±РѕРЅСѓСЃ Рє РїРѕРїР°РґР°РЅРёСЋ / РѕРєРЅСѓ.")]
     public float aimFullBonusAngle = 8f;
-    [Tooltip("Дальше этого угла враг не считается наведённым.")]
+    [Tooltip("Р”Р°Р»СЊС€Рµ СЌС‚РѕРіРѕ СѓРіР»Р° РІСЂР°Рі РЅРµ СЃС‡РёС‚Р°РµС‚СЃСЏ РЅР°РІРµРґС‘РЅРЅС‹Рј.")]
     public float aimMaxAngle = 28f;
     public float aimRange = 28f;
     [Range(0f, 1f)] public float baseHitChance = 0.35f;
@@ -25,37 +25,35 @@ public class RangedController : MonoBehaviour
     public float missYawMin = 8f;
     public float missYawMax = 16f;
 
-    [Header("Самонаведение после полного натяга")]
-    [Tooltip("Довод до цели при курсоре почти на враге.")]
+    [Header("РЎР°РјРѕРЅР°РІРµРґРµРЅРёРµ РїРѕСЃР»Рµ РїРѕР»РЅРѕРіРѕ РЅР°С‚СЏРіР°")]
+    [Tooltip("Р”РѕРІРѕРґ РґРѕ С†РµР»Рё РїСЂРё РєСѓСЂСЃРѕСЂРµ РїРѕС‡С‚Рё РЅР° РІСЂР°РіРµ.")]
     public float aimInFast = 0.18f;
-    [Tooltip("Довод до цели на краю конуса.")]
+    [Tooltip("Р”РѕРІРѕРґ РґРѕ С†РµР»Рё РЅР° РєСЂР°СЋ РєРѕРЅСѓСЃР°.")]
     public float aimInSlow = 0.48f;
-    [Tooltip("Точное окно при курсоре на краю конуса.")]
+    [Tooltip("РўРѕС‡РЅРѕРµ РѕРєРЅРѕ РїСЂРё РєСѓСЂСЃРѕСЂРµ РЅР° РєСЂР°СЋ РєРѕРЅСѓСЃР°.")]
     public float precisionWindowMin = 0.12f;
-    [Tooltip("Точное окно при курсоре на цели.")]
+    [Tooltip("РўРѕС‡РЅРѕРµ РѕРєРЅРѕ РїСЂРё РєСѓСЂСЃРѕСЂРµ РЅР° С†РµР»Рё.")]
     public float precisionWindowMax = 0.55f;
-    [Tooltip("Увод после окна, если не выстрелил.")]
+    [Tooltip("РЈРІРѕРґ РїРѕСЃР»Рµ РѕРєРЅР°, РµСЃР»Рё РЅРµ РІС‹СЃС‚СЂРµР»РёР».")]
     public float driftYawMin = 10f;
     public float driftYawMax = 18f;
 
     public bool IsDrawing { get; private set; }
     public bool IsReloading => Time.time < _reloadUntil;
     public float ChargePercent { get; private set; }
-    public bool HasRangedEquipped => Weapon != null && Weapon.isRanged && Weapon.OccupiesBothHands;
+    public bool HasRangedEquipped => loadout != null && loadout.HasRangedArmed();
 
     public Transform AimMark { get; private set; }
     public Vector3 ShotDir { get; private set; }
     public bool IsPrecisionLocked { get; private set; }
-    public bool IsSelfAiming => IsDrawing && ChargePercent >= 1f && AimMark != null;
+    public bool IsSelfAiming => HasRangedEquipped && IsDrawing && ChargePercent >= 1f && AimMark != null;
 
     public WeaponData Weapon
     {
         get
         {
-            if (loadout == null) return null;
+            if (!HasRangedEquipped) return null;
             var w = loadout.GetMainWeapon();
-            if (w != null && w.isRanged) return w;
-            w = loadout.GetOffhandWeapon();
             return w != null && w.isRanged ? w : null;
         }
     }
@@ -350,7 +348,7 @@ public class RangedController : MonoBehaviour
             _reloadUntil = Time.time + weapon.reloadDuration;
     }
 
-    /// <summary>Позже: бросок в точном окне. Сейчас окно = попадание в направление цели.</summary>
+    /// <summary>РџРѕР·Р¶Рµ: Р±СЂРѕСЃРѕРє РІ С‚РѕС‡РЅРѕРј РѕРєРЅРµ. РЎРµР№С‡Р°СЃ РѕРєРЅРѕ = РїРѕРїР°РґР°РЅРёРµ РІ РЅР°РїСЂР°РІР»РµРЅРёРµ С†РµР»Рё.</summary>
     bool RollPrecisionHit()
     {
         return true;

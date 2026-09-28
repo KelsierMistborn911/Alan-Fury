@@ -2,61 +2,56 @@ using UnityEngine;
 using System.Collections.Generic;
 
 /// <summary>
-/// Летун на префабе ghost-set. Только полёт: парит над землёй, летит к точке / за целью.
-/// Вне боя обходит деревья (Pathfinder + сфера). В бою проходит сквозь объекты.
-/// Мозг носителя / разведка / фаза-2 сюда не входят.
+/// Р›РµС‚СѓРЅ РЅР° РїСЂРµС„Р°Р±Рµ ghost-set. РўРѕР»СЊРєРѕ РїРѕР»С‘С‚: РїР°СЂРёС‚ РЅР°Рґ Р·РµРјР»С‘Р№, Р»РµС‚РёС‚ Рє С‚РѕС‡РєРµ / Р·Р° С†РµР»СЊСЋ.
+/// Р’РЅРµ Р±РѕСЏ РѕР±С…РѕРґРёС‚ РґРµСЂРµРІСЊСЏ (Pathfinder + СЃС„РµСЂР°). Р’ Р±РѕСЋ РїСЂРѕС…РѕРґРёС‚ СЃРєРІРѕР·СЊ РѕР±СЉРµРєС‚С‹.
+/// РњРѕР·Рі РЅРѕСЃРёС‚РµР»СЏ / СЂР°Р·РІРµРґРєР° / С„Р°Р·Р°-2 СЃСЋРґР° РЅРµ РІС…РѕРґСЏС‚.
 /// </summary>
 [RequireComponent(typeof(CapsuleCollider))]
 [RequireComponent(typeof(Rigidbody))]
 public class GhostFlyer : MonoBehaviour
 {
-    public enum Role { Scout, Spirit }
-
-    [Header("Роль (масштаб позже)")]
-    public Role role = Role.Scout;
-
-    [Header("Источники мира")]
+    [Header("РСЃС‚РѕС‡РЅРёРєРё РјРёСЂР°")]
     public Pathfinder pathfinder;
     public HeightMapGenerator heightSource;
     public ChunkedTerrainBuilder chunkedBuilder;
     public MapBoundary boundary;
 
-    [Header("Полёт")]
-    [Tooltip("Высота корпуса над землёй (м).")]
+    [Header("РџРѕР»С‘С‚")]
+    [Tooltip("Р’С‹СЃРѕС‚Р° РєРѕСЂРїСѓСЃР° РЅР°Рґ Р·РµРјР»С‘Р№ (Рј).")]
     public float hoverHeight = 2.2f;
-    [Tooltip("Крейсер вне боя (м/с).")]
+    [Tooltip("РљСЂРµР№СЃРµСЂ РІРЅРµ Р±РѕСЏ (Рј/СЃ).")]
     public float cruiseSpeed = 4.2f;
-    [Tooltip("Скорость в бою (м/с).")]
+    [Tooltip("РЎРєРѕСЂРѕСЃС‚СЊ РІ Р±РѕСЋ (Рј/СЃ).")]
     public float combatSpeed = 6.5f;
     public float acceleration = 8f;
     public float deceleration = 10f;
-    [Tooltip("Дистанция начала торможения (м).")]
+    [Tooltip("Р”РёСЃС‚Р°РЅС†РёСЏ РЅР°С‡Р°Р»Р° С‚РѕСЂРјРѕР¶РµРЅРёСЏ (Рј).")]
     public float slowdownDistance = 2.4f;
     public float arriveThreshold = 0.7f;
-    [Tooltip("Скорость доворота корпуса.")]
+    [Tooltip("РЎРєРѕСЂРѕСЃС‚СЊ РґРѕРІРѕСЂРѕС‚Р° РєРѕСЂРїСѓСЃР°.")]
     public float turnSpeed = 5f;
 
-    [Header("Парение на месте")]
+    [Header("РџР°СЂРµРЅРёРµ РЅР° РјРµСЃС‚Рµ")]
     public float bobAmplitude = 0.16f;
     public float bobHz = 0.45f;
 
-    [Header("Столкновения вне боя")]
-    [Tooltip("Слои, сквозь которые вне боя нельзя. В бою игнор.")]
+    [Header("РЎС‚РѕР»РєРЅРѕРІРµРЅРёСЏ РІРЅРµ Р±РѕСЏ")]
+    [Tooltip("РЎР»РѕРё, СЃРєРІРѕР·СЊ РєРѕС‚РѕСЂС‹Рµ РІРЅРµ Р±РѕСЏ РЅРµР»СЊР·СЏ. Р’ Р±РѕСЋ РёРіРЅРѕСЂ.")]
     public LayerMask obstacleMask = ~0;
     public float bodyRadius = 0.4f;
-    [Tooltip("Сколько боковых проб при упирании в стену.")]
+    [Tooltip("РЎРєРѕР»СЊРєРѕ Р±РѕРєРѕРІС‹С… РїСЂРѕР± РїСЂРё СѓРїРёСЂР°РЅРёРё РІ СЃС‚РµРЅСѓ.")]
     public int slideProbes = 5;
 
-    [Header("Бой")]
-    [Tooltip("Вкл — можно клипать сквозь объекты. Мозг выставит позже.")]
+    [Header("Р‘РѕР№")]
+    [Tooltip("Р’РєР» вЂ” РјРѕР¶РЅРѕ РєР»РёРїР°С‚СЊ СЃРєРІРѕР·СЊ РѕР±СЉРµРєС‚С‹. РњРѕР·Рі РІС‹СЃС‚Р°РІРёС‚ РїРѕР·Р¶Рµ.")]
     public bool inCombat;
 
-    [Header("Цель полёта (опционально)")]
+    [Header("Р¦РµР»СЊ РїРѕР»С‘С‚Р° (РѕРїС†РёРѕРЅР°Р»СЊРЅРѕ)")]
     public Transform follow;
-    [Tooltip("Если нет follow и нет MoveTo — висит на стартовой XZ.")]
+    [Tooltip("Р•СЃР»Рё РЅРµС‚ follow Рё РЅРµС‚ MoveTo вЂ” РІРёСЃРёС‚ РЅР° СЃС‚Р°СЂС‚РѕРІРѕР№ XZ.")]
     public bool hoverInPlace = true;
 
-    [Header("Аниматор")]
+    [Header("РђРЅРёРјР°С‚РѕСЂ")]
     public Animator animator;
 
     public bool InCombat => inCombat;

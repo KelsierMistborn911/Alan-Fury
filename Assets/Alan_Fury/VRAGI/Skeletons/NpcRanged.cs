@@ -1,8 +1,8 @@
 using UnityEngine;
 
 /// <summary>
-/// Дальний бой для NPC. Без ввода, без инвентаря.
-/// Draw / Fire / Cancel — мозг лучника или отряд.
+/// Р”Р°Р»СЊРЅРёР№ Р±РѕР№ РґР»СЏ NPC. Р‘РµР· РІРІРѕРґР°, Р±РµР· РёРЅРІРµРЅС‚Р°СЂСЏ.
+/// Draw / Fire / Cancel вЂ” РјРѕР·Рі Р»СѓС‡РЅРёРєР° РёР»Рё РѕС‚СЂСЏРґ.
 /// </summary>
 public class NpcRanged : MonoBehaviour
 {

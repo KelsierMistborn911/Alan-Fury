@@ -2,18 +2,18 @@ using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
-/// 4 = предмет «фокусировка»: 1-е нажатие в правую (меч в ножны),
-/// 2-е — в левую (щит в ножны, меч обратно). 1/2 возвращают меч/щит.
-/// Пока фокус в руке — набор стрелками в эту руку. 3 = голос.
+/// 4 = РїСЂРµРґРјРµС‚ В«С„РѕРєСѓСЃРёСЂРѕРІРєР°В»: 1-Рµ РЅР°Р¶Р°С‚РёРµ РІ РїСЂР°РІСѓСЋ (РјРµС‡ РІ РЅРѕР¶РЅС‹),
+/// 2-Рµ вЂ” РІ Р»РµРІСѓСЋ (С‰РёС‚ РІ РЅРѕР¶РЅС‹, РјРµС‡ РѕР±СЂР°С‚РЅРѕ). 1/2 РІРѕР·РІСЂР°С‰Р°СЋС‚ РјРµС‡/С‰РёС‚.
+/// РџРѕРєР° С„РѕРєСѓСЃ РІ СЂСѓРєРµ вЂ” РЅР°Р±РѕСЂ СЃС‚СЂРµР»РєР°РјРё РІ СЌС‚Сѓ СЂСѓРєСѓ. 3 = РіРѕР»РѕСЃ.
 /// </summary>
 [DefaultExecutionOrder(-50)]
 public class SpellComposer : MonoBehaviour
 {
-    [Header("Ввод")]
+    [Header("Р’РІРѕРґ")]
     public KeyCode composeKey = KeyCode.Alpha4;
     public KeyCode cancelKey = KeyCode.Space;
 
-    [Header("Мана")]
+    [Header("РњР°РЅР°")]
     public float baseMana = 15f;
     public float maxInvest = 60f;
     public float wheelStep = 5f;

@@ -25,7 +25,7 @@ Shader "Nature/GrassField"
 
         [Header(Player Push)]
         _PlayerPos ("Player Pos", Vector) = (0, 0, 0, 0)
-        _DrawRadius ("Draw Radius", Range(4, 400)) = 252
+        _DrawRadius ("Draw Radius", Range(4, 120)) = 55
         _PushRadius ("Push Radius", Range(0.2, 6)) = 1.35
         _PushStrength ("Push Strength", Range(0, 3)) = 1.05
     }
@@ -194,6 +194,9 @@ Shader "Nature/GrassField"
                 float3 b = i[1].positionWS;
                 float3 c = i[2].positionWS;
                 float3 mid = (a + b + c) * 0.333333;
+                float pdist = distance(_PlayerPos.xz, mid.xz);
+                if (pdist > _DrawRadius) return;
+
                 float4 clip = TransformWorldToHClip(mid);
                 float2 ndc = clip.xy / max(abs(clip.w), 1e-4);
                 float pad = max(_ScreenPad, 1.0);
@@ -211,7 +214,7 @@ Shader "Nature/GrassField"
                 float3 up = normalize(i[0].normalWS + i[1].normalWS + i[2].normalWS);
                 if (up.y < 0.35) return;
 
-                float rim = saturate((pad - frame) / 0.08);
+                float rim = saturate((_DrawRadius - pdist) / 8.0);
                 int n = (int)clamp(area * dens * rim, 0, 32);
                 if (n <= 0) return;
 

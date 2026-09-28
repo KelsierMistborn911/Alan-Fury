@@ -1,4 +1,4 @@
-﻿using UnityEngine;
+using UnityEngine;
 using System.Collections.Generic;
 
 /// <summary>
@@ -111,6 +111,24 @@ public class WerewolfWaypointRoute : MonoBehaviour, IWerewolfRoute
             if (sq < bestSq) { bestSq = sq; best = i; }
         }
         _index = best;
+    }
+
+    /// <summary>Разнести стаю по маршруту: каждый волк стартует с другой точки.</summary>
+    public void SpreadFrom(int salt)
+    {
+        if (points == null || points.Length == 0) return;
+        int n = 0;
+        for (int i = 0; i < points.Length; i++)
+            if (points[i] != null) n++;
+        if (n <= 0) return;
+        int want = Mathf.Abs(salt) % n;
+        int seen = 0;
+        for (int i = 0; i < points.Length; i++)
+        {
+            if (points[i] == null) continue;
+            if (seen == want) { _index = i; return; }
+            seen++;
+        }
     }
 
     private Transform CurrentTransform()
