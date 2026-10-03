@@ -49,8 +49,11 @@ Shader "Nature/VisionFade"
             float _VisionGroundY;
             float _VisionKeepRadius;
             float _VisionNearFalloff;
-            float _VisionFadePale;
             float _VisionKeepHeight;
+            float _VisionProjectGround;
+            float4 _NatureLightPos;
+            float4 _NatureLightColor;
+            float4 _NatureLightParams;
 
             float3 ViewGround(float3 wp)
             {
@@ -107,13 +110,24 @@ Shader "Nature/VisionFade"
                 half4 col = SAMPLE_TEXTURE2D(_MainTex, sampler_MainTex, i.uv) * (half4)_Color;
                 if (col.a < 0.02)
                     discard;
+                if (_NatureLightParams.z > 0.5)
+                {
+                    float range = max(_NatureLightParams.x, 0.05);
+                    float d = distance(i.worldPos, _NatureLightPos.xyz);
+                    float t = saturate(1.0 - d / range);
+                    t = pow(t, max(_NatureLightParams.y, 0.5));
+                    col.rgb += col.rgb * (half3)_NatureLightColor.rgb * (half)t;
+                }
 
                 float4x4 root = mul(unity_ObjectToWorld, _VisionPartInv);
                 float3 basePos = float3(root._m03, root._m13, root._m23);
 
-                float3 ground = ViewGround(i.worldPos);
-                float vis = VisionInside(ground.xz);
-                float visEdge = smoothstep(0.06, 0.72, vis);
+                float2 xz = i.worldPos.xz;
+                if (_VisionProjectGround > 0.5)
+                    xz = ViewGround(i.worldPos).xz;
+                float vis = VisionInside(xz);
+                // Rim only. No hard step — a 0.42 cut flashed whole bush clumps.
+                float visEdge = smoothstep(0.0, 0.42, vis);
 
                 float2 radial = i.worldPos.xz - basePos.xz;
                 float keepR = max(_VisionKeepRadius, 0.0);
@@ -124,7 +138,8 @@ Shader "Nature/VisionFade"
                 float w = saturate(visEdge * (1.0 - stem) * (1.0 - stump));
                 float aMul = 1.0 - w;
                 col.a *= aMul;
-                col.rgb = lerp(col.rgb, col.rgb * (1.0 - _VisionFadePale) + _VisionFadePale, w);
+                // Dim the fringe. Unlit albedo through alpha was reading as a white cut.
+                col.rgb *= lerp(0.55, 1.0, aMul);
                 return col;
             }
             ENDHLSL

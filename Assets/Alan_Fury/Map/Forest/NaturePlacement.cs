@@ -1,15 +1,17 @@
 using UnityEngine;
 using System.Collections.Generic;
+using System.Text;
 
 /// <summary>
 /// Стриминг природы по слоям.
-/// Слои: Основной лес / Маленькие деревья / Кусты / Растения / Трава(stub).
+/// Слои: Основной лес / Маленькие деревья / Кусты / Растения / Трава.
+/// Трава — тот же секторный проход, после деревьев. Не GrassField.
 /// В каждом слое — варианты с весом (%). Префаб или спрайт.
-/// Зоны непрерывные (Perlin). Роща детерминирована, лес/чаща — рандом при загрузке.
+/// Зоны: роща вдоль дороги, лес дальше, чаща по краю и островками, поляны в лесу.
 /// </summary>
 public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
 {
-    public enum Zone : byte { None = 0, Grove = 1, Forest = 2, Thicket = 3 }
+    public enum Zone : byte { None = 0, Grove = 1, Forest = 2, Thicket = 3, Clearing = 4 }
     public enum LayerKind : byte { MainForest = 0, SmallTree = 1, Bush = 2, Plant = 3, Grass = 4 }
 
     [System.Serializable]
@@ -88,6 +90,7 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
         public float maxCoverHeight = 2.5f;
 
         public bool IsTree => kind == LayerKind.MainForest || kind == LayerKind.SmallTree;
+        public bool UsesVisionFade => IsTree;
     }
 
     [Header("Источники")]
@@ -98,13 +101,8 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
     [Header("Слои")]
     public List<NatureLayer> layers = new List<NatureLayer>();
 
-    [Header("Зоны (Perlin) — непрерывные")]
-    [Tooltip("Меньше = крупнее пятна")]
-    public float zoneNoiseScale = 0.028f;
-    [Range(0f, 1f)] public float groveThreshold = 0.28f;
-    [Range(0f, 1f)] public float thicketThreshold = 0.72f;
-    public Vector2 zoneNoiseOffset = new Vector2(17.3f, 91.7f);
-
+    [Header("Зоны")]
+    public MapLayout layout;
     [Header("Карта")]
     public float waterLevel = 0f;
     public int borderCells = 2;
@@ -113,6 +111,13 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
     [Header("Стриминг")]
     public float streamRadius = 50f;
     public float unloadExtra = 30f;
+
+    [Header("Трава")]
+    [Tooltip("Множитель плотности на клетке с деревом.")]
+    [Range(0f, 1f)] public float grassUnderTreeMult = 0.28f;
+    [Tooltip("Масштаб шума пятен травы внутри зоны.")]
+    public float grassClusterNoiseScale = 0.09f;
+    public Vector2 grassClusterOffset = new Vector2(41.2f, 8.7f);
 
     public bool IsReady => _ready;
 
@@ -202,19 +207,9 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
                     new NatureVariant { name = "Plant_Stub", weight = 100f, minScale = 0.6f, maxScale = 1.0f }
                 }
             },
-            new NatureLayer
-            {
-                name = "Трава (Unity later)",
-                kind = LayerKind.Grass,
-                enabled = false,
-                footprint = 1,
-                densityGrove = 0f,
-                densityForest = 0f,
-                densityThicket = 0f,
-                variants = new List<NatureVariant>()
-            }
+            MakeDefaultGrassLayer()
         };
-        Debug.Log("NaturePlacement: default layers filled (Main Forest ready, rest stubs).");
+        Debug.Log("NaturePlacement: default layers filled (Main Forest + Grass).");
     }
 
     [ContextMenu("Init")]
@@ -224,6 +219,7 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
 
         if (layers == null || layers.Count == 0)
             FillDefaultLayers();
+        EnsureGrassLayer();
 
         allVariants.Clear();
         variantLayer.Clear();
@@ -236,7 +232,8 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
                 if (v == null) continue;
                 if (!ResolveParts(v))
                 {
-                    Debug.LogWarning($"NaturePlacement: '{layer.name}/{v.name}' — нет частей mesh/material, пропуск.");
+                    if (layer.kind != LayerKind.Grass)
+                        Debug.LogWarning($"NaturePlacement: '{layer.name}/{v.name}' — нет частей mesh/material, пропуск.");
                     continue;
                 }
                 v.propertyBlock = new MaterialPropertyBlock();
@@ -257,6 +254,12 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
         for (int i = 0; i < allVariants.Count; i++)
             if (allVariants[i].parts != null) partSum += allVariants[i].parts.Count;
         Debug.Log($"NaturePlacement: Init OK, variants={allVariants.Count}, parts={partSum}");
+        DumpSettings("Init");
+    }
+
+    private void Start()
+    {
+        DumpSettings("Start");
     }
 
     public void UpdateStreaming(Vector3 playerPos)
@@ -265,15 +268,16 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
             return;
 
         float ts = terrainBuilder.TileSize;
-        float sectorWorld = sectorSize * ts;
+        float sectorWorld = Mathf.Max(0.01f, sectorSize * ts);
         int w = heightSource.width;
         int d = heightSource.depth;
         Vector3 origin = new Vector3(-w * ts / 2f, 0f, -d * ts / 2f);
+        Vector3 playerLocal = terrainBuilder.WorldToMapLocal(playerPos);
 
-        int pcx = Mathf.FloorToInt((playerPos.x - origin.x) / sectorWorld);
-        int pcz = Mathf.FloorToInt((playerPos.z - origin.z) / sectorWorld);
-        int loadR = Mathf.CeilToInt(streamRadius / sectorWorld);
-        int unloadR = Mathf.CeilToInt((streamRadius + unloadExtra) / sectorWorld);
+        int pcx = Mathf.FloorToInt((playerLocal.x - origin.x) / sectorWorld);
+        int pcz = Mathf.FloorToInt((playerLocal.z - origin.z) / sectorWorld);
+        int loadR = Mathf.Max(2, Mathf.CeilToInt(streamRadius / sectorWorld));
+        int unloadR = Mathf.Max(loadR + 1, Mathf.CeilToInt((streamRadius + unloadExtra) / sectorWorld));
 
         for (int sx = pcx - loadR; sx <= pcx + loadR; sx++)
         {
@@ -342,11 +346,13 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
         int z1 = Mathf.Min(d, z0 + sectorSize);
         var key = new Vector2Int(sx, sz);
 
+        for (int pass = 0; pass < 2; pass++)
         for (int vi = 0; vi < allVariants.Count; vi++)
         {
             var v = allVariants[vi];
             var layer = variantLayer[vi];
             if (v.parts == null || v.parts.Count == 0) continue;
+            if (layer.IsTree != (pass == 0)) continue;
 
             if (!v.sectorLists.TryGetValue(key, out var list))
             {
@@ -376,12 +382,14 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
                     if (!CanGrow(layer, zone)) continue;
 
                     bool stable = true;
-                    float roll = Hash01(x, z, vi, 0);
-                    float dens = GetDensity(layer, zone);
-                    if (roll > dens) continue;
+                    float dens = EffectiveDensity(layer, zone, x, z);
+                    if (Hash01(x, z, vi, 0) > dens) continue;
+                    if (Hash01(x, z, vi, 1) > myChance) continue;
 
-                    float shareRoll = Hash01(x, z, vi, 1);
-                    if (shareRoll > myChance) continue;
+                    if (!layer.IsTree && mapGrid != null && mapGrid.IsReady)
+                    {
+                        if (mapGrid.HasFlag(x, z, MapGrid.OccupancyFlags.Road)) continue;
+                    }
 
                     if (useGrid)
                     {
@@ -393,18 +401,20 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
                     Vector3 pos;
                     if (layer.IsTree)
                     {
-                        pos = origin + new Vector3((x + 0.5f) * ts, 0f, (z + 0.5f) * ts);
-                        pos.y = h + v.heightOffset;
+                        pos = terrainBuilder.MapLocalToWorld(new Vector3(
+                            origin.x + (x + 0.5f) * ts,
+                            h + v.heightOffset,
+                            origin.z + (z + 0.5f) * ts));
                     }
                     else
                     {
                         float m = ts * 0.15f;
                         float rx = stable ? Hash01(x, z, vi, 10) : Random.value;
                         float rz = stable ? Hash01(x, z, vi, 20) : Random.value;
-                        pos = new Vector3(
+                        pos = terrainBuilder.MapLocalToWorld(new Vector3(
                             origin.x + x * ts + Mathf.Lerp(m, ts - m, rx),
                             h + v.heightOffset,
-                            origin.z + z * ts + Mathf.Lerp(m, ts - m, rz));
+                            origin.z + z * ts + Mathf.Lerp(m, ts - m, rz)));
                     }
 
                     float scale = stable
@@ -426,6 +436,11 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
                         mapGrid.Occupy(x, z, fp, fp, MapGrid.OccupancyFlags.Tree, anchorCenter: true);
                         ResolveCover(layer, v, out var coverMode, out var coverH);
                         mapGrid.SetSightCover(x, z, fp, fp, coverMode, coverH, anchorCenter: true);
+                    }
+                    else if (layer.kind == LayerKind.Bush && mapGrid != null && mapGrid.IsReady)
+                    {
+                        ResolveCover(layer, v, out var coverMode, out var coverH);
+                        mapGrid.SetSightCover(x, z, 1, 1, coverMode, coverH, anchorCenter: true);
                     }
                 }
             }
@@ -461,6 +476,24 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
                         if (batch == null) continue;
                         for (int i = 0; i < batch.Length; i++)
                             ClearTreeFootprint(batch[i], fp, ref any, ref bx0, ref bz0, ref bx1, ref bz1);
+                    }
+                }
+            }
+            else if (gridOk && layer.kind == LayerKind.Bush)
+            {
+                if (v.sectorLists != null && v.sectorLists.TryGetValue(key, out var list) && list != null)
+                {
+                    for (int i = 0; i < list.Count; i++)
+                        ClearBushCover(list[i], ref any, ref bx0, ref bz0, ref bx1, ref bz1);
+                }
+                else if (v.sectors != null && v.sectors.TryGetValue(key, out var batches) && batches != null)
+                {
+                    for (int b = 0; b < batches.Length; b++)
+                    {
+                        var batch = batches[b];
+                        if (batch == null) continue;
+                        for (int i = 0; i < batch.Length; i++)
+                            ClearBushCover(batch[i], ref any, ref bx0, ref bz0, ref bx1, ref bz1);
                     }
                 }
             }
@@ -501,14 +534,175 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
         }
     }
 
-    private Zone GetZone(int x, int z)
+    private void ClearBushCover(Matrix4x4 m,
+        ref bool any, ref int bx0, ref int bz0, ref int bx1, ref int bz1)
     {
+        Vector3 p = m.GetColumn(3);
+        mapGrid.WorldToCell(p, out int cx, out int cz);
+        if (mapGrid.HasFlag(cx, cz, MapGrid.OccupancyFlags.Tree)) return;
+        mapGrid.ClearSightCover(cx, cz, 1, 1, anchorCenter: true);
+
+        if (!any)
+        {
+            bx0 = cx; bz0 = cz; bx1 = cx; bz1 = cz;
+            any = true;
+        }
+        else
+        {
+            if (cx < bx0) bx0 = cx;
+            if (cz < bz0) bz0 = cz;
+            if (cx > bx1) bx1 = cx;
+            if (cz > bz1) bz1 = cz;
+        }
+    }
+
+    private static NatureLayer MakeDefaultGrassLayer()
+    {
+        return new NatureLayer
+        {
+            name = "Трава",
+            kind = LayerKind.Grass,
+            enabled = true,
+            footprint = 1,
+            densityGrove = 0.62f,
+            densityForest = 0.22f,
+            densityThicket = 0.06f,
+            growInGrove = true,
+            growInForest = true,
+            growInThicket = true,
+            sightCover = MapGrid.SightCoverMode.None,
+            maxCoverHeight = 0f,
+            variants = new List<NatureVariant>()
+        };
+    }
+
+    private void EnsureGrassLayer()
+    {
+        if (layers == null) layers = new List<NatureLayer>();
+        NatureLayer grass = null;
+        for (int i = 0; i < layers.Count; i++)
+        {
+            if (layers[i] != null && layers[i].kind == LayerKind.Grass)
+            {
+                grass = layers[i];
+                break;
+            }
+        }
+        if (grass == null)
+        {
+            layers.Add(MakeDefaultGrassLayer());
+            return;
+        }
+
+        grass.enabled = true;
+        if (grass.name == "Трава (Unity later)") grass.name = "Трава";
+        float sum = grass.densityGrove + grass.densityForest + grass.densityThicket;
+        if (sum <= 0.0001f)
+        {
+            grass.densityGrove = 0.62f;
+            grass.densityForest = 0.22f;
+            grass.densityThicket = 0.06f;
+        }
+        grass.growInGrove = true;
+        grass.growInForest = true;
+        grass.growInThicket = true;
+        if (grass.variants == null) grass.variants = new List<NatureVariant>();
+    }
+
+    private float EffectiveDensity(NatureLayer layer, Zone zone, int x, int z)
+    {
+        float dens = GetDensity(layer, zone);
+        if (layer == null || layer.kind != LayerKind.Grass) return dens;
+        if (CellHasTree(x, z)) dens *= grassUnderTreeMult;
         float n = Mathf.PerlinNoise(
-            (x + zoneNoiseOffset.x) * zoneNoiseScale,
-            (z + zoneNoiseOffset.y) * zoneNoiseScale);
-        if (n < groveThreshold) return Zone.Grove;
-        if (n >= thicketThreshold) return Zone.Thicket;
-        return Zone.Forest;
+            (x + grassClusterOffset.x) * grassClusterNoiseScale,
+            (z + grassClusterOffset.y) * grassClusterNoiseScale);
+        dens *= Mathf.Lerp(0.4f, 1.2f, n);
+        return Mathf.Clamp01(dens);
+    }
+
+    private bool CellHasTree(int x, int z)
+    {
+        if (mapGrid == null || !mapGrid.IsReady) return false;
+        return mapGrid.HasFlag(x, z, MapGrid.OccupancyFlags.Tree);
+    }
+
+    [ContextMenu("Dump Settings")]
+    public void DumpSettingsFromMenu()
+    {
+        DumpSettings("Menu");
+    }
+
+    private void DumpSettings(string when)
+    {
+        var sb = new StringBuilder(1024);
+        sb.Append("NaturePlacement settings [").Append(when).Append("]\n");
+        sb.Append("  heightSource=").Append(heightSource != null ? heightSource.name : "null");
+        sb.Append(" terrainBuilder=").Append(terrainBuilder != null ? terrainBuilder.name : "null");
+        sb.Append(" mapGrid=").Append(mapGrid != null ? mapGrid.name : "null").Append('\n');
+        sb.Append("  layout=").Append(layout != null ? layout.name : "null").Append('\n');
+        sb.Append("  waterLevel=").Append(waterLevel);
+        sb.Append(" borderCells=").Append(borderCells);
+        sb.Append(" sectorSize=").Append(sectorSize).Append('\n');
+        sb.Append("  streamRadius=").Append(streamRadius);
+        sb.Append(" unloadExtra=").Append(unloadExtra).Append('\n');
+        sb.Append("  grassUnderTreeMult=").Append(grassUnderTreeMult);
+        sb.Append(" grassClusterNoiseScale=").Append(grassClusterNoiseScale);
+        sb.Append(" grassClusterOffset=").Append(grassClusterOffset).Append('\n');
+        sb.Append("  ready=").Append(_ready);
+        sb.Append(" loadedSectors=").Append(_loaded.Count);
+        sb.Append(" allVariants=").Append(allVariants != null ? allVariants.Count : 0).Append('\n');
+        int n = layers != null ? layers.Count : 0;
+        sb.Append("  layers=").Append(n).Append('\n');
+        for (int i = 0; i < n; i++)
+        {
+            var L = layers[i];
+            if (L == null)
+            {
+                sb.Append("    [").Append(i).Append("] null\n");
+                continue;
+            }
+            int vc = L.variants != null ? L.variants.Count : 0;
+            sb.Append("    [").Append(i).Append("] ").Append(L.name);
+            sb.Append(" kind=").Append(L.kind);
+            sb.Append(" enabled=").Append(L.enabled);
+            sb.Append(" footprint=").Append(L.footprint).Append('\n');
+            sb.Append("      dens G/F/T=").Append(L.densityGrove).Append('/')
+                .Append(L.densityForest).Append('/').Append(L.densityThicket);
+            sb.Append(" grow G/F/T=").Append(L.growInGrove).Append('/')
+                .Append(L.growInForest).Append('/').Append(L.growInThicket).Append('\n');
+            sb.Append("      cover=").Append(L.sightCover);
+            sb.Append(" maxCoverH=").Append(L.maxCoverHeight);
+            sb.Append(" variants=").Append(vc).Append('\n');
+            for (int vi = 0; vi < vc; vi++)
+            {
+                var v = L.variants[vi];
+                if (v == null)
+                {
+                    sb.Append("        (").Append(vi).Append(") null\n");
+                    continue;
+                }
+                int parts = v.parts != null ? v.parts.Count : 0;
+                sb.Append("        (").Append(vi).Append(") ").Append(v.name);
+                sb.Append(" w=").Append(v.weight);
+                sb.Append(" scale=").Append(v.minScale).Append('-').Append(v.maxScale);
+                sb.Append(" yOff=").Append(v.heightOffset);
+                sb.Append(" rndY=").Append(v.randomYRotation);
+                sb.Append(" shadows=").Append(v.castShadows);
+                sb.Append(" prefab=").Append(v.prefab != null ? v.prefab.name : "null");
+                sb.Append(" mesh=").Append(v.mesh != null ? v.mesh.name : "null");
+                sb.Append(" mat=").Append(v.material != null ? v.material.name : "null");
+                sb.Append(" sprite=").Append(v.sprite != null ? v.sprite.name : "null");
+                sb.Append(" parts=").Append(parts).Append('\n');
+            }
+        }
+        Debug.Log(sb.ToString());
+    }
+
+    public Zone GetZone(int x, int z)
+    {
+        if (layout == null) layout = GetComponent<MapLayout>();
+        return layout != null ? layout.GetZone(x, z) : Zone.Forest;
     }
 
     private static bool CanGrow(NatureLayer layer, Zone zone)
@@ -518,6 +712,7 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
             case Zone.Grove: return layer.growInGrove;
             case Zone.Forest: return layer.growInForest;
             case Zone.Thicket: return layer.growInThicket;
+            case Zone.Clearing: return layer.kind == LayerKind.Grass;
             default: return false;
         }
     }
@@ -552,6 +747,7 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
             case Zone.Grove: return layer.densityGrove;
             case Zone.Forest: return layer.densityForest;
             case Zone.Thicket: return layer.densityThicket;
+            case Zone.Clearing: return layer.kind == LayerKind.Grass ? layer.densityGrove : 0f;
             default: return 0f;
         }
     }
@@ -564,57 +760,6 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
             h = (h ^ (h >> 13)) * 1274126177u;
             h ^= (h >> 16);
             return (h & 0xFFFFFF) / 16777215f;
-        }
-    }
-
-    /// <summary>
-    /// Якоря стволов (центр клетки) теми же бросками, что PlaceSector.
-    /// Трава режет круги вокруг этих точек, не клетки.
-    /// </summary>
-    public void CollectTreeAnchors(List<Vector2> dst)
-    {
-        if (dst == null || heightSource == null || !heightSource.isGenerated) return;
-        if (layers == null) return;
-        int w = heightSource.width;
-        int d = heightSource.depth;
-        float ts = terrainBuilder != null ? terrainBuilder.tileSize : 4f;
-        Vector3 origin = new Vector3(-w * ts * 0.5f, 0f, -d * ts * 0.5f);
-
-        for (int li = 0; li < layers.Count; li++)
-        {
-            var layer = layers[li];
-            if (layer == null || !layer.enabled || !layer.IsTree) continue;
-            int fp = Mathf.Max(1, layer.footprint);
-            int half = fp / 2;
-            int step = fp;
-            float weightSum = 0f;
-            if (layer.variants != null)
-                foreach (var ov in layer.variants) if (ov != null) weightSum += Mathf.Max(0f, ov.weight);
-
-            int variantCount = layer.variants != null ? layer.variants.Count : 0;
-            for (int vi = 0; vi < variantCount; vi++)
-            {
-                var v = layer.variants[vi];
-                if (v == null) continue;
-                float myChance = weightSum > 0f ? Mathf.Max(0f, v.weight) / weightSum : 1f;
-                for (int x = borderCells + half; x < w - borderCells - half; x += step)
-                {
-                    for (int z = borderCells + half; z < d - borderCells - half; z += step)
-                    {
-                        if (heightSource.GetHeight(x, z) <= waterLevel) continue;
-                        Zone zone = GetZone(x, z);
-                        if (!CanGrow(layer, zone)) continue;
-                        if (Hash01(x, z, vi, 0) > GetDensity(layer, zone)) continue;
-                        if (Hash01(x, z, vi, 1) > myChance) continue;
-                        if (mapGrid != null && mapGrid.IsReady)
-                        {
-                            if (mapGrid.HasFlag(x, z, MapGrid.OccupancyFlags.Road)) continue;
-                            if (FootprintHitsRoad(x, z, fp)) continue;
-                        }
-                        dst.Add(new Vector2(origin.x + (x + 0.5f) * ts, origin.z + (z + 0.5f) * ts));
-                    }
-                }
-            }
         }
     }
 
@@ -778,4 +923,5 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
         }
         return true;
     }
+
 }

@@ -50,6 +50,7 @@ Shader "Nature/GrassField"
 
             HLSLPROGRAM
             #pragma target 4.5
+            #pragma require geometry
             #pragma vertex Vert
             #pragma geometry Geom
             #pragma fragment Frag
@@ -81,6 +82,10 @@ Shader "Nature/GrassField"
                 float4 _PushDirs[STAMP_COUNT];
             CBUFFER_END
 
+            float4 _NatureLightPos;
+            float4 _NatureLightColor;
+            float4 _NatureLightParams;
+
             struct Attributes
             {
                 float4 positionOS : POSITION;
@@ -100,6 +105,7 @@ Shader "Nature/GrassField"
                 float4 positionCS : SV_POSITION;
                 float2 uv : TEXCOORD0;
                 float fogCoord : TEXCOORD1;
+                float3 positionWS : TEXCOORD2;
             };
 
             float3 Hash33(float3 p)
@@ -129,6 +135,7 @@ Shader "Nature/GrassField"
                 o.positionCS = TransformWorldToHClip(posWS);
                 o.uv = uv;
                 o.fogCoord = ComputeFogFactor(o.positionCS.z);
+                o.positionWS = posWS;
                 return o;
             }
 
@@ -195,18 +202,12 @@ Shader "Nature/GrassField"
                 float3 c = i[2].positionWS;
                 float3 mid = (a + b + c) * 0.333333;
                 float pdist = distance(_PlayerPos.xz, mid.xz);
-                if (pdist > _DrawRadius) return;
-
-                float4 clip = TransformWorldToHClip(mid);
-                float2 ndc = clip.xy / max(abs(clip.w), 1e-4);
-                float pad = max(_ScreenPad, 1.0);
-                float frame = max(abs(ndc.x), abs(ndc.y));
-                if (frame > pad) return;
+                if (_DrawRadius > 0.5 && pdist > _DrawRadius) return;
 
                 float open = saturate((i[0].open + i[1].open + i[2].open) * 0.333333);
-                float t = open * open * open;
+                float t = open * open;
                 float dens = lerp(_EdgeDensity, _CenterDensity, t);
-                if (dens < 0.15) return;
+                dens = max(dens, 2.0);
 
                 float3 ab = b - a;
                 float3 ac = c - a;
@@ -214,8 +215,10 @@ Shader "Nature/GrassField"
                 float3 up = normalize(i[0].normalWS + i[1].normalWS + i[2].normalWS);
                 if (up.y < 0.35) return;
 
-                float rim = saturate((_DrawRadius - pdist) / 8.0);
-                int n = (int)clamp(area * dens * rim, 0, 32);
+                float rim = 1.0;
+                if (_DrawRadius > 0.5)
+                    rim = max(0.35, saturate((_DrawRadius - pdist) / 8.0));
+                int n = (int)clamp(area * dens * rim, 2, 32);
                 if (n <= 0) return;
 
                 [loop]
@@ -231,6 +234,14 @@ Shader "Nature/GrassField"
             half4 Frag(g2f i) : SV_Target
             {
                 float3 col = lerp(_BottomColor.rgb, _TopColor.rgb, i.uv.y) * _Brightness;
+                if (_NatureLightParams.z > 0.5)
+                {
+                    float range = max(_NatureLightParams.x, 0.05);
+                    float d = distance(i.positionWS, _NatureLightPos.xyz);
+                    float t = saturate(1.0 - d / range);
+                    t = pow(t, max(_NatureLightParams.y, 0.5));
+                    col += col * _NatureLightColor.rgb * t;
+                }
                 col = MixFog(col, i.fogCoord);
                 return half4(col, 1);
             }

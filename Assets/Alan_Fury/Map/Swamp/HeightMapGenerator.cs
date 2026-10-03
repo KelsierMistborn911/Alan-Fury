@@ -15,8 +15,8 @@ public abstract class HeightMapGenerator : MonoBehaviour
     public const string Version = "3.1";
 
     [Header("Размеры карты")]
-    public int width = 60;
-    public int depth = 60;
+    public int width = 400;
+    public int depth = 1500;
 
     [Header("Масштаб мира (источник tileSize)")]
     public ChunkedTerrainBuilder chunkedBuilder;

@@ -17,17 +17,22 @@ public class TerrainManager : MonoBehaviour
     public SpriteVegetationPlacer vegetationPlacer;    // legacy спрайтовая растительность
     public NaturePlacement naturePlacement;            // единая система деревья + растительность
     public NatureRenderer natureRenderer;              // отрисовка + live
-    public GrassField grassField;                      // отдельное поле Dynamic Grass FX
 
     [Header("Сетка занятости")]
     public MapGrid mapGrid;                             // единая occupancy-сетка (base/sector/region)
 
     [Header("Опциональные системы")]
-    public RoadGenerator roadGenerator;                 // процедурная дорога
+    public MapLayout mapLayout;                 // процедурная дорога
     public MapFogCurtain fogCurtain;                    // туман-занавес по краям карты
     public FogPlacer fogPlacer;                         // очаги тумана на карте
     public Pathfinder pathfinder;                       // сетка проходимости для AI (строится после деревьев)
     public MapBoundary mapBoundary;                     // мягкая граница карты (пересчёт после генерации)
+
+    [Header("Размер карты")]
+    [Tooltip("Пишется в HeightMapGenerator перед генерацией. 300×800 клеток, тайл 4 м = 1.2×3.2 км.")]
+    public int mapWidth = 300;
+    public int mapDepth = 800;
+    public bool applyMapSize = true;
 
     [Header("Настройки запуска")]
     public bool generateOnStart = true;
@@ -71,39 +76,44 @@ public class TerrainManager : MonoBehaviour
 
         Debug.Log("=== Начинаем генерацию ===");
         if (clearBeforeGenerate) ClearAll();
+        if (applyMapSize && heightGenerator != null)
+        {
+            heightGenerator.width = Mathf.Max(8, mapWidth);
+            heightGenerator.depth = Mathf.Max(8, mapDepth);
+        }
 
         var sw = System.Diagnostics.Stopwatch.StartNew();
 
-        // 1. Карта высот
+        // 1. Ось дороги. Волна, без поиска по клеткам.
+        if (mapLayout != null)
+        {
+            if (mapLayout.heightSource == null) mapLayout.heightSource = heightGenerator;
+            mapLayout.BuildSpine();
+            LogStep("Ось дороги", ref sw);
+        }
+
+        // 2. Карта высот вокруг уже известной оси
         heightGenerator.Generate();
         LogStep("Карта высот", ref sw);
 
-        // 1.5 Сетка занятости (пустая, writers заполнят позже)
         if (mapGrid != null)
         {
             mapGrid.Build();
             LogStep("MapGrid", ref sw);
         }
 
-        // 2. Меш
+        // 3. Полотно по оси, высоты поджимаются к дороге
+        if (mapLayout != null)
+        {
+            mapLayout.FinishRoad();
+            LogStep("Полотно дороги", ref sw);
+        }
+
+        // 4. Меш один раз, уже с выровненной дорогой
         if (chunkedTerrainBuilder != null)
         {
             chunkedTerrainBuilder.BuildTerrain();
             LogStep("Чанки меша", ref sw);
-        }
-
-        // 3. Дорога (до объектов — чтобы деревья её обходили)
-        if (roadGenerator != null)
-        {
-            roadGenerator.GenerateRoad();
-            LogStep("Дорога", ref sw);
-        }
-
-        // 3.5 Дорога сгладила карту высот → пересобрать меш
-        if (roadGenerator != null && roadGenerator.flattenAlongRoad && chunkedTerrainBuilder != null)
-        {
-            chunkedTerrainBuilder.BuildTerrain();
-            LogStep("Пересборка меша после дороги", ref sw);
         }
 
         // 4. Объекты
@@ -125,13 +135,6 @@ public class TerrainManager : MonoBehaviour
         {
             vegetationPlacer.PlaceAll();
             LogStep("Растительность (legacy)", ref sw);
-        }
-
-        // 4.3 Отдельное поле травы (материал Dynamic Grass FX)
-        if (grassField != null)
-        {
-            grassField.Build();
-            LogStep("GrassField", ref sw);
         }
 
         // 4.5 Сетка проходимости для AI + пересчёт границы карты.
@@ -171,10 +174,9 @@ public class TerrainManager : MonoBehaviour
         if (naturePlacement != null) naturePlacement.UnloadAll();
         if (natureRenderer != null) natureRenderer.ClearLive();
         if (vegetationPlacer != null) vegetationPlacer.ClearAll();
-        if (grassField != null) grassField.Clear();
         if (mapGrid != null) mapGrid.Clear();
         if (heightGenerator != null) heightGenerator.Clear();
-        if (roadGenerator != null) roadGenerator.ClearRoad();
+        if (mapLayout != null) mapLayout.ClearRoad();
         if (fogCurtain != null) fogCurtain.ClearCurtain();
         if (fogPlacer != null) fogPlacer.ClearFog();
     }
@@ -194,9 +196,8 @@ public class TerrainManager : MonoBehaviour
         if (objectPlacer == null) objectPlacer = GetComponent<ObjectPlacer>();
         if (naturePlacement == null) naturePlacement = GetComponent<NaturePlacement>();
         if (natureRenderer == null) natureRenderer = GetComponent<NatureRenderer>();
-        if (grassField == null) grassField = GetComponent<GrassField>();
         if (mapGrid == null) mapGrid = GetComponent<MapGrid>();
-        if (roadGenerator == null) roadGenerator = GetComponent<RoadGenerator>();
+        if (mapLayout == null) mapLayout = GetComponent<MapLayout>();
         if (fogCurtain == null) fogCurtain = GetComponent<MapFogCurtain>();
         if (fogPlacer == null) fogPlacer = GetComponent<FogPlacer>();
         if (pathfinder == null) pathfinder = GetComponent<Pathfinder>();
@@ -207,22 +208,21 @@ public class TerrainManager : MonoBehaviour
             if (mapGrid.heightSource == null) mapGrid.heightSource = heightGenerator;
             if (mapGrid.chunkedBuilder == null) mapGrid.chunkedBuilder = chunkedTerrainBuilder;
         }
-        if (roadGenerator != null && roadGenerator.mapGrid == null)
-            roadGenerator.mapGrid = mapGrid;
+        if (mapLayout != null && mapLayout.mapGrid == null)
+            mapLayout.mapGrid = mapGrid;
         if (objectPlacer != null && objectPlacer.mapGrid == null)
             objectPlacer.mapGrid = mapGrid;
         if (pathfinder != null && pathfinder.mapGrid == null)
             pathfinder.mapGrid = mapGrid;
-        if (grassField != null)
-        {
-            if (grassField.heightSource == null) grassField.heightSource = heightGenerator;
-            if (grassField.terrainBuilder == null) grassField.terrainBuilder = chunkedTerrainBuilder;
-            if (grassField.mapGrid == null) grassField.mapGrid = mapGrid;
-            if (grassField.naturePlacement == null) grassField.naturePlacement = naturePlacement;
-            if (grassField.roadGenerator == null) grassField.roadGenerator = roadGenerator;
-        }
         if (natureRenderer != null && natureRenderer.placement == null)
             natureRenderer.placement = naturePlacement;
+        if (naturePlacement != null)
+        {
+            if (naturePlacement.heightSource == null) naturePlacement.heightSource = heightGenerator;
+            if (naturePlacement.terrainBuilder == null) naturePlacement.terrainBuilder = chunkedTerrainBuilder;
+            if (naturePlacement.mapGrid == null) naturePlacement.mapGrid = mapGrid;
+            if (naturePlacement.layout == null) naturePlacement.layout = mapLayout;
+        }
     }
 
     private bool ValidateComponents()
@@ -238,5 +238,16 @@ public class TerrainManager : MonoBehaviour
             return false;
         }
         return true;
+    }
+
+    void OnDrawGizmos()
+    {
+        if (mapLayout == null) mapLayout = GetComponent<MapLayout>();
+        if (mapLayout == null) return;
+        if (mapLayout.heightSource == null && heightGenerator != null)
+            mapLayout.heightSource = heightGenerator;
+        if (mapLayout.chunkedBuilder == null && chunkedTerrainBuilder != null)
+            mapLayout.chunkedBuilder = chunkedTerrainBuilder;
+        mapLayout.EnsureZones();
     }
 }

@@ -28,6 +28,7 @@ public class HumanoidCombat : MonoBehaviour
     [Header("Управление боем")]
     public float sheathVisualDelay = 1f;
     public float combatLingerSeconds = 15f;
+    public float battleStepHold = 10f;
     [Tooltip("Секунд после сброса боя до авто-ножен. 0 = не убирать. Игрок = 60.")]
     public float sheathAfterPeaceSeconds = 0f;
     public float combatFaceRange = 10f;
@@ -89,6 +90,8 @@ public class HumanoidCombat : MonoBehaviour
     [Range(0.35f, 0.85f)] public float sweepHitAt = 0.6f;
     [Tooltip("Добавка к замаху, если стойки нет (Neutral) — сначала войти в Mid.")]
     public float stanceEnterWindup = 0.22f;
+    [Tooltip("Конец удара держит позу. Новая атака в это окно бьёт до стойки. Иначе вход в High/Low.")]
+    public float stanceSettleDelay = 0.5f;
     [Tooltip("Множитель замаха, когда бьём из High/Low: клинок уже сбоку.")]
     [Range(0.35f, 1f)] public float chainWindupMult = 0.62f;
     [Tooltip("Старт слэша: корпус чуть наружу от линии на врага.")]
@@ -105,6 +108,8 @@ public class HumanoidCombat : MonoBehaviour
     public bool IsShieldArmed { get; protected set; }
     public bool ForcePeace { get; protected set; }
     public bool IsInCombat { get; protected set; }
+    public bool WantsBattleStep =>
+        IsArmed && !ForcePeace && (HasTarget || NearTarget != null || IsInAttackPipeline || Time.time < _battleStepUntil);
     public float ChargePercent { get; protected set; }
     public bool IsHeavyReady => IsCharging && ChargePercent >= heavyChargeThreshold;
     public bool IsInfighting { get; protected set; }
@@ -208,10 +213,20 @@ public class HumanoidCombat : MonoBehaviour
     protected AttackMoveMode _attackMoveMode;
 
     protected float _combatLingerUntil;
+    float _battleStepUntil;
     protected float _sheathAfterPeaceAt;
     protected float _nextShieldRamTime;
     protected float _noRadialPushUntil;
     protected float _shockUntil;
+    float _stanceSettleAt;
+    bool _holdEndPose;
+    int _holdStateHash;
+    float _holdNorm;
+    int _preAttackHash;
+    int _attackPoseHash;
+    float _attackPoseNorm;
+    bool _wantAttackPose;
+    string _attackTrig;
 
     [Header("Формы")]
     [Tooltip("Не переписывать удар в локоть / рукоять / плечо. Манекен.")]
@@ -331,6 +346,13 @@ public class HumanoidCombat : MonoBehaviour
         ResetTrig("ShieldBash");
         ResetTrig("ShieldBashBlock");
         SetTrig(trig);
+        _attackTrig = trig;
+        _attackPoseHash = 0;
+        _attackPoseNorm = 0.45f;
+        _wantAttackPose = true;
+        _preAttackHash = 0;
+        if (animator != null)
+            _preAttackHash = animator.GetCurrentAnimatorStateInfo(0).fullPathHash;
     }
 
     public void FireSpellTrigger(string name) => SetTrig(name);
@@ -356,16 +378,19 @@ public class HumanoidCombat : MonoBehaviour
             IsInfighting = false;
             if (melee != null) melee.Stop();
             else if (hitbox != null) hitbox.Deactivate();
+            CancelEndHold();
             return;
         }
 
         if (stance != null)
-            stance.Tick(IsInCombat, IsArmed, IsInAttackPipeline);
+            stance.Tick(IsInCombat, IsArmed, IsInAttackPipeline || _stanceSettleAt > 0f);
 
         TickCombatState();
 
         if (IsParrying && Time.time >= _parryEndTime) IsParrying = false;
 
+        TickEndHold();
+        TryCaptureAttackPose();
         TickShieldRam();
 
         if (IsApproaching)
@@ -626,6 +651,7 @@ public class HumanoidCombat : MonoBehaviour
 
     void BeginWindupThenAttack(bool fromBlock, AttackForm? forcedForm = null, float? windupOverride = null, bool allowApproach = true)
     {
+        CancelEndHold();
         if (allowApproach && UsesAttackApproach && !fromBlock && !IsApproaching && CanAltMagnet()
             && !WantsRetreatStrike())
         {
@@ -675,6 +701,7 @@ public class HumanoidCombat : MonoBehaviour
 
     void StartHoldAttack()
     {
+        CancelEndHold();
         DrawWeapon();
         IsCharging = true;
         isHoldingAttack = true;
@@ -854,6 +881,7 @@ public class HumanoidCombat : MonoBehaviour
     void CommitSwing(bool fromBlock, AttackForm? forcedForm = null)
     {
         IsAttacking = true;
+        _battleStepUntil = Time.time + battleStepHold;
         _noRadialPushUntil = Time.time + 0.45f;
 
         float dur = currentWeapon != null ? currentWeapon.attackDuration : 0.2f;
@@ -1599,9 +1627,10 @@ public class HumanoidCombat : MonoBehaviour
             if (melee != null) melee.Stop();
             else if (hitbox != null) hitbox.Deactivate();
             if (hitbox != null && hitbox.visual != null) hitbox.visual.HideWindup();
-            EndAttack();
+            EndAttack(settle: false);
         }
 
+        CancelEndHold();
         _shockUntil = Time.time + (heavy ? shockHeavy : shockLight);
         SetTrig("HitReact");
     }
@@ -1624,16 +1653,109 @@ public class HumanoidCombat : MonoBehaviour
         _canStickThisAttack = false;
         if (hitbox != null && hitbox.visual != null) hitbox.visual.HideWindup();
         if (melee != null && melee.IsTelegraphing) melee.Stop();
+        BeginEndHold();
+    }
+
+    void EndAttack(bool settle)
+    {
+        EndAttack();
+        if (!settle) CancelEndHold();
+    }
+
+    static float ClipNorm(float t)
+    {
+        t -= Mathf.Floor(t);
+        return t < 0f ? t + 1f : t;
+    }
+
+    void TryCaptureAttackPose()
+    {
+        if (animator == null) return;
+        const int layer = 0;
+        bool trans = animator.IsInTransition(layer);
+        AnimatorStateInfo cur = animator.GetCurrentAnimatorStateInfo(layer);
+        int curHash = cur.fullPathHash;
+        int nextHash = trans ? animator.GetNextAnimatorStateInfo(layer).fullPathHash : 0;
+
+        if (_wantAttackPose)
+        {
+            if (trans && curHash == _preAttackHash && nextHash != 0 && nextHash != _preAttackHash)
+            {
+                _attackPoseHash = nextHash;
+                return;
+            }
+            if (curHash != 0 && curHash != _preAttackHash)
+            {
+                _attackPoseHash = curHash;
+                _attackPoseNorm = ClipNorm(cur.normalizedTime);
+                if (!trans) _wantAttackPose = false;
+            }
+            return;
+        }
+
+        if (_attackPoseHash == 0 || trans || curHash != _attackPoseHash) return;
+        float norm = ClipNorm(cur.normalizedTime);
+        if (norm + 0.02f >= _attackPoseNorm)
+            _attackPoseNorm = norm;
+    }
+
+    void BeginEndHold()
+    {
+        TryCaptureAttackPose();
+        stanceSettleDelay = 0.5f;
+        _stanceSettleAt = Time.time + stanceSettleDelay;
+        _holdEndPose = false;
+        if (animator == null) return;
+        _holdStateHash = _attackPoseHash;
+        bool thrust = _lastForm == AttackForm.Thrust || _lastForm == AttackForm.Pommel;
+        float raw = _attackPoseNorm - 0.03f;
+        _holdNorm = thrust ? Mathf.Clamp(raw, 0.28f, 0.42f) : Mathf.Clamp(raw, 0.55f, 0.82f);
+        _holdEndPose = _holdStateHash != 0 || !string.IsNullOrEmpty(_attackTrig);
+        PinEndPose();
+    }
+
+    void PinEndPose()
+    {
+        if (!_holdEndPose || animator == null) return;
+        if (_holdStateHash != 0)
+            animator.Play(_holdStateHash, 0, _holdNorm);
+        else if (!string.IsNullOrEmpty(_attackTrig))
+            animator.Play(_attackTrig, 0, _holdNorm);
+        if (animator.IsInTransition(0))
+        {
+            if (_holdStateHash != 0)
+                animator.Play(_holdStateHash, 0, _holdNorm);
+            else if (!string.IsNullOrEmpty(_attackTrig))
+                animator.Play(_attackTrig, 0, _holdNorm);
+        }
+    }
+
+    void TickEndHold()
+    {
+        if (_stanceSettleAt <= 0f) return;
+        if (Time.time < _stanceSettleAt)
+        {
+            PinEndPose();
+            return;
+        }
+        CancelEndHold();
         if (stance != null) stance.PulseCurrent();
+    }
+
+    void CancelEndHold()
+    {
+        _stanceSettleAt = 0f;
+        _holdEndPose = false;
     }
 
     void ApplyCommitStance()
     {
         if (stance == null) return;
         if (_prep.charge >= heavyChargeThreshold)
-            stance.Enter(CombatStance.Low);
+            stance.Enter(CombatStance.Low, writeAnim: false);
         else
-            stance.Enter(CombatStance.High);
+            stance.Enter(CombatStance.High, writeAnim: false);
+        stance.SuppressAnim();
     }
 
     void DropChargeToLow()
@@ -1730,6 +1852,7 @@ public class HumanoidCombat : MonoBehaviour
         IsInCombat = false;
         _combatLingerUntil = 0f;
         if (IsCharging) CancelCharge();
+        CancelEndHold();
         SheathAll();
         if (stance != null) stance.ResetToNeutral();
         ClearTarget();
@@ -1764,6 +1887,7 @@ public class HumanoidCombat : MonoBehaviour
     {
         if (!IsArmed) return;
         if (IsCharging) CancelCharge();
+        CancelEndHold();
         IsArmed = false;
         if (stance != null) stance.ResetToNeutral();
         _bladeYawValid = false;

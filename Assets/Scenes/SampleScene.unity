@@ -14,17 +14,17 @@ OcclusionCullingSettings:
 RenderSettings:
   m_ObjectHideFlags: 0
   serializedVersion: 9
-  m_Fog: 0
-  m_FogColor: {r: 0.5, g: 0.5, b: 0.5, a: 1}
-  m_FogMode: 3
+  m_Fog: 1
+  m_FogColor: {r: 0.06, g: 0.08, b: 0.12, a: 1}
+  m_FogMode: 2
   m_FogDensity: 0.01
   m_LinearFogStart: 0
   m_LinearFogEnd: 300
-  m_AmbientSkyColor: {r: 0.212, g: 0.227, b: 0.259, a: 1}
-  m_AmbientEquatorColor: {r: 0.114, g: 0.125, b: 0.133, a: 1}
-  m_AmbientGroundColor: {r: 0.047, g: 0.043, b: 0.035, a: 1}
+  m_AmbientSkyColor: {r: 0.0176, g: 0.0264, b: 0.0484, a: 0.22}
+  m_AmbientEquatorColor: {r: 0.0154, g: 0.0198, b: 0.0308, a: 0.22}
+  m_AmbientGroundColor: {r: 0.0066, g: 0.0088, b: 0.0132, a: 0.22}
   m_AmbientIntensity: 1
-  m_AmbientMode: 0
+  m_AmbientMode: 1
   m_SubtractiveShadowColor: {r: 0.42, g: 0.478, b: 0.627, a: 1}
   m_SkyboxMaterial: {fileID: 10304, guid: 0000000000000000f000000000000000, type: 0}
   m_HaloStrength: 0.5
@@ -37,7 +37,7 @@ RenderSettings:
   m_ReflectionBounces: 1
   m_ReflectionIntensity: 1
   m_CustomReflection: {fileID: 0}
-  m_Sun: {fileID: 0}
+  m_Sun: {fileID: 410087040}
   m_UseRadianceAmbientProbe: 0
 --- !u!157 &3
 LightmapSettings:
@@ -302,8 +302,8 @@ Camera:
   m_GameObject: {fileID: 330585543}
   m_Enabled: 1
   serializedVersion: 2
-  m_ClearFlags: 1
-  m_BackGroundColor: {r: 0, g: 0, b: 0, a: 1}
+  m_ClearFlags: 2
+  m_BackGroundColor: {r: 0.04, g: 0.06, b: 0.1, a: 1}
   m_projectionMatrixMode: 1
   m_GateFitMode: 2
   m_FOVAxisMode: 0
@@ -482,8 +482,8 @@ Light:
   serializedVersion: 10
   m_Type: 1
   m_Shape: 0
-  m_Color: {r: 1, g: 1, b: 1, a: 1}
-  m_Intensity: 0
+  m_Color: {r: 0.55, g: 0.68, b: 1, a: 1}
+  m_Intensity: 0.2
   m_Range: 10
   m_SpotAngle: 30
   m_InnerSpotAngle: 21.80208
@@ -492,7 +492,7 @@ Light:
     m_Type: 2
     m_Resolution: -1
     m_CustomResolution: -1
-    m_Strength: 1
+    m_Strength: 0.42
     m_Bias: 0.05
     m_NormalBias: 0.4
     m_NearPlane: 0.2
@@ -541,7 +541,7 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 410087039}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.40821788, y: -0.23456968, z: 0.10938163, w: 0.8754261}
+  m_LocalRotation: {x: -0.071340196, y: 0.9285075, z: -0.26624525, w: -0.24879283}
   m_LocalPosition: {x: 0, y: 3, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
@@ -601,6 +601,160 @@ Transform:
   m_ConstrainProportionsScale: 0
   m_Children:
   - {fileID: 280965120}
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &587254897
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 587254899}
+  - component: {fileID: 587254898}
+  m_Layer: 0
+  m_Name: Svetlost'
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &587254898
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 587254897}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: bcd1fd4e029adfc40a64dc73b87bda47, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  sun: {fileID: 410087040}
+  targetCamera: {fileID: 330585545}
+  globalVolume: {fileID: 832575518}
+  nature: {fileID: 1950520786}
+  natureRenderer: {fileID: 1950520787}
+  period: 3
+  blendTime: 0.8
+  applyInEditMode: 1
+  useHotkeys: 1
+  keyNoon: 54
+  keySunset: 55
+  keyDusk: 56
+  keyMoon: 57
+  keyNight: 48
+  keyCycle: 45
+  noon:
+    name: Noon
+    sunEuler: {x: 48, y: 45, z: 0}
+    sunColor: {r: 1, g: 0.96, b: 0.88, a: 1}
+    sunIntensity: 1.05
+    shadowStrength: 0.62
+    ambientSky: {r: 0.55, g: 0.66, b: 0.78, a: 1}
+    ambientEquator: {r: 0.48, g: 0.5, b: 0.42, a: 1}
+    ambientGround: {r: 0.22, g: 0.2, b: 0.16, a: 1}
+    ambientIntensity: 0.95
+    fog: 1
+    fogColor: {r: 0.62, g: 0.7, b: 0.74, a: 1}
+    fogDensity: 0.0045
+    cameraBackground: {r: 0.48, g: 0.62, b: 0.74, a: 1}
+    postExposure: 0
+    contrast: 4
+    saturation: 4
+    colorFilter: {r: 1, g: 1, b: 1, a: 1}
+    natureTint: {r: 1, g: 1, b: 1, a: 1}
+  sunset:
+    name: Sunset
+    sunEuler: {x: 12, y: 40, z: 0}
+    sunColor: {r: 1, g: 0.42, b: 0.18, a: 1}
+    sunIntensity: 0.58
+    shadowStrength: 0.62
+    ambientSky: {r: 0.35, g: 0.22, b: 0.28, a: 1}
+    ambientEquator: {r: 0.42, g: 0.26, b: 0.2, a: 1}
+    ambientGround: {r: 0.12, g: 0.08, b: 0.06, a: 1}
+    ambientIntensity: 0.42
+    fog: 1
+    fogColor: {r: 0.28, g: 0.16, b: 0.1, a: 1}
+    fogDensity: 0.012
+    cameraBackground: {r: 0.38, g: 0.18, b: 0.12, a: 1}
+    postExposure: -0.55
+    contrast: 12
+    saturation: 6
+    colorFilter: {r: 1, g: 0.82, b: 0.7, a: 1}
+    natureTint: {r: 0.72, g: 0.52, b: 0.38, a: 1}
+  dusk:
+    name: Dusk
+    sunEuler: {x: 4, y: 38, z: 0}
+    sunColor: {r: 0.95, g: 0.28, b: 0.16, a: 1}
+    sunIntensity: 0.28
+    shadowStrength: 0.48
+    ambientSky: {r: 0.16, g: 0.14, b: 0.28, a: 1}
+    ambientEquator: {r: 0.22, g: 0.14, b: 0.18, a: 1}
+    ambientGround: {r: 0.06, g: 0.05, b: 0.06, a: 1}
+    ambientIntensity: 0.28
+    fog: 1
+    fogColor: {r: 0.14, g: 0.1, b: 0.16, a: 1}
+    fogDensity: 0.016
+    cameraBackground: {r: 0.16, g: 0.1, b: 0.18, a: 1}
+    postExposure: -0.95
+    contrast: 10
+    saturation: -4
+    colorFilter: {r: 0.88, g: 0.72, b: 0.82, a: 1}
+    natureTint: {r: 0.42, g: 0.34, b: 0.4, a: 1}
+  fullMoon:
+    name: FullMoon
+    sunEuler: {x: 32, y: 210, z: 0}
+    sunColor: {r: 0.55, g: 0.68, b: 1, a: 1}
+    sunIntensity: 0.2
+    shadowStrength: 0.42
+    ambientSky: {r: 0.08, g: 0.12, b: 0.22, a: 1}
+    ambientEquator: {r: 0.07, g: 0.09, b: 0.14, a: 1}
+    ambientGround: {r: 0.03, g: 0.04, b: 0.06, a: 1}
+    ambientIntensity: 0.22
+    fog: 1
+    fogColor: {r: 0.06, g: 0.08, b: 0.12, a: 1}
+    fogDensity: 0.01
+    cameraBackground: {r: 0.04, g: 0.06, b: 0.1, a: 1}
+    postExposure: -1.25
+    contrast: 8
+    saturation: -16
+    colorFilter: {r: 0.75, g: 0.82, b: 1, a: 1}
+    natureTint: {r: 0.34, g: 0.4, b: 0.52, a: 1}
+  night:
+    name: Night
+    sunEuler: {x: 18, y: 205, z: 0}
+    sunColor: {r: 0.35, g: 0.42, b: 0.7, a: 1}
+    sunIntensity: 0.08
+    shadowStrength: 0.28
+    ambientSky: {r: 0.04, g: 0.05, b: 0.1, a: 1}
+    ambientEquator: {r: 0.03, g: 0.04, b: 0.07, a: 1}
+    ambientGround: {r: 0.015, g: 0.016, b: 0.025, a: 1}
+    ambientIntensity: 0.12
+    fog: 1
+    fogColor: {r: 0.03, g: 0.035, b: 0.055, a: 1}
+    fogDensity: 0.018
+    cameraBackground: {r: 0.02, g: 0.025, b: 0.04, a: 1}
+    postExposure: -1.7
+    contrast: 6
+    saturation: -22
+    colorFilter: {r: 0.62, g: 0.7, b: 0.92, a: 1}
+    natureTint: {r: 0.2, g: 0.24, b: 0.34, a: 1}
+--- !u!4 &587254899
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 587254897}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: -72.4841, y: -52.984474, z: -369.55936}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &824045060
@@ -814,6 +968,7 @@ MonoBehaviour:
   heavyChargeThreshold: 0.55
   sheathVisualDelay: 1
   combatLingerSeconds: 15
+  battleStepHold: 10
   sheathAfterPeaceSeconds: 0
   combatFaceRange: 10
   parryWindow: 0.25
@@ -850,6 +1005,7 @@ MonoBehaviour:
   strikeLead: 0.08
   sweepHitAt: 0.6
   stanceEnterWindup: 0.22
+  stanceSettleDelay: 1
   chainWindupMult: 0.62
   slashFaceOutward: 25
   EnemyLayers:
@@ -1411,13 +1567,13 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 866895051}
-  m_Enabled: 1
+  m_Enabled: 0
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: f868c31d5c7349649b6cb45d25fff8af, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
   heightSource: {fileID: 1950520784}
-  terrainBuilder: {fileID: 1950520777}
+  terrainBuilder: {fileID: 1950520789}
   player: {fileID: 0}
   types:
   - name: Grass 1
@@ -1653,6 +1809,7 @@ GameObject:
   m_Component:
   - component: {fileID: 1222755968}
   - component: {fileID: 1222755969}
+  - component: {fileID: 1222755970}
   m_Layer: 0
   m_Name: PlayerSpawn
   m_TagString: Untagged
@@ -1688,6 +1845,43 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   randomRadius: 1.5
+  snapToRoad: 1
+  groundProbe: 80
+  roadRoot: {fileID: 0}
+  player: {fileID: 0}
+  playOnStart: 1
+--- !u!114 &1222755970
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1222755967}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f30ef5827bdbbe44ea5b18dc83fdc593, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  playOnStart: 1
+  height: 14
+  radius: 2.6
+  color: {r: 1, g: 0.93, b: 0.72, a: 1}
+  coreColor: {r: 2.6, g: 2.5, b: 2.3, a: 1}
+  intensity: 8
+  lightRange: 16
+  flashBoost: 5
+  flashDecay: 10
+  shadows: 2
+  beamDelay: 0.5
+  revealAfterBeam: 0.5
+  arriveTime: 0
+  holdTime: 1.1
+  fadeTime: 2.2
+  arriveActor: {fileID: 0}
+  haloSize: 4.2
+  ringLife: 0.7
+  spawnBurst: 1
+  burstCount: 24
 --- !u!1 &1224455443
 GameObject:
   m_ObjectHideFlags: 0
@@ -1909,7 +2103,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   heightSource: {fileID: 0}
-  chunkedBuilder: {fileID: 1950520777}
+  chunkedBuilder: {fileID: 0}
   seamlessBuilder: {fileID: 0}
   bandWidth: 9
   edgePadding: 1
@@ -2478,7 +2672,6 @@ GameObject:
   - component: {fileID: 1950520766}
   - component: {fileID: 1950520765}
   - component: {fileID: 1950520776}
-  - component: {fileID: 1950520777}
   - component: {fileID: 1950520779}
   - component: {fileID: 1950520780}
   - component: {fileID: 1950520781}
@@ -2489,6 +2682,7 @@ GameObject:
   - component: {fileID: 1950520786}
   - component: {fileID: 1950520785}
   - component: {fileID: 1950520788}
+  - component: {fileID: 1950520789}
   m_Layer: 7
   m_Name: Terrain
   m_TagString: Untagged
@@ -2509,8 +2703,8 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   heightSource: {fileID: 1950520784}
-  chunkedBuilder: {fileID: 1950520777}
-  mapGrid: {fileID: 0}
+  chunkedBuilder: {fileID: 1950520789}
+  mapGrid: {fileID: 1950520785}
   objectTypes:
   - name: cube
     prefab: {fileID: 7142537620106917095, guid: 1b81ffb1abe63a64e936967afa3b1dd3,
@@ -2566,18 +2760,20 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   heightGenerator: {fileID: 1950520784}
-  chunkedTerrainBuilder: {fileID: 1950520777}
+  chunkedTerrainBuilder: {fileID: 1950520789}
   objectPlacer: {fileID: 1950520765}
   vegetationPlacer: {fileID: 866895052}
   naturePlacement: {fileID: 1950520786}
   natureRenderer: {fileID: 1950520787}
-  grassField: {fileID: 1950520788}
   mapGrid: {fileID: 1950520785}
-  roadGenerator: {fileID: 1950520782}
+  mapLayout: {fileID: 0}
   fogCurtain: {fileID: 1950520781}
   fogPlacer: {fileID: 1950520780}
   pathfinder: {fileID: 1950520783}
   mapBoundary: {fileID: 1224455450}
+  mapWidth: 400
+  mapDepth: 1500
+  applyMapSize: 1
   generateOnStart: 1
   clearBeforeGenerate: 1
   logTimings: 1
@@ -2688,25 +2884,6 @@ MonoBehaviour:
   lowColor: {r: 0.3, g: 0.3, b: 0.3, a: 1}
   highColor: {r: 0.9, g: 0.9, b: 0.9, a: 1}
   foundationColor: {r: 0.2, g: 0.15, b: 0.1, a: 1}
---- !u!114 &1950520777
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1950520764}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 761eb3056a6bf0443b58ee3e152b43a3, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  heightSource: {fileID: 1950520784}
-  tileSize: 4
-  slopeThreshold: 0.5
-  chunkSize: 10
-  lowColor: {r: 0.3, g: 0.3, b: 0.3, a: 1}
-  highColor: {r: 0.9, g: 0.9, b: 0.9, a: 1}
-  terrainMaterial: {fileID: 2100000, guid: bb404253f40073546827e9d92233a30f, type: 2}
 --- !u!114 &1950520779
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -2719,7 +2896,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: b2d648b5350878149a9151a7237cf9ce, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  player: {fileID: 0}
+  player: {fileID: 3200823202175224380, guid: 4f15a7177df3aeb47968e1a129db1000, type: 3}
   playerTag: Player
   maxActive: 45
   cullInterval: 0.4
@@ -2736,7 +2913,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   heightSource: {fileID: 1950520784}
-  terrainBuilder: {fileID: 1950520777}
+  terrainBuilder: {fileID: 1950520789}
   roadGenerator: {fileID: 1950520782}
   roadClearance: 8
   lowBandHeight: 0.12
@@ -2768,7 +2945,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   heightSource: {fileID: 1950520784}
-  chunkedBuilder: {fileID: 1950520777}
+  chunkedBuilder: {fileID: 1950520789}
   fogPrefab: {fileID: 418428478413586072, guid: 04ff3010d7b80b9448f16a1a4e74ed5c,
     type: 3}
   parent: {fileID: 0}
@@ -2789,18 +2966,40 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   heightSource: {fileID: 1950520784}
-  chunkedBuilder: {fileID: 1950520777}
-  mapGrid: {fileID: 0}
+  chunkedBuilder: {fileID: 1950520789}
+  mapGrid: {fileID: 1950520785}
   roadWidth: 2
   heightWeight: 8
+  waveAmplitude: 70
+  waveWavelength: 240
+  waveHarmonic: 0.4
   buildRoadMesh: 1
-  roadMaterial: {fileID: 0}
+  roadMaterial: {fileID: 2100000, guid: ef3d7ca622c22bf44a55ad5e8426df60, type: 2}
   roadColor: {r: 0.45, g: 0.38, b: 0.28, a: 1}
   meshHeightOffset: 0.1
   flattenAlongRoad: 1
   maxHeightStep: 0.1
   shoulderCells: 1
   shoulderBlend: 0.5
+  groveBandCells: 14
+  edgeThicketCells: 22
+  zoneNoiseScale: 0.012
+  thicketIslandThreshold: 0.78
+  zoneNoiseOffset: {x: 17.3, y: 91.7}
+  largeClearingCount: 5
+  smallClearingCount: 10
+  largeClearingMinRadius: 5
+  largeClearingMaxRadius: 10
+  smallClearingMinRadius: 3
+  smallClearingMaxRadius: 5
+  clearingSeed: 4912
+  showZoneMarkup: 1
+  markupBlock: 16
+  markupHeight: 18
+  groveGizmoColor: {r: 0.55, g: 0.95, b: 0.32, a: 0.55}
+  forestGizmoColor: {r: 0.14, g: 0.55, b: 0.22, a: 0.35}
+  thicketGizmoColor: {r: 0.02, g: 0.18, b: 0.05, a: 0.55}
+  clearingGizmoColor: {r: 0.95, g: 0.82, b: 0.18, a: 0.55}
   showGizmos: 1
   roadGizmoColor: {r: 0.6, g: 0.5, b: 0.2, a: 0.75}
   gizmoHeight: 0.06
@@ -2817,8 +3016,8 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   heightSource: {fileID: 1950520784}
-  chunkedBuilder: {fileID: 1950520777}
-  mapGrid: {fileID: 0}
+  chunkedBuilder: {fileID: 1950520789}
+  mapGrid: {fileID: 1950520785}
   obstacleMask:
     serializedVersion: 2
     m_Bits: 256
@@ -2839,7 +3038,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   width: 250
   depth: 600
-  chunkedBuilder: {fileID: 0}
+  chunkedBuilder: {fileID: 1950520789}
   randomSeed: 1
   seed: 0
   maxHeight: 10
@@ -2865,7 +3064,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   heightSource: {fileID: 1950520784}
-  chunkedBuilder: {fileID: 1950520777}
+  chunkedBuilder: {fileID: 1950520789}
   sectorSize: 10
   regionSize: 100
   blockMask: 1
@@ -2873,6 +3072,7 @@ MonoBehaviour:
   drawRoads: 1
   drawSectors: 0
   drawRegions: 0
+  drawZones: 1
   treeLabelColor: {r: 0.2, g: 0.85, b: 0.25, a: 1}
   roadFillColor: {r: 0.45, g: 0.35, b: 0.2, a: 0.35}
   sectorColor: {r: 0.3, g: 0.6, b: 1, a: 0.15}
@@ -2891,7 +3091,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   heightSource: {fileID: 1950520784}
-  terrainBuilder: {fileID: 1950520777}
+  terrainBuilder: {fileID: 1950520789}
   mapGrid: {fileID: 1950520785}
   layers:
   - name: "\u041E\u0441\u043D\u043E\u0432\u043D\u043E\u0439 \u043B\u0435\u0441"
@@ -2977,23 +3177,41 @@ MonoBehaviour:
     maxCoverHeight: 2.5
   - name: "\u041A\u0443\u0441\u0442\u044B"
     kind: 2
-    enabled: 0
+    enabled: 1
     footprint: 1
-    densityGrove: 0.15
-    densityForest: 0.3
-    densityThicket: 0.5
+    densityGrove: 0.06
+    densityForest: 0.12
+    densityThicket: 0.2
     growInGrove: 1
     growInForest: 1
     growInThicket: 1
     variants:
     - name: Bush_Stub
-      prefab: {fileID: 0}
+      prefab: {fileID: 213899067198857939, guid: fbd37a08d1a089840b0e9ce1e199395a,
+        type: 3}
       mesh: {fileID: 0}
       material: {fileID: 0}
       sprite: {fileID: 0}
       weight: 100
-      minScale: 0.7
-      maxScale: 1.1
+      minScale: 1
+      maxScale: 1
+      heightOffset: 0
+      randomYRotation: 1
+      castShadows: 1
+      spriteEuler: {x: 0, y: 0, z: 0}
+      overrideCover: 0
+      sightCover: 0
+      maxCoverHeight: 2.5
+      resolvedMesh: {fileID: 0}
+    - name: Bush_Stub
+      prefab: {fileID: 1301040729513061559, guid: c62992837f845bf4ea6feb789bcde0de,
+        type: 3}
+      mesh: {fileID: 0}
+      material: {fileID: 0}
+      sprite: {fileID: 0}
+      weight: 100
+      minScale: 1
+      maxScale: 1
       heightOffset: 0
       randomYRotation: 1
       castShadows: 1
@@ -3046,15 +3264,15 @@ MonoBehaviour:
     variants: []
     sightCover: 0
     maxCoverHeight: 2.5
-  zoneNoiseScale: 0.028
-  groveThreshold: 0.28
-  thicketThreshold: 0.72
-  zoneNoiseOffset: {x: 17.3, y: 91.7}
+  layout: {fileID: 0}
   waterLevel: 0
   borderCells: 2
   sectorSize: 16
   streamRadius: 80
   unloadExtra: 25
+  grassUnderTreeMult: 0.28
+  grassClusterNoiseScale: 0.09
+  grassClusterOffset: {x: 41.2, y: 8.7}
   allVariants: []
   variantLayer: []
 --- !u!114 &1950520787
@@ -3082,10 +3300,10 @@ MonoBehaviour:
   fadeKeepHeight: 2.3
   fadeKeepRadius: 1.8
   fadeKeepFalloff: 1
-  fadePale: 0.45
   fadeRestoreDelay: 0.4
   fadeRestoreTime: 0.7
   fadeMaterial: {fileID: 2100000, guid: fc357d90650695b47a3717717d8a08bc, type: 2}
+  todTint: {r: 0.34, g: 0.4, b: 0.52, a: 1}
   liveCheckEveryNFrames: 4
   liveRoot: {fileID: 0}
   streamCheckEveryNFrames: 8
@@ -3100,17 +3318,17 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1950520764}
-  m_Enabled: 0
+  m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 6ab0c2576d64e0948bd20bc861d0ce46, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
   heightSource: {fileID: 1950520784}
-  terrainBuilder: {fileID: 1950520777}
+  terrainBuilder: {fileID: 1950520789}
   mapGrid: {fileID: 1950520785}
   naturePlacement: {fileID: 1950520786}
-  roadGenerator: {fileID: 1950520782}
-  grassMaterial: {fileID: 2100000, guid: 398e375eea068974d8413ce961f68a52, type: 2}
+  mapLayout: {fileID: 0}
+  grassMaterial: {fileID: 2100000, guid: 13b0bb833654e49448e8f6fc6f88caf7, type: 2}
   heightOffset: 0.03
   skipBorderCells: 2
   maxSlope: 1.6
@@ -3120,15 +3338,15 @@ MonoBehaviour:
   edgeBlades: 5
   trunkRadius: 2.6
   fadeMeters: 10
-  bladeHeight: 1.15
-  bladeWidth: 0.11
+  bladeHeight: 0.85
+  bladeWidth: 0.09
   windStrength: 0.14
   windSpeed: 0.35
   screenPad: 1.05
-  player: {fileID: 0}
+  player: {fileID: 3200823202175224380, guid: 4f15a7177df3aeb47968e1a129db1000, type: 3}
   drawRadius: 28
   matchTreeRadius: 1
-  natureRenderer: {fileID: 0}
+  natureRenderer: {fileID: 1950520787}
   pushRadius: 1.8
   pushStrength: 1.15
   recoverSeconds: 1.35
@@ -3138,13 +3356,36 @@ MonoBehaviour:
   skipWater: 1
   waterLevel: 0
   skipRoads: 1
-  skipUnderTrees: 0
+  skipUnderTrees: 1
   growInGrove: 1
   growInForest: 1
   growInThicket: 1
+  growInClearing: 1
+  densityGrove: 0.62
+  densityForest: 0.22
+  densityThicket: 0.06
   coverage: 1
   shadowCasting: 0
   receiveShadows: 1
+--- !u!114 &1950520789
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1950520764}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 761eb3056a6bf0443b58ee3e152b43a3, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  heightSource: {fileID: 1950520784}
+  tileSize: 4
+  slopeThreshold: 0.2
+  chunkSize: 10
+  lowColor: {r: 0.3, g: 0.3, b: 0.3, a: 1}
+  highColor: {r: 0.9, g: 0.9, b: 0.9, a: 1}
+  terrainMaterial: {fileID: 2100000, guid: bb404253f40073546827e9d92233a30f, type: 2}
 --- !u!1 &1984545281
 GameObject:
   m_ObjectHideFlags: 0
@@ -3247,7 +3488,7 @@ MonoBehaviour:
   - {fileID: 8300000, guid: 9c7a3fc716d0746469d6785e10cce0a4, type: 3}
   howlRange: 900
   answerDelay: 0.35
-  howlCooldown: 8
+  howlCooldown: 25
   beaterEveryMeters: 100
   heraldClearMeters: 70
 --- !u!4 &2057484379 stripped
@@ -3356,7 +3597,7 @@ PrefabInstance:
         type: 3}
       propertyPath: chunkedBuilder
       value: 
-      objectReference: {fileID: 1950520777}
+      objectReference: {fileID: 0}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []
@@ -3461,3 +3702,4 @@ SceneRoots:
   - {fileID: 824045073}
   - {fileID: 8829691084510088204}
   - {fileID: 977760327}
+  - {fileID: 587254899}

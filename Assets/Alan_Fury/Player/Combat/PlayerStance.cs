@@ -76,21 +76,29 @@ public class PlayerStance : MonoBehaviour
             _stanceTimer = stanceDuration;
     }
 
-    public void Enter(CombatStance s)
+    public void Enter(CombatStance s, bool writeAnim = true)
     {
         if (Current == s)
         {
             if (s == CombatStance.High || s == CombatStance.Low)
                 _stanceTimer = stanceDuration;
+            if (writeAnim)
+                WriteStance((int)s);
             return;
         }
 
         Current = s;
         _stanceTimer = (s == CombatStance.High || s == CombatStance.Low) ? stanceDuration : 0f;
-        WriteStance((int)s);
+        if (writeAnim)
+            WriteStance((int)s);
 
-        if (s != CombatStance.High && s != CombatStance.Low)
+        if (writeAnim && s != CombatStance.High && s != CombatStance.Low)
             FireTrig(s);
+    }
+
+    public void SuppressAnim()
+    {
+        WriteStance((int)CombatStance.Mid);
     }
 
     void FireTrig(CombatStance s)

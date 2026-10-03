@@ -3,9 +3,9 @@ using System.Collections.Generic;
 
 /// <summary>
 /// Отрисовка + hybrid live + стриминг.
-/// Fade: открытые видимые клетки. Клетка-укрытие (дерево) не бледнеет.
+/// Fade только у деревьев: открытые видимые клетки. Клетка-укрытие не бледнеет.
 /// Макс внутри поля, к краю — в непрозрачное.
-/// Ствол (низ + радиус корня) не выцветает. Без среза-плоскости.
+/// Ствол (низ + радиус корня) не выцветает. Кусты без кронового fade.
 /// Live — коллайдер; картинка всегда инстанс.
 /// </summary>
 public class NatureRenderer : MonoBehaviour
@@ -27,7 +27,7 @@ public class NatureRenderer : MonoBehaviour
 
     [Header("Fade (заслон камеры)")]
     public bool useVisionFade = true;
-    [Tooltip("Ширина мягкого края у границы зрения (м).")]
+    [Tooltip("Ширина мягкого края только у границы зрения (м). Внутри поля срез жёсткий.")]
     public float fadeEdgeMeters = 2.2f;
     [Tooltip("Высота ствола, который не выцветает (м от корня).")]
     public float fadeKeepHeight = 2.3f;
@@ -35,13 +35,15 @@ public class NatureRenderer : MonoBehaviour
     public float fadeKeepRadius = 1.8f;
     [Tooltip("Мягкость края ствола (м).")]
     public float fadeKeepFalloff = 1.0f;
-    [Tooltip("Насколько обесцветить крону в fade.")]
-    [Range(0f, 1f)] public float fadePale = 0f;
     [Tooltip("Секунды удержания прозрачности после выхода клетки из зрения.")]
     public float fadeRestoreDelay = 0.4f;
     [Tooltip("Секунды плавного возврата в непрозрачное.")]
     public float fadeRestoreTime = 0.7f;
     public Material fadeMaterial;
+
+    [Header("Время суток")]
+    [Tooltip("Множитель альбедо инстансов. Ставит TimeOfDayController. Unlit VisionFade солнце не берёт.")]
+    public Color todTint = Color.white;
 
     [Header("Live")]
     public int liveCheckEveryNFrames = 12;
@@ -92,9 +94,11 @@ public class NatureRenderer : MonoBehaviour
     private bool _fadeShaderOkCache;
 
     private MaterialPropertyBlock _fadeBlock;
+    private MaterialPropertyBlock _tintBlock;
     private Matrix4x4[] _drawSlice = new Matrix4x4[1023];
     private static readonly int ColorId = Shader.PropertyToID("_Color");
     private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
+    private static readonly int TodTintId = Shader.PropertyToID("_TodTint");
     private static readonly int MainTexId = Shader.PropertyToID("_MainTex");
     private static readonly int BaseMapId = Shader.PropertyToID("_BaseMap");
     private readonly Dictionary<int, Material> _fadeBySrc = new Dictionary<int, Material>();
@@ -107,10 +111,10 @@ public class NatureRenderer : MonoBehaviour
     private static readonly int VisionMaskOnId = Shader.PropertyToID("_VisionMaskOn");
     private static readonly int VisionKeepRadiusId = Shader.PropertyToID("_VisionKeepRadius");
     private static readonly int VisionPartInvId = Shader.PropertyToID("_VisionPartInv");
-    private static readonly int VisionFadePaleId = Shader.PropertyToID("_VisionFadePale");
     private static readonly int VisionCamFwdId = Shader.PropertyToID("_VisionCamFwd");
     private static readonly int VisionNearFalloffId = Shader.PropertyToID("_VisionNearFalloff");
     private static readonly int VisionKeepHeightId = Shader.PropertyToID("_VisionKeepHeight");
+    private static readonly int VisionProjectGroundId = Shader.PropertyToID("_VisionProjectGround");
 
     private class LiveEntry
     {
@@ -247,7 +251,6 @@ public class NatureRenderer : MonoBehaviour
 
     private void PushFadeGlobals()
     {
-        Shader.SetGlobalFloat(VisionFadePaleId, Mathf.Clamp01(fadePale));
         Shader.SetGlobalFloat(VisionGroundYId, player != null ? player.position.y : 0f);
         Shader.SetGlobalTexture(VisionCellMaskTexId, _cellMask);
         MapGrid grid = playerVision != null ? playerVision.mapGrid : null;
@@ -268,6 +271,7 @@ public class NatureRenderer : MonoBehaviour
         Shader.SetGlobalFloat(VisionKeepRadiusId, Mathf.Max(0f, fadeKeepRadius));
         Shader.SetGlobalFloat(VisionNearFalloffId, Mathf.Max(0.5f, fadeKeepFalloff));
         Shader.SetGlobalFloat(VisionKeepHeightId, Mathf.Max(0.5f, fadeKeepHeight));
+        Shader.SetGlobalFloat(VisionProjectGroundId, 1f);
     }
 
     private void EnsureCellMask()
@@ -364,7 +368,8 @@ public class NatureRenderer : MonoBehaviour
         for (int i = 0; i < n; i++)
         {
             float meters = _visDist[i] * ts;
-            float w = Mathf.Clamp01(meters / edge);
+            float w = _visDist[i] == 0 ? 0f : Mathf.Clamp01(meters / edge);
+            if (_visDist[i] >= 2) w = 1f;
             byte v = (byte)Mathf.RoundToInt(w * 255f);
             _cellMaskPixels[i] = new Color32(v, v, v, v);
         }
@@ -377,6 +382,11 @@ public class NatureRenderer : MonoBehaviour
             for (int x = 0; x < MaskDim; x++)
             {
                 int i = z * MaskDim + x;
+                if (_visDist[i] >= 2)
+                {
+                    _maskBlur[i] = new Color32(255, 255, 255, 255);
+                    continue;
+                }
                 int acc = _cellMaskPixels[i].r * 4;
                 int ww = 4;
                 if (x > 0) { acc += _cellMaskPixels[i - 1].r; ww++; }
@@ -519,9 +529,10 @@ public class NatureRenderer : MonoBehaviour
         int w = placement.heightSource.width;
         int d = placement.heightSource.depth;
         Vector3 origin = new Vector3(-w * ts / 2f, 0f, -d * ts / 2f);
+        Vector3 playerLocal = placement.terrainBuilder.WorldToMapLocal(player.position);
 
-        int pcx = Mathf.FloorToInt((player.position.x - origin.x) / sectorWorld);
-        int pcz = Mathf.FloorToInt((player.position.z - origin.z) / sectorWorld);
+        int pcx = Mathf.FloorToInt((playerLocal.x - origin.x) / sectorWorld);
+        int pcz = Mathf.FloorToInt((playerLocal.z - origin.z) / sectorWorld);
         int r = Mathf.CeilToInt(drawRadius / sectorWorld);
 
         for (int vi = 0; vi < placement.allVariants.Count; vi++)
@@ -537,7 +548,7 @@ public class NatureRenderer : MonoBehaviour
             _opaque.Clear();
             _faded.Clear();
 
-            bool treeFade = useVisionFade && layer.IsTree && FadeShaderOk();
+            bool visionFade = useVisionFade && layer != null && layer.UsesVisionFade && FadeShaderOk();
 
             for (int sx = pcx - r; sx <= pcx + r; sx++)
             {
@@ -549,17 +560,17 @@ public class NatureRenderer : MonoBehaviour
                         if (batch == null) continue;
                         for (int i = 0; i < batch.Length; i++)
                         {
-                            if (treeFade) _faded.Add(batch[i]);
+                            if (visionFade) _faded.Add(batch[i]);
                             else _opaque.Add(batch[i]);
                         }
                     }
                 }
             }
 
-            if (treeFade)
-                DrawParts(v, _faded, null, shadows, fade: true);
-            else
-                DrawParts(v, _opaque, v.propertyBlock, shadows, fade: false);
+            if (_faded.Count > 0)
+                DrawParts(v, layer, _faded, null, shadows, fade: true);
+            if (_opaque.Count > 0)
+                DrawParts(v, layer, _opaque, v.propertyBlock, shadows, fade: false);
         }
     }
 
@@ -628,10 +639,14 @@ public class NatureRenderer : MonoBehaviour
         }
     }
 
-    private void DrawParts(NaturePlacement.NatureVariant v, List<Matrix4x4> roots,
+    private void DrawParts(NaturePlacement.NatureVariant v, NaturePlacement.NatureLayer layer,
+        List<Matrix4x4> roots,
         MaterialPropertyBlock block, UnityEngine.Rendering.ShadowCastingMode shadows, bool fade)
     {
         if (roots.Count == 0 || v.parts == null) return;
+        float keepR = fadeKeepRadius;
+        float keepH = fadeKeepHeight;
+
         for (int p = 0; p < v.parts.Count; p++)
         {
             var part = v.parts[p];
@@ -658,12 +673,52 @@ public class NatureRenderer : MonoBehaviour
                 CopyAlbedo(part.material, _fadeBlock);
                 Matrix4x4 partInv = ident ? Matrix4x4.identity : part.localToRoot.inverse;
                 _fadeBlock.SetMatrix(VisionPartInvId, partInv);
-                _fadeBlock.SetFloat(VisionFadePaleId, fadePale);
+                _fadeBlock.SetFloat(VisionKeepRadiusId, Mathf.Max(0f, keepR));
+                _fadeBlock.SetFloat(VisionKeepHeightId, Mathf.Max(0f, keepH));
+                _fadeBlock.SetFloat(VisionNearFalloffId, Mathf.Max(0.5f, fadeKeepFalloff));
+                _fadeBlock.SetFloat(VisionProjectGroundId, 1f);
+                Shader.SetGlobalFloat(VisionKeepRadiusId, Mathf.Max(0f, keepR));
+                Shader.SetGlobalFloat(VisionKeepHeightId, Mathf.Max(0f, keepH));
+                Shader.SetGlobalFloat(VisionProjectGroundId, 1f);
+                ApplyTodTint(_fadeBlock, part.material);
                 pb = _fadeBlock;
+            }
+            else
+            {
+                pb = TintOpaqueBlock(block, part.material);
             }
 
             DrawList(part.mesh, mat, pb, list, shadows, part.submesh);
         }
+    }
+
+    private void ApplyTodTint(MaterialPropertyBlock block, Material src)
+    {
+        if (block == null || todTint == Color.white) return;
+        Color c = Color.white;
+        if (block.HasColor(ColorId)) c = block.GetColor(ColorId);
+        else if (src != null && src.HasProperty(ColorId)) c = src.GetColor(ColorId);
+        else if (src != null && src.HasProperty(BaseColorId)) c = src.GetColor(BaseColorId);
+        c *= todTint;
+        block.SetColor(ColorId, c);
+        block.SetColor(BaseColorId, c);
+        block.SetColor(TodTintId, todTint);
+    }
+
+    private MaterialPropertyBlock TintOpaqueBlock(MaterialPropertyBlock srcBlock, Material src)
+    {
+        if (todTint == Color.white) return srcBlock;
+        if (_tintBlock == null) _tintBlock = new MaterialPropertyBlock();
+        _tintBlock.Clear();
+        Color c = Color.white;
+        if (src != null && src.HasProperty(ColorId)) c = src.GetColor(ColorId);
+        else if (src != null && src.HasProperty(BaseColorId)) c = src.GetColor(BaseColorId);
+        else if (srcBlock != null && srcBlock.HasColor(ColorId)) c = srcBlock.GetColor(ColorId);
+        c *= todTint;
+        _tintBlock.SetColor(ColorId, c);
+        _tintBlock.SetColor(BaseColorId, c);
+        _tintBlock.SetColor(TodTintId, todTint);
+        return _tintBlock;
     }
 
     private void DrawList(Mesh mesh, Material mat, MaterialPropertyBlock block,
@@ -716,9 +771,10 @@ public class NatureRenderer : MonoBehaviour
         int w = placement.heightSource.width;
         int d = placement.heightSource.depth;
         Vector3 origin = new Vector3(-w * ts / 2f, 0f, -d * ts / 2f);
+        Vector3 playerLocal = placement.terrainBuilder.WorldToMapLocal(pp);
 
-        int pcx = Mathf.FloorToInt((pp.x - origin.x) / sectorWorld);
-        int pcz = Mathf.FloorToInt((pp.z - origin.z) / sectorWorld);
+        int pcx = Mathf.FloorToInt((playerLocal.x - origin.x) / sectorWorld);
+        int pcz = Mathf.FloorToInt((playerLocal.z - origin.z) / sectorWorld);
         int r = Mathf.CeilToInt(exitR / sectorWorld) + 1;
 
         EnsureLiveRoot();

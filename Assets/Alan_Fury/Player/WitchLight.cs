@@ -37,6 +37,11 @@ public class WitchLight : MonoBehaviour
     public float range = 12f;
     public LightShadows shadows = LightShadows.Soft;
 
+    [Header("Природа (unlit)")]
+    [Tooltip("Множитель круга на кронах. Выше, чем у постоянного света игрока, чтобы огонёк было видно.")]
+    public float natureStrength = 4.5f;
+    [Range(0.5f, 4f)] public float natureFalloff = 1.4f;
+
     [Header("Свечение капсулы (emission)")]
     [Tooltip("Renderer капсулы. Пусто → ищется в детях.")]
     public Renderer glowRenderer;
@@ -124,6 +129,13 @@ public class WitchLight : MonoBehaviour
         _light.shadows = shadows;
         _light.intensity = 0f;
         _light.enabled = false;
+
+        var nature = go.AddComponent<LocalLightNature>();
+        nature.affectNature = true;
+        nature.useLightColor = true;
+        nature.natureStrength = natureStrength;
+        nature.falloff = natureFalloff;
+        nature.rangeOverride = 0f;
     }
 
     private void SetupGlowMaterial()
@@ -154,6 +166,12 @@ public class WitchLight : MonoBehaviour
         if (_light != null)
         {
             _light.intensity = intensity * k;
+            var nature = _light.GetComponent<LocalLightNature>();
+            if (nature != null)
+            {
+                nature.natureStrength = natureStrength;
+                nature.falloff = natureFalloff;
+            }
 
             // Выключаем компонент света, когда полностью погас (экономия)
             if (!IsOn && _current <= 0.001f && _light.enabled)

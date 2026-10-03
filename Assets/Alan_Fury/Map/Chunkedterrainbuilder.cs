@@ -1,4 +1,4 @@
-﻿using UnityEngine;
+using UnityEngine;
 using System.Collections.Generic;
 
 /// <summary>
@@ -36,6 +36,7 @@ public class ChunkedTerrainBuilder : MonoBehaviour
     private const float Eps = 0.001f;
 
     private List<GameObject> chunks = new List<GameObject>();
+    private Transform chunksRoot;
     private float[,] heights;
     private int mapWidth, mapDepth;
     private Vector3 mapOrigin;
@@ -47,6 +48,22 @@ public class ChunkedTerrainBuilder : MonoBehaviour
 
     public float TileSize => tileSize;
 
+    public Vector3 LocalCorner(int x, int z)
+    {
+        int w = mapWidth;
+        int d = mapDepth;
+        if ((w <= 0 || d <= 0) && heightSource != null)
+        {
+            w = heightSource.width;
+            d = heightSource.depth;
+        }
+        return new Vector3(x * tileSize - w * tileSize * 0.5f, 0f, z * tileSize - d * tileSize * 0.5f);
+    }
+
+    public Vector3 MapLocalToWorld(Vector3 local) => transform.TransformPoint(local);
+
+    public Vector3 WorldToMapLocal(Vector3 world) => transform.InverseTransformPoint(world);
+
     public void BuildTerrain()
     {
         if (heightSource == null || !heightSource.isGenerated)
@@ -56,6 +73,7 @@ public class ChunkedTerrainBuilder : MonoBehaviour
         }
 
         ClearTerrain();
+        EnsureChunksRoot();
 
         heights = heightSource.heightMap;
         mapWidth = heights.GetLength(0);
@@ -84,6 +102,45 @@ public class ChunkedTerrainBuilder : MonoBehaviour
             else DestroyImmediate(chunk);
         }
         chunks.Clear();
+
+        Sweep(chunksRoot);
+        var found = transform.Find("Chunks");
+        if (found != null && found != chunksRoot)
+            Sweep(found);
+
+        for (int i = transform.childCount - 1; i >= 0; i--)
+        {
+            var child = transform.GetChild(i);
+            if (child == null || !child.name.StartsWith("Chunk_")) continue;
+            if (Application.isPlaying) Destroy(child.gameObject);
+            else DestroyImmediate(child.gameObject);
+        }
+    }
+
+    private void EnsureChunksRoot()
+    {
+        if (chunksRoot != null) return;
+        var existing = transform.Find("Chunks");
+        if (existing != null)
+        {
+            chunksRoot = existing;
+            return;
+        }
+        var go = new GameObject("Chunks");
+        go.transform.SetParent(transform, false);
+        chunksRoot = go.transform;
+    }
+
+    private static void Sweep(Transform root)
+    {
+        if (root == null) return;
+        for (int i = root.childCount - 1; i >= 0; i--)
+        {
+            var child = root.GetChild(i);
+            if (child == null) continue;
+            if (Application.isPlaying) Destroy(child.gameObject);
+            else DestroyImmediate(child.gameObject);
+        }
     }
 
     // =================== Единая сетка углов ===================
@@ -257,7 +314,7 @@ public class ChunkedTerrainBuilder : MonoBehaviour
         if (verts.Count == 0) return;
 
         var chunkGO = new GameObject($"Chunk_{chunkX}_{chunkZ}");
-        chunkGO.transform.SetParent(transform);
+        chunkGO.transform.SetParent(chunksRoot, false);
         chunkGO.isStatic = true;
 
         int terrainLayer = LayerMask.NameToLayer("Terrain");

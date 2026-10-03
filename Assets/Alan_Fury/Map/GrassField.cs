@@ -3,9 +3,9 @@ using UnityEngine.Rendering;
 using System.Collections.Generic;
 
 /// <summary>
-/// Отдельное поле травы: меш только из допущенных клеток + материал Dynamic Grass FX.
+/// Отдельное поле травы: меш только из допущенных клеток + материал Dynamic Grass FX / Nature/GrassField.
+/// Зоны читает у NaturePlacement. На клетки деревьев не ставится.
 /// Не слой NaturePlacement.Grass и не SpriteVegetationPlacer.
-/// Чанки земли не меняет. Коллайдера нет.
 /// </summary>
 public class GrassField : MonoBehaviour
 {
@@ -14,7 +14,7 @@ public class GrassField : MonoBehaviour
     public ChunkedTerrainBuilder terrainBuilder;
     public MapGrid mapGrid;
     public NaturePlacement naturePlacement;
-    public RoadGenerator roadGenerator;
+    public MapLayout mapLayout;
 
     [Header("Материал пакета")]
     [Tooltip("Материал из Dynamic Grass FX после Import.")]
@@ -71,6 +71,10 @@ public class GrassField : MonoBehaviour
     public bool growInGrove = true;
     public bool growInForest = true;
     public bool growInThicket = true;
+    public bool growInClearing = true;
+    [Range(0f, 1f)] public float densityGrove = 0.62f;
+    [Range(0f, 1f)] public float densityForest = 0.22f;
+    [Range(0f, 1f)] public float densityThicket = 0.06f;
     [Range(0f, 1f)] public float coverage = 1f;
 
     [Header("Рендер")]
@@ -101,6 +105,12 @@ public class GrassField : MonoBehaviour
     private readonly List<int> _tris = new List<int>(4096);
     private readonly List<Vector2> _uvs = new List<Vector2>(4096);
     private readonly List<Color> _cols = new List<Color>(4096);
+
+    private void Start()
+    {
+        if (!IsBuilt && heightSource != null && heightSource.isGenerated && grassMaterial != null)
+            Build();
+    }
 
     [ContextMenu("Build")]
     public void Build()
@@ -208,6 +218,8 @@ public class GrassField : MonoBehaviour
                 float o10 = _open[x1c, z];
                 float o11 = _open[x1c, z1c];
                 float o01 = _open[x, z1c];
+                float zm = Mathf.Lerp(0.35f, 1f, GrassDensity(ResolveZone(x, z)));
+                o00 *= zm; o10 *= zm; o11 *= zm; o01 *= zm;
                 if (o00 + o10 + o11 + o01 < 0.02f) continue;
 
                 float yOff = heightOffset;
@@ -220,10 +232,10 @@ public class GrassField : MonoBehaviour
                         float u1 = (sx + 1) / (float)_div;
                         float v1 = (sz + 1) / (float)_div;
                         int i = _verts.Count;
-                        _verts.Add(new Vector3(_origin.x + (x + u0) * _ts, Hlerp(h00, h10, h01, h11, u0, v0) + yOff, _origin.z + (z + v0) * _ts));
-                        _verts.Add(new Vector3(_origin.x + (x + u1) * _ts, Hlerp(h00, h10, h01, h11, u1, v0) + yOff, _origin.z + (z + v0) * _ts));
-                        _verts.Add(new Vector3(_origin.x + (x + u1) * _ts, Hlerp(h00, h10, h01, h11, u1, v1) + yOff, _origin.z + (z + v1) * _ts));
-                        _verts.Add(new Vector3(_origin.x + (x + u0) * _ts, Hlerp(h00, h10, h01, h11, u0, v1) + yOff, _origin.z + (z + v1) * _ts));
+                        _verts.Add(ToMesh(_origin.x + (x + u0) * _ts, Hlerp(h00, h10, h01, h11, u0, v0) + yOff, _origin.z + (z + v0) * _ts));
+                        _verts.Add(ToMesh(_origin.x + (x + u1) * _ts, Hlerp(h00, h10, h01, h11, u1, v0) + yOff, _origin.z + (z + v0) * _ts));
+                        _verts.Add(ToMesh(_origin.x + (x + u1) * _ts, Hlerp(h00, h10, h01, h11, u1, v1) + yOff, _origin.z + (z + v1) * _ts));
+                        _verts.Add(ToMesh(_origin.x + (x + u0) * _ts, Hlerp(h00, h10, h01, h11, u0, v1) + yOff, _origin.z + (z + v1) * _ts));
                         _uvs.Add(new Vector2(u0, v0));
                         _uvs.Add(new Vector2(u1, v0));
                         _uvs.Add(new Vector2(u1, v1));
@@ -239,7 +251,11 @@ public class GrassField : MonoBehaviour
             }
         }
 
-        if (_verts.Count == 0) return;
+        if (_verts.Count == 0)
+        {
+            Debug.LogWarning("GrassField: меш пустой — ни одна клетка не прошла фильтр.");
+            return;
+        }
 
         var mesh = new Mesh();
         mesh.name = "GrassField";
@@ -262,10 +278,17 @@ public class GrassField : MonoBehaviour
         mr.shadowCastingMode = shadowCasting;
         mr.receiveShadows = receiveShadows;
         _renderers.Add(mr);
+        Debug.Log($"GrassField: mesh verts={_verts.Count} shader={(grassMaterial.shader != null ? grassMaterial.shader.name : "null")}");
     }
 
     private void ResolvePlayer()
     {
+        if (natureRenderer == null) natureRenderer = GetComponent<NatureRenderer>();
+        if (natureRenderer != null && natureRenderer.player != null)
+        {
+            player = natureRenderer.player;
+            return;
+        }
         if (player != null) return;
         player = PlayerRegistry.ResolvePrimary();
     }
@@ -330,9 +353,13 @@ public class GrassField : MonoBehaviour
             if (natureRenderer == null) natureRenderer = GetComponent<NatureRenderer>();
             if (natureRenderer != null) drawRadius = natureRenderer.drawRadius;
         }
-        Vector3 p = player != null ? player.position : new Vector3(9999f, 0f, 9999f);
+        ResolvePlayer();
+        Vector3 p;
+        if (player != null) p = player.position;
+        else if (Camera.main != null) p = Camera.main.transform.position;
+        else p = Vector3.zero;
         _block.SetVector("_PlayerPos", p);
-        _block.SetFloat("_DrawRadius", drawRadius);
+        _block.SetFloat("_DrawRadius", Mathf.Max(drawRadius, 40f));
         _block.SetVectorArray("_PushStamps", _stamps);
         _block.SetVectorArray("_PushDirs", _dirs);
     }
@@ -346,53 +373,57 @@ public class GrassField : MonoBehaviour
         {
             if (skipRoads && mapGrid.HasFlag(x, z, MapGrid.OccupancyFlags.Road))
                 return false;
+            if (skipUnderTrees && mapGrid.HasFlag(x, z, MapGrid.OccupancyFlags.Tree))
+                return false;
         }
 
-        if (coverage < 1f && Hash01(x, z, 71, 19) > coverage)
-            return false;
-
         var zone = ResolveZone(x, z);
+        if (!ZoneAllowsGrass(zone)) return false;
+        if (coverage < 1f && Hash01(x, z, 71, 19) > coverage) return false;
+        return true;
+    }
+
+    private bool ZoneAllowsGrass(NaturePlacement.Zone zone)
+    {
         switch (zone)
         {
             case NaturePlacement.Zone.Grove: return growInGrove;
             case NaturePlacement.Zone.Forest: return growInForest;
             case NaturePlacement.Zone.Thicket: return growInThicket;
-            default: return true;
+            case NaturePlacement.Zone.Clearing: return growInClearing;
+            default: return false;
+        }
+    }
+
+    private float GrassDensity(NaturePlacement.Zone zone)
+    {
+        switch (zone)
+        {
+            case NaturePlacement.Zone.Grove: return densityGrove;
+            case NaturePlacement.Zone.Forest: return densityForest;
+            case NaturePlacement.Zone.Thicket: return densityThicket;
+            case NaturePlacement.Zone.Clearing: return densityGrove;
+            default: return 0f;
         }
     }
 
     private NaturePlacement.Zone ResolveZone(int x, int z)
     {
-        float scale = naturePlacement != null ? naturePlacement.zoneNoiseScale : 0.028f;
-        float grove = naturePlacement != null ? naturePlacement.groveThreshold : 0.28f;
-        float thicket = naturePlacement != null ? naturePlacement.thicketThreshold : 0.72f;
-        Vector2 off = naturePlacement != null ? naturePlacement.zoneNoiseOffset : new Vector2(17.3f, 91.7f);
-        float n = Mathf.PerlinNoise((x + off.x) * scale, (z + off.y) * scale);
-        if (n < grove) return NaturePlacement.Zone.Grove;
-        if (n >= thicket) return NaturePlacement.Zone.Thicket;
+        if (naturePlacement == null) naturePlacement = GetComponent<NaturePlacement>();
+        if (naturePlacement != null) return naturePlacement.GetZone(x, z);
         return NaturePlacement.Zone.Forest;
-    }
-
-    private bool IsTrunkCell(int x, int z)
-    {
-        if (mapGrid != null && mapGrid.IsReady)
-        {
-            if (mapGrid.HasFlag(x, z, MapGrid.OccupancyFlags.Tree)) return true;
-            if (mapGrid.GetSightCoverMode(x, z) == MapGrid.SightCoverMode.Full) return true;
-        }
-        return PredictTreeCell(x, z);
     }
 
     private void CollectTreePoints(List<Vector2> dst, int w, int d, float ts, Vector3 origin)
     {
-        if (naturePlacement != null)
-            naturePlacement.CollectTreeAnchors(dst);
-        if (mapGrid == null || !mapGrid.IsReady) return;
         for (int x = 0; x < w; x++)
         {
             for (int z = 0; z < d; z++)
             {
-                if (!mapGrid.HasFlag(x, z, MapGrid.OccupancyFlags.Tree)) continue;
+                bool tree = false;
+                if (mapGrid != null && mapGrid.IsReady && mapGrid.HasFlag(x, z, MapGrid.OccupancyFlags.Tree))
+                    tree = true;
+                if (!tree) continue;
                 dst.Add(new Vector2(origin.x + (x + 0.5f) * ts, origin.z + (z + 0.5f) * ts));
             }
         }
@@ -452,25 +483,6 @@ public class GrassField : MonoBehaviour
         return new Color(o, o, o, 1f);
     }
 
-    private bool PredictTreeCell(int x, int z)
-    {
-        if (naturePlacement == null || naturePlacement.layers == null) return false;
-        var zone = ResolveZone(x, z);
-        for (int i = 0; i < naturePlacement.layers.Count; i++)
-        {
-            var layer = naturePlacement.layers[i];
-            if (layer == null || !layer.enabled || !layer.IsTree) continue;
-            if (zone == NaturePlacement.Zone.Grove && !layer.growInGrove) continue;
-            if (zone == NaturePlacement.Zone.Forest && !layer.growInForest) continue;
-            if (zone == NaturePlacement.Zone.Thicket && !layer.growInThicket) continue;
-            float dens = zone == NaturePlacement.Zone.Grove ? layer.densityGrove
-                : zone == NaturePlacement.Zone.Thicket ? layer.densityThicket
-                : layer.densityForest;
-            if (Hash01(x, z, i, 0) <= dens) return true;
-        }
-        return false;
-    }
-
     private static float Hlerp(float h00, float h10, float h01, float h11, float u, float v)
     {
         float a = Mathf.Lerp(h00, h10, u);
@@ -492,7 +504,7 @@ public class GrassField : MonoBehaviour
         if (mapGrid == null) mapGrid = GetComponent<MapGrid>();
         if (naturePlacement == null) naturePlacement = GetComponent<NaturePlacement>();
         if (natureRenderer == null) natureRenderer = GetComponent<NatureRenderer>();
-        if (roadGenerator == null) roadGenerator = GetComponent<RoadGenerator>();
+        if (mapLayout == null) mapLayout = GetComponent<MapLayout>();
 
         if (heightSource == null || !heightSource.isGenerated)
         {
@@ -506,12 +518,23 @@ public class GrassField : MonoBehaviour
     {
         var existing = transform.Find("GrassFields");
         if (existing != null)
-        {
             _root = existing;
-            return;
+        else
+        {
+            var go = new GameObject("GrassFields");
+            go.transform.SetParent(transform, false);
+            _root = go.transform;
         }
-        var go = new GameObject("GrassFields");
-        go.transform.SetParent(transform, false);
-        _root = go.transform;
+        _root.localPosition = Vector3.zero;
+        _root.localRotation = Quaternion.identity;
+        _root.localScale = Vector3.one;
+    }
+
+    private Vector3 ToMesh(float x, float y, float z)
+    {
+        Vector3 world = terrainBuilder != null
+            ? terrainBuilder.MapLocalToWorld(new Vector3(x, y, z))
+            : new Vector3(x, y, z);
+        return _root != null ? _root.InverseTransformPoint(world) : world;
     }
 }

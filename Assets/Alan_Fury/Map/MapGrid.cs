@@ -54,6 +54,7 @@ public class MapGrid : MonoBehaviour
     public bool drawRoads = true;
     public bool drawSectors = false;
     public bool drawRegions = false;
+    public bool drawZones = true;
     public Color treeLabelColor = new Color(0.2f, 0.85f, 0.25f, 1f);
     public Color roadFillColor = new Color(0.45f, 0.35f, 0.2f, 0.35f);
     public Color sectorColor = new Color(0.3f, 0.6f, 1f, 0.15f);
@@ -556,6 +557,11 @@ public class MapGrid : MonoBehaviour
         DrawOccupancyGizmos();
         if (drawSectors) DrawSectorFrames();
         if (drawRegions) DrawRegionFrames();
+        if (drawZones)
+        {
+            var layout = GetComponent<MapLayout>();
+            if (layout != null) layout.EnsureZones();
+        }
     }
 
     void OnDrawGizmosSelected()

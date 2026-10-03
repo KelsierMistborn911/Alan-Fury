@@ -971,8 +971,9 @@ public class HumanoidLocomotion : MonoBehaviour
             if (combatMode && !_inCombat && HasParam("CombatEnter")) animator.SetTrigger("CombatEnter");
 
             int battleStepLayer = animator.GetLayerIndex("Battle Step");
+            bool battleStep = Combat != null && Combat.WantsBattleStep;
             if (battleStepLayer >= 0)
-                animator.SetLayerWeight(battleStepLayer, combatMode ? 1f : 0f);
+                animator.SetLayerWeight(battleStepLayer, battleStep ? 1f : 0f);
 
             if (HasParam("Turn"))
             {
