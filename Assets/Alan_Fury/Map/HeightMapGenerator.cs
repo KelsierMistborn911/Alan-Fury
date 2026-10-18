@@ -15,8 +15,8 @@ public abstract class HeightMapGenerator : MonoBehaviour
     public const string Version = "3.1";
 
     [Header("Размеры карты")]
-    public int width = 400;
-    public int depth = 1500;
+    public int width = 300;
+    public int depth = 800;
 
     [Header("Масштаб мира (источник tileSize)")]
     public ChunkedTerrainBuilder chunkedBuilder;
@@ -45,6 +45,22 @@ public abstract class HeightMapGenerator : MonoBehaviour
     // Публичные данные — доступ для всех скриптов
     public float[,] heightMap { get; protected set; }
     public bool isGenerated { get; protected set; }
+
+    /// <summary>
+    /// Если задан — высоты берутся из гекс-стрима, квадратная карта не нужна.
+    /// </summary>
+    public ICellGround streamGround;
+
+    /// <summary>Привязать к LocationStream и считать карту готовой.</summary>
+    public void BindStream(ICellGround ground)
+    {
+        streamGround = ground;
+        isGenerated = ground != null;
+        if (isGenerated)
+        {
+            onHeightMapReady?.Invoke();
+        }
+    }
 
     // ============ СОБЫТИЯ ============
     public System.Action onHeightMapReady;
@@ -371,45 +387,63 @@ public abstract class HeightMapGenerator : MonoBehaviour
     }
 
     /// <summary>Безопасно возвращает высоту по индексам ячейки.</summary>
-    public float GetHeight(int x, int z)
+    public virtual float GetHeight(int x, int z)
     {
+        if (streamGround != null)
+            return streamGround.Height(x, z);
         if (heightMap == null) return 0f;
         if (x < 0 || x >= width || z < 0 || z >= depth) return 0f;
         return heightMap[x, z];
     }
 
     /// <summary>Возвращает высоту с билинейной интерполяцией.</summary>
-    public float GetHeightBilinear(float worldX, float worldZ, float tileSize, Vector3 mapOrigin)
+    public virtual float GetHeightBilinear(float worldX, float worldZ, float tileSize, Vector3 mapOrigin)
     {
+        if (streamGround != null)
+            return GetHeightAtWorldPos(new Vector3(worldX, 0f, worldZ), tileSize, mapOrigin);
         if (heightMap == null) return 0f;
-
-        float localX = worldX - mapOrigin.x;
-        float localZ = worldZ - mapOrigin.z;
-
-        float cellXFloat = localX / tileSize;
-        float cellZFloat = localZ / tileSize;
-
-        int cellX = Mathf.FloorToInt(cellXFloat);
-        int cellZ = Mathf.FloorToInt(cellZFloat);
-
-        float fx = cellXFloat - cellX;
-        float fz = cellZFloat - cellZ;
-
-        float h00 = GetHeight(cellX, cellZ);
-        float h10 = GetHeight(Mathf.Min(cellX + 1, width - 1), cellZ);
-        float h01 = GetHeight(cellX, Mathf.Min(cellZ + 1, depth - 1));
-        float h11 = GetHeight(Mathf.Min(cellX + 1, width - 1), Mathf.Min(cellZ + 1, depth - 1));
-
-        float h0 = Mathf.Lerp(h00, h10, fx);
-        float h1 = Mathf.Lerp(h01, h11, fx);
-
-        return Mathf.Lerp(h0, h1, fz);
+        return BilinearFromMap(worldX, worldZ, tileSize, mapOrigin);
     }
 
     /// <summary>Возвращает высоту поверхности в произвольной мировой точке.</summary>
-    public float GetHeightAtWorldPos(Vector3 worldPos, float tileSize, Vector3 mapOrigin)
+    public virtual float GetHeightAtWorldPos(Vector3 worldPos, float tileSize, Vector3 mapOrigin)
     {
-        return GetHeightBilinear(worldPos.x, worldPos.z, tileSize, mapOrigin);
+        if (streamGround is LocationStream hex)
+            return hex.HeightAtWorld(worldPos.x, worldPos.z);
+        if (streamGround != null)
+        {
+            float ts = tileSize > 0.01f ? tileSize : 4f;
+            int x = Mathf.FloorToInt(worldPos.x / ts);
+            int z = Mathf.FloorToInt(worldPos.z / ts);
+            return streamGround.Height(x, z);
+        }
+        // старый путь — билиней по квадратной карте
+        if (heightMap == null) return 0f;
+        return BilinearFromMap(worldPos.x, worldPos.z, tileSize, mapOrigin);
+    }
+
+    float BilinearFromMap(float worldX, float worldZ, float tileSize, Vector3 mapOrigin)
+    {
+        float localX = worldX - mapOrigin.x;
+        float localZ = worldZ - mapOrigin.z;
+        float cellXFloat = localX / tileSize;
+        float cellZFloat = localZ / tileSize;
+        int cellX = Mathf.FloorToInt(cellXFloat);
+        int cellZ = Mathf.FloorToInt(cellZFloat);
+        float fx = cellXFloat - cellX;
+        float fz = cellZFloat - cellZ;
+        float h00 = RawHeight(cellX, cellZ);
+        float h10 = RawHeight(Mathf.Min(cellX + 1, width - 1), cellZ);
+        float h01 = RawHeight(cellX, Mathf.Min(cellZ + 1, depth - 1));
+        float h11 = RawHeight(Mathf.Min(cellX + 1, width - 1), Mathf.Min(cellZ + 1, depth - 1));
+        return Mathf.Lerp(Mathf.Lerp(h00, h10, fx), Mathf.Lerp(h01, h11, fx), fz);
+    }
+
+    float RawHeight(int x, int z)
+    {
+        if (heightMap == null) return 0f;
+        if (x < 0 || x >= width || z < 0 || z >= depth) return 0f;
+        return heightMap[x, z];
     }
 
 #if UNITY_EDITOR

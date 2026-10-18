@@ -30,6 +30,8 @@ public class WeaponHitbox : MonoBehaviour
     public Color sweepColor = new Color(1f, 0.12f, 0.08f, 0.42f);
     public Color strikeColor = new Color(1f, 0.92f, 0.55f, 0.92f);
     public Color strikeWindupColor = new Color(1f, 0.85f, 0.2f, 0.35f);
+    [Tooltip("Длина клинка в боевой позе, если хозяин не передал свою.")]
+    public float readyBladeLength = 1.15f;
 
     [Header("Отладка")]
     public bool debugShowZone = false;
@@ -68,6 +70,14 @@ public class WeaponHitbox : MonoBehaviour
     private LayerMask layers;
     private HitInfo _hitInfo;
     private bool _hasHitInfo;
+
+    bool _readyHeld;
+    Vector3 _readyTipDir = Vector3.forward;
+    float _readyLength = 1.15f;
+    bool _blendFromReady;
+    Vector3 _blendFromDir = Vector3.forward;
+    float _blendStart;
+    const float ReadyBlendTime = 0.24f;
 
     private Dictionary<GameObject, float> lastHitTime = new Dictionary<GameObject, float>();
 
@@ -119,6 +129,50 @@ public class WeaponHitbox : MonoBehaviour
         tip = origin + tip;
     }
 
+    /// <summary>Боевая поза вне удара. tipDir — куда смотрит клинок (Mid вперёд, High/Low назад).</summary>
+    public void ShowReady(Vector3 tipDir, float length)
+    {
+        tipDir.y = 0f;
+        if (tipDir.sqrMagnitude < 0.0001f) tipDir = PlanarForward();
+        else tipDir.Normalize();
+
+        _readyLength = Mathf.Max(0.35f, length > 0.01f ? length : readyBladeLength);
+        bool was = _readyHeld;
+        _readyHeld = true;
+
+        if (!was || _readyTipDir.sqrMagnitude < 0.0001f)
+            _readyTipDir = tipDir;
+        else
+            _readyTipDir = Vector3.Slerp(_readyTipDir, tipDir, 1f - Mathf.Exp(-10f * Time.deltaTime));
+
+        if (!IsLive)
+            RefreshReadyMesh();
+    }
+
+    public void ClearReady()
+    {
+        _readyHeld = false;
+        _blendFromReady = false;
+        if (!IsLive)
+            HideStrikeMesh();
+    }
+
+    /// <summary>Куда сейчас смотрит клинок: живой удар или боевая поза.</summary>
+    public Vector3 BladeTipDir
+    {
+        get
+        {
+            if (IsLive)
+            {
+                GetStrikePose(out Vector3 origin, out Vector3 tip, out _);
+                Vector3 d = tip - origin;
+                d.y = 0f;
+                if (d.sqrMagnitude > 0.0001f) return d.normalized;
+            }
+            return _readyTipDir.sqrMagnitude > 0.0001f ? _readyTipDir : PlanarForward();
+        }
+    }
+
     void Awake()
     {
         if (visual == null)
@@ -160,6 +214,12 @@ public class WeaponHitbox : MonoBehaviour
                               float innerRadius = -1f, float yawOffsetDeg = 0f,
                               float sweepSign = 1f)
     {
+        if (_readyHeld)
+        {
+            _blendFromReady = true;
+            _blendFromDir = _readyTipDir.sqrMagnitude > 0.0001f ? _readyTipDir : PlanarForward();
+            _blendStart = Time.time;
+        }
         ApplyShape(range, radius, height, offset, direction, layers,
             coneHalfAngleOverride, shape, innerRadius, yawOffsetDeg, sweepSign);
         _followFacing = true;
@@ -220,9 +280,10 @@ public class WeaponHitbox : MonoBehaviour
         isActive = false;
         _hasHitInfo = false;
         _followFacing = false;
+        _blendFromReady = false;
         if (visual != null) visual.HideArc();
         HideZoneMeshes();
-        HideStrikeMesh();
+        SettleAfterStrike();
     }
 
     void ApplyShape(float range, float radius, float height, Vector3 offset,
@@ -256,27 +317,32 @@ public class WeaponHitbox : MonoBehaviour
             return;
         }
 
-        if (!isActive) return;
-
-        timer += Time.deltaTime;
-        bool expired = duration <= 0f || timer >= duration;
-        if (Time.time >= nextTickTime || expired)
+        if (isActive)
         {
-            DetectHits();
-            nextTickTime = Time.time + Mathf.Max(0.02f, tickInterval > 0f ? tickInterval : 0.02f);
+            timer += Time.deltaTime;
+            bool expired = duration <= 0f || timer >= duration;
+            if (Time.time >= nextTickTime || expired)
+            {
+                DetectHits();
+                nextTickTime = Time.time + Mathf.Max(0.02f, tickInterval > 0f ? tickInterval : 0.02f);
+            }
+
+            RefreshZoneMeshes(Sweep01, fullOnly: false);
+            RefreshStrikeMesh(Sweep01, windup: false);
+
+            if (expired)
+            {
+                isActive = false;
+                _hasHitInfo = false;
+                if (visual != null) visual.HideArc();
+                HideZoneMeshes();
+                SettleAfterStrike();
+            }
+            return;
         }
 
-        RefreshZoneMeshes(Sweep01, fullOnly: false);
-        RefreshStrikeMesh(Sweep01, windup: false);
-
-        if (expired)
-        {
-            isActive = false;
-            _hasHitInfo = false;
-            if (visual != null) visual.HideArc();
-            HideZoneMeshes();
-            HideStrikeMesh();
-        }
+        if (_readyHeld)
+            RefreshReadyMesh();
     }
 
     Vector3 PlanarForward()
@@ -684,6 +750,69 @@ public class WeaponHitbox : MonoBehaviour
         if (_zoneStrike != null) _zoneStrike.gameObject.SetActive(false);
     }
 
+    void SettleAfterStrike()
+    {
+        if (!_readyHeld)
+        {
+            HideStrikeMesh();
+            return;
+        }
+        StrikeAxes(1f, out Vector3 cut, out _);
+        cut.y = 0f;
+        if (cut.sqrMagnitude > 0.0001f)
+            _readyTipDir = cut.normalized;
+        RefreshReadyMesh();
+    }
+
+    void RefreshReadyMesh()
+    {
+        Vector3 dir = _readyTipDir.sqrMagnitude > 0.0001f ? _readyTipDir : PlanarForward();
+        ShowBladeAlong(dir, _readyLength, strikeColor);
+    }
+
+    Vector3 StrikeStartDir()
+    {
+        StrikeAxes(0f, out Vector3 cut, out _);
+        cut.y = 0f;
+        return cut.sqrMagnitude > 0.0001f ? cut.normalized : PlanarForward();
+    }
+
+    void ShowBladeAlong(Vector3 worldDir, float length, Color color)
+    {
+        if (_zoneStrike == null)
+            CreateZone("HitStrike", color, out _zoneStrike, out _meshStrike, out _matStrike);
+
+        worldDir.y = 0f;
+        if (worldDir.sqrMagnitude < 0.0001f) worldDir = PlanarForward();
+        worldDir.Normalize();
+
+        Vector3 origin = transform.position + Vector3.up * debugZoneY + worldDir * 0.32f;
+        _zoneStrike.SetPositionAndRotation(origin, Quaternion.LookRotation(worldDir));
+        _zoneStrike.localScale = Vector3.one;
+        BuildReadyBlade(_meshStrike, length);
+        if (_matStrike != null) _matStrike.color = color;
+        if (!_zoneStrike.gameObject.activeSelf)
+            _zoneStrike.gameObject.SetActive(true);
+    }
+
+    void BuildReadyBlade(Mesh mesh, float length)
+    {
+        float len = Mathf.Max(0.4f, length);
+        float r = 0.055f;
+        var verts = new Vector3[]
+        {
+            new Vector3(-r, 0f, 0f),
+            new Vector3(-r, 0f, len),
+            new Vector3( r, 0f, len),
+            new Vector3( r, 0f, 0f),
+        };
+        var tris = new int[] { 0, 1, 2, 0, 2, 3 };
+        mesh.Clear();
+        mesh.vertices = verts;
+        mesh.triangles = tris;
+        mesh.RecalculateNormals();
+    }
+
     void StrikeAxes(float sweep, out Vector3 cutDir, out Vector3 tipLocal)
     {
         float u = Mathf.Clamp01(sweep);
@@ -717,6 +846,18 @@ public class WeaponHitbox : MonoBehaviour
         if (!showStrikeMesh && !debugShowZone)
         {
             HideStrikeMesh();
+            return;
+        }
+
+        if (windup && _blendFromReady)
+        {
+            float t = Mathf.Clamp01((Time.time - _blendStart) / ReadyBlendTime);
+            Vector3 from = _blendFromDir.sqrMagnitude > 0.0001f ? _blendFromDir : PlanarForward();
+            Vector3 to = StrikeStartDir();
+            Vector3 blend = Vector3.Slerp(from, to, t);
+            if (blend.sqrMagnitude < 0.0001f) blend = to;
+            ShowBladeAlong(blend, _readyLength, strikeWindupColor);
+            if (t >= 1f) _blendFromReady = false;
             return;
         }
 

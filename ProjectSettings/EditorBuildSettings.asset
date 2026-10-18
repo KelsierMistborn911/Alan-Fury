@@ -6,9 +6,12 @@ EditorBuildSettings:
   serializedVersion: 2
   m_Scenes:
   - enabled: 1
-    path: Assets/Scenes/SampleScene.unity
+    path: Assets/Alan_Fury/Scenes/SampleScene.unity
     guid: 99c9720ab356a0642a771bea13969a05
   - enabled: 1
-    path: Assets/Scenes/DEMKA.unity
+    path: Assets/Alan_Fury/Scenes/DEMKA.unity
     guid: 0d42f3b8725e92a4d93787dfc4f3de79
+  - enabled: 1
+    path: Assets/Alan_Fury/Scenes/RegionMap.unity
+    guid: f0c8738f454d1fd4dab040916594e579
   m_configObjects: {}

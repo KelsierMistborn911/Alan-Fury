@@ -44,6 +44,12 @@ public class MapFogCurtain : MonoBehaviour
             Debug.LogError("MapFogCurtain: карта высот не готова!");
             return;
         }
+        // в hex-режиме нет краёв квадрата — занавес не строим
+        if (heightSource.streamGround != null)
+        {
+            Debug.Log("MapFogCurtain: hex-режим, краевой занавес пропущен.");
+            return;
+        }
         if (fogPrefab == null)
         {
             Debug.LogError("MapFogCurtain: не задан fogPrefab!");

@@ -28,6 +28,7 @@ Shader "Nature/VisionFade"
             #pragma fragment frag
             #pragma multi_compile_instancing
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
 
             TEXTURE2D(_MainTex);
             SAMPLER(sampler_MainTex);
@@ -80,6 +81,7 @@ Shader "Nature/VisionFade"
             struct Attributes
             {
                 float4 positionOS : POSITION;
+                float3 normalOS   : NORMAL;
                 float2 uv : TEXCOORD0;
                 UNITY_VERTEX_INPUT_INSTANCE_ID
             };
@@ -89,6 +91,7 @@ Shader "Nature/VisionFade"
                 float4 positionCS : SV_POSITION;
                 float2 uv : TEXCOORD0;
                 float3 worldPos : TEXCOORD1;
+                float3 normalWS : TEXCOORD2;
                 UNITY_VERTEX_INPUT_INSTANCE_ID
             };
 
@@ -101,6 +104,7 @@ Shader "Nature/VisionFade"
                 o.positionCS = TransformWorldToHClip(ws);
                 o.uv = v.uv * _MainTex_ST.xy + _MainTex_ST.zw;
                 o.worldPos = ws;
+                o.normalWS = TransformObjectToWorldNormal(v.normalOS);
                 return o;
             }
 
@@ -110,6 +114,14 @@ Shader "Nature/VisionFade"
                 half4 col = SAMPLE_TEXTURE2D(_MainTex, sampler_MainTex, i.uv) * (half4)_Color;
                 if (col.a < 0.02)
                     discard;
+
+                // полу-Lit: main light + SH ambient, чтобы яркость ближе к URP Lit
+                Light mainLight = GetMainLight();
+                float3 N = normalize(i.normalWS);
+                float ndl = saturate(dot(N, mainLight.direction));
+                float3 lighting = mainLight.color * ndl + SampleSH(N);
+                col.rgb *= lighting;
+
                 if (_NatureLightParams.z > 0.5)
                 {
                     float range = max(_NatureLightParams.x, 0.05);
@@ -126,7 +138,6 @@ Shader "Nature/VisionFade"
                 if (_VisionProjectGround > 0.5)
                     xz = ViewGround(i.worldPos).xz;
                 float vis = VisionInside(xz);
-                // Rim only. No hard step — a 0.42 cut flashed whole bush clumps.
                 float visEdge = smoothstep(0.0, 0.42, vis);
 
                 float2 radial = i.worldPos.xz - basePos.xz;
@@ -138,8 +149,6 @@ Shader "Nature/VisionFade"
                 float w = saturate(visEdge * (1.0 - stem) * (1.0 - stump));
                 float aMul = 1.0 - w;
                 col.a *= aMul;
-                // Dim the fringe. Unlit albedo through alpha was reading as a white cut.
-                col.rgb *= lerp(0.55, 1.0, aMul);
                 return col;
             }
             ENDHLSL

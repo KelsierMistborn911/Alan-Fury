@@ -164,6 +164,8 @@ public class NatureRenderer : MonoBehaviour
 
         if (useVisionFade)
         {
+            // всегда пушим глобалы, чтобы при неготовом гриде сбросить маску
+            PushFadeGlobals();
             if (ShouldEvalFade())
             {
                 BuildVisibleMask();
@@ -229,6 +231,11 @@ public class NatureRenderer : MonoBehaviour
 
     private bool ShouldEvalFade()
     {
+        if (playerVision == null || playerVision.mapGrid == null || !playerVision.mapGrid.IsReady)
+        {
+            _maskOk = false;
+            return false;
+        }
         if (_fadeRestoring) return true;
         int n = Mathf.Max(1, fadeCheckEveryNFrames);
         if (Time.frameCount - _lastFadeEval >= n) return true;
@@ -259,6 +266,13 @@ public class NatureRenderer : MonoBehaviour
             Vector3 o = grid.Origin;
             Shader.SetGlobalVector(VisionMapOriginId, new Vector4(o.x, o.z, 0f, 0f));
             Shader.SetGlobalFloat(VisionTileSizeId, grid.TileSize);
+        }
+        else
+        {
+            // сброс, чтобы шейдер не читал мусор
+            Shader.SetGlobalVector(VisionMapOriginId, Vector4.zero);
+            Shader.SetGlobalFloat(VisionTileSizeId, 0f);
+            _maskOk = false;
         }
         Shader.SetGlobalVector(VisionMaskOriginId, new Vector4(_maskOx, _maskOz, 0f, 0f));
         Shader.SetGlobalFloat(VisionMaskDimId, MaskDim);
@@ -520,16 +534,23 @@ public class NatureRenderer : MonoBehaviour
 
     private void DrawInstanced()
     {
-        if (placement.terrainBuilder == null || placement.heightSource == null) return;
+        if (placement.streamGround == null && placement.terrainBuilder == null) return;
+        if (placement.heightSource == null && placement.streamGround == null) return;
         if (placement.allVariants == null) return;
         EnsureFadeMaterial();
 
-        float ts = placement.terrainBuilder.TileSize;
+        float ts = placement.terrainBuilder != null ? placement.terrainBuilder.TileSize : 4f;
         float sectorWorld = placement.sectorSize * ts;
-        int w = placement.heightSource.width;
-        int d = placement.heightSource.depth;
-        Vector3 origin = new Vector3(-w * ts / 2f, 0f, -d * ts / 2f);
-        Vector3 playerLocal = placement.terrainBuilder.WorldToMapLocal(player.position);
+        Vector3 origin;
+        if (!placement.TryCellOrigin(out origin))
+        {
+            int w = placement.heightSource != null ? placement.heightSource.width : 0;
+            int d = placement.heightSource != null ? placement.heightSource.depth : 0;
+            origin = new Vector3(-w * ts / 2f, 0f, -d * ts / 2f);
+        }
+        Vector3 playerLocal = (placement.streamGround != null)
+            ? player.position
+            : placement.terrainBuilder.WorldToMapLocal(player.position);
 
         int pcx = Mathf.FloorToInt((playerLocal.x - origin.x) / sectorWorld);
         int pcz = Mathf.FloorToInt((playerLocal.z - origin.z) / sectorWorld);
@@ -560,8 +581,10 @@ public class NatureRenderer : MonoBehaviour
                         if (batch == null) continue;
                         for (int i = 0; i < batch.Length; i++)
                         {
-                            if (visionFade) _faded.Add(batch[i]);
-                            else _opaque.Add(batch[i]);
+                            if (visionFade && InstanceNeedsDissolve(batch[i]))
+                                _faded.Add(batch[i]);
+                            else
+                                _opaque.Add(batch[i]);
                         }
                     }
                 }
@@ -572,6 +595,27 @@ public class NatureRenderer : MonoBehaviour
             if (_opaque.Count > 0)
                 DrawParts(v, layer, _opaque, v.propertyBlock, shadows, fade: false);
         }
+    }
+
+
+    private bool InstanceNeedsDissolve(Matrix4x4 root)
+    {
+        if (!_maskOk || _cellMaskPixels == null) return false;
+        MapGrid grid = playerVision != null ? playerVision.mapGrid : null;
+        if (grid == null || !grid.IsReady) return false;
+
+        float ts = grid.TileSize;
+        if (ts < 0.01f) return false;
+        Vector3 o = grid.Origin;
+        Vector3 pos = new Vector3(root.m03, root.m13, root.m23);
+        int cx = Mathf.FloorToInt((pos.x - o.x) / ts);
+        int cz = Mathf.FloorToInt((pos.z - o.z) / ts);
+        int lx = cx - _maskOx;
+        int lz = cz - _maskOz;
+        if ((uint)lx >= MaskDim || (uint)lz >= MaskDim) return false;
+
+        // маска высокая = открытая видимая клетка → крона растворяется
+        return _cellMaskPixels[lz * MaskDim + lx].r > 96;
     }
 
     private bool FadeShaderOk()
@@ -595,15 +639,11 @@ public class NatureRenderer : MonoBehaviour
         if (src == null) return fadeMaterial;
 
         int id = src.GetInstanceID();
-        if (_fadeBySrc.TryGetValue(id, out var cached) && cached != null)
-        {
-            if (cached.shader != fadeSh) cached.shader = fadeSh;
-            cached.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
+        if (_fadeBySrc.TryGetValue(id, out var cached) && cached != null && cached.shader == fadeSh)
             return cached;
-        }
 
-        var m = new Material(src);
-        m.shader = fadeSh;
+        // Material Variant forbids shader swaps. Build from the fade shader, then copy albedo.
+        var m = new Material(fadeSh);
         m.enableInstancing = true;
         m.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
         m.name = src.name + "_VisionFade";
@@ -766,12 +806,18 @@ public class NatureRenderer : MonoBehaviour
             _liveKeys.Remove(k);
         }
 
-        float ts = placement.terrainBuilder.TileSize;
+        float ts = placement.terrainBuilder != null ? placement.terrainBuilder.TileSize : 4f;
         float sectorWorld = placement.sectorSize * ts;
-        int w = placement.heightSource.width;
-        int d = placement.heightSource.depth;
-        Vector3 origin = new Vector3(-w * ts / 2f, 0f, -d * ts / 2f);
-        Vector3 playerLocal = placement.terrainBuilder.WorldToMapLocal(pp);
+        Vector3 origin;
+        if (!placement.TryCellOrigin(out origin))
+        {
+            int w = placement.heightSource != null ? placement.heightSource.width : 0;
+            int d = placement.heightSource != null ? placement.heightSource.depth : 0;
+            origin = new Vector3(-w * ts / 2f, 0f, -d * ts / 2f);
+        }
+        Vector3 playerLocal = (placement.streamGround != null)
+            ? pp
+            : (placement.terrainBuilder != null ? placement.terrainBuilder.WorldToMapLocal(pp) : pp);
 
         int pcx = Mathf.FloorToInt((playerLocal.x - origin.x) / sectorWorld);
         int pcz = Mathf.FloorToInt((playerLocal.z - origin.z) / sectorWorld);
