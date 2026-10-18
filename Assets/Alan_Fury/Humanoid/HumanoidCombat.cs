@@ -27,7 +27,7 @@ public class HumanoidCombat : MonoBehaviour
 
     [Header("Управление боем")]
     public float sheathVisualDelay = 1f;
-    public float combatLingerSeconds = 15f;
+    public float combatLingerSeconds = 10f;
     [Tooltip("Секунд после сброса боя до авто-ножен. 0 = не убирать. Игрок = 60.")]
     public float sheathAfterPeaceSeconds = 0f;
     public float combatFaceRange = 10f;
@@ -106,7 +106,7 @@ public class HumanoidCombat : MonoBehaviour
     public bool ForcePeace { get; protected set; }
     public bool IsInCombat { get; protected set; }
     public bool WantsBattleStep =>
-        IsArmed && !ForcePeace && (HasTarget || NearTarget != null || IsInAttackPipeline);
+        IsArmed && !ForcePeace && (IsInCombat || HasTarget || NearTarget != null || IsInAttackPipeline);
     public float ChargePercent { get; protected set; }
     public bool IsHeavyReady => IsCharging && ChargePercent >= heavyChargeThreshold;
     public bool IsInfighting { get; protected set; }
@@ -361,10 +361,10 @@ public class HumanoidCombat : MonoBehaviour
             return;
         }
 
+        TickCombatState();
+
         if (stance != null)
             stance.Tick(IsInCombat, IsArmed, IsInAttackPipeline);
-
-        TickCombatState();
 
         if (IsParrying && Time.time >= _parryEndTime) IsParrying = false;
 
@@ -1592,6 +1592,8 @@ public class HumanoidCombat : MonoBehaviour
 
     public void ReceiveHitShock(bool heavy)
     {
+        if (IsArmed && !ForcePeace)
+            _combatLingerUntil = Time.time + combatLingerSeconds;
         if (IsBlocking || IsParrying) return;
 
         CancelApproach();
@@ -1696,7 +1698,7 @@ public class HumanoidCombat : MonoBehaviour
             return;
         }
 
-        bool contact = IsArmed && (NearTarget != null || IsInAttackPipeline || IsBlocking);
+        bool contact = IsArmed && (HasTarget || NearTarget != null || IsInAttackPipeline || IsBlocking);
         if (contact)
             _combatLingerUntil = Time.time + combatLingerSeconds;
 

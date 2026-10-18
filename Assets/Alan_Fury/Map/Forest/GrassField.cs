@@ -179,10 +179,14 @@ public class GrassField : MonoBehaviour
         if (_renderers.Count == 0) return;
         TickStamps();
         FillBlock();
-        for (int i = 0; i < _renderers.Count; i++)
+        // штампы стареют каждый кадр, но SetPropertyBlock на все секторы — дорого. Раз в 2 кадра достаточно.
+        if ((Time.frameCount & 1) == 0)
         {
-            if (_renderers[i] != null)
-                _renderers[i].SetPropertyBlock(_block);
+            for (int i = 0; i < _renderers.Count; i++)
+            {
+                if (_renderers[i] != null)
+                    _renderers[i].SetPropertyBlock(_block);
+            }
         }
     }
 
@@ -258,6 +262,7 @@ public class GrassField : MonoBehaviour
 
     private void BakeSector(int sx, int sz, int treeStamp)
     {
+        float t0 = Time.realtimeSinceStartup;
         int x0 = sx * _sectorSize;
         int z0 = sz * _sectorSize;
         int x1 = Mathf.Min(_w, x0 + _sectorSize);
@@ -352,6 +357,8 @@ public class GrassField : MonoBehaviour
             entry.renderer = mr;
         }
         _sectors[new Vector2Int(sx, sz)] = entry;
+        float ms = (Time.realtimeSinceStartup - t0) * 1000f;
+        Debug.Log($"[AF.Load] GrassField.BakeSector {sx},{sz} {ms:0.0}ms verts={_verts.Count}");
     }
 
     private void UnloadSector(Vector2Int key)

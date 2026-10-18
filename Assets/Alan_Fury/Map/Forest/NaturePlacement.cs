@@ -121,6 +121,8 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
 
     public bool IsReady => _ready;
     public ICellGround streamGround;
+    /// <summary>Растёт на каждой загрузке/выгрузке сектора. NatureRenderer по нему решает, пересобирать ли списки.</summary>
+    public int StreamStamp { get; private set; }
 
     private bool _ready;
     private readonly HashSet<Vector2Int> _loaded = new HashSet<Vector2Int>();
@@ -307,6 +309,7 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
                 if (sx < 0 || sz < 0 || sx * sectorSize >= w || sz * sectorSize >= d) continue;
                 GenerateSector(sx, sz);
                 _loaded.Add(key);
+                StreamStamp++;
             }
         }
 
@@ -321,6 +324,7 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
             UnloadSector(_toUnload[i].x, _toUnload[i].y);
             _loaded.Remove(_toUnload[i]);
         }
+        if (_toUnload.Count > 0) StreamStamp++;
     }
 
     [ContextMenu("Unload All")]
@@ -331,6 +335,7 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
         for (int i = 0; i < _toUnload.Count; i++)
             UnloadSector(_toUnload[i].x, _toUnload[i].y);
         _loaded.Clear();
+        StreamStamp++;
     }
 
     public bool RemoveInstance(int typeIndex, Vector2Int sector, Vector3 worldPos)
@@ -361,12 +366,13 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
         if (_loaded.Contains(key)) return;
         GenerateSector(sx, sz);
         _loaded.Add(key);
+        StreamStamp++;
         int n = 0;
         for (int i = 0; i < allVariants.Count; i++)
             if (allVariants[i].sectorLists != null && allVariants[i].sectorLists.TryGetValue(key, out var l) && l != null)
                 n += l.Count;
-        if (n == 0)
-            Debug.Log($"NaturePlacement: сектор {sx},{sz} пуст (variants={allVariants.Count})");
+        if (n == 0 && (StreamStamp % 32) == 1)
+            Debug.Log($"[AF.Load] NaturePlacement сектор {sx},{sz} пуст (stamp={StreamStamp})");
     }
 
     public void ReleaseStreamSector(int sx, int sz)
@@ -374,10 +380,12 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
         if (!_ready) return;
         UnloadSector(sx, sz);
         _loaded.Remove(new Vector2Int(sx, sz));
+        StreamStamp++;
     }
 
     private void GenerateSector(int sx, int sz)
     {
+        float t0 = Time.realtimeSinceStartup;
         float ts = terrainBuilder != null ? terrainBuilder.TileSize : 4f;
         bool stream = streamGround != null;
         int w = stream ? int.MaxValue / 4 : heightSource.width;
@@ -527,6 +535,12 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
 
             v.sectors[key] = SplitToBatches(list);
         }
+        float ms = (Time.realtimeSinceStartup - t0) * 1000f;
+        int inst = 0;
+        for (int i = 0; i < allVariants.Count; i++)
+            if (allVariants[i].sectorLists != null && allVariants[i].sectorLists.TryGetValue(key, out var ls) && ls != null)
+                inst += ls.Count;
+        Debug.Log($"[AF.Load] NaturePlacement.GenerateSector {sx},{sz} {ms:0.0}ms instances={inst} stamp={StreamStamp}");
     }
 
     private void UnloadSector(int sx, int sz)

@@ -8,6 +8,8 @@ using UnityEngine.SceneManagement;
 /// Плавный и слабый фокус на выбранном гексе. Лесные высоты с шагом.
 /// Один гекс — «Воющая пуща» (маркер для зоны волков).
 /// Кнопка «Переместиться» → основная сцена, спавн в выбранном гексе.
+/// Типы — один файл HexTypes. На гекс не пишется.
+/// Сначала линия дороги, потом префаб типа (HexContent).
 /// </summary>
 public class RegionHexMap : MonoBehaviour
 {
@@ -43,6 +45,10 @@ public class RegionHexMap : MonoBehaviour
     [Tooltip("При старте брать новый случайный сид.")]
     public bool randomMapOnStart = false;
 
+    [Header("Типы гексов")]
+    [Tooltip("Один файл со всеми типами. Alan Fury → Create Hex Types.")]
+    public HexTypes hexTypesAsset;
+
     private readonly List<HexCell> _cells = new List<HexCell>(256);
     private HexCell _selected;
     private HexCell _howling;
@@ -66,7 +72,9 @@ public class RegionHexMap : MonoBehaviour
         public Material mat;
         public Color baseColor;
         public Vector3[] sideNormals;
-        public string kind = "лес"; // лес / дорога / деревня / погост / храм / болото / пуща
+        public string kind = "лес";
+        public bool road;
+        public Vector3 roadDir = Vector3.forward;
     }
 
     HexCell _village;
@@ -155,7 +163,7 @@ public class RegionHexMap : MonoBehaviour
             var ray = _cam.ScreenPointToRay(Input.mousePosition);
             if (Physics.Raycast(ray, out var hit, 400f))
             {
-                var cell = _cells.Find(c => c.go == hit.collider.gameObject);
+                var cell = FindCellFromHit(hit.collider.gameObject);
                 if (cell != null)
                 {
                     if (_selected == cell)
@@ -257,7 +265,7 @@ public class RegionHexMap : MonoBehaviour
         var mr = go.AddComponent<MeshRenderer>();
         var mc = go.AddComponent<MeshCollider>();
 
-        var mesh = BuildHexPrism(hexSize * 1.005f, h);
+        var mesh = HexMesh.Prism(hexSize * 1.005f, h);
         mf.sharedMesh = mesh;
         mc.sharedMesh = mesh;
 
@@ -292,27 +300,17 @@ public class RegionHexMap : MonoBehaviour
         _cemetery = FindCell(RegionLayout.Cemetery.x, RegionLayout.Cemetery.y);
         _swamp = FindCell(RegionLayout.Swamp.x, RegionLayout.Swamp.y);
 
-        PaintSite(_village, "деревня", new Color(0.75f, 0.62f, 0.35f), PrimitiveType.Cube);
+        LevelRoadHexes();
+        PaintSite(_village, "населенный пункт", new Color(0.75f, 0.62f, 0.35f), PrimitiveType.Cube);
         PaintSite(_temple, "старый храм", new Color(0.85f, 0.82f, 0.7f), PrimitiveType.Cylinder);
         PaintSite(_cemetery, "погост", new Color(0.55f, 0.55f, 0.6f), PrimitiveType.Cube);
         PaintSite(_swamp, "болото", new Color(0.25f, 0.38f, 0.28f), PrimitiveType.Sphere);
 
-        _road.Clear();
-        var roadColor = new Color(0.45f, 0.36f, 0.22f);
-        for (int i = 0; i < RegionLayout.Road.Count; i++)
-        {
-            var p = RegionLayout.Road[i];
-            var cell = FindCell(p.x, p.y);
-            if (cell == null) continue;
-            cell.kind = "дорога";
-            cell.baseColor = roadColor;
-            if (cell.mat != null) cell.mat.color = roadColor;
-            _road.Add(cell);
-        }
-
         PlaceHowlingNearRoad();
         PaintZones();
+        DrawRoadRibbon();
         AddSiteLabels();
+        ApplyHexTypes();
     }
 
     void PaintZones()
@@ -354,26 +352,134 @@ public class RegionHexMap : MonoBehaviour
         if (col != null) Destroy(col);
     }
 
-    void BuildRoad(HexCell a, HexCell b)
+    void LevelRoadHexes()
     {
         _road.Clear();
-        var path = HexLine(a.q, a.r, b.q, b.r);
-        var roadColor = new Color(0.45f, 0.36f, 0.22f);
+        if (_village == null || _temple == null) return;
+        var path = HexLine(_village.q, _village.r, _temple.q, _temple.r);
+        float sum = 0f;
+        int n = 0;
         for (int i = 0; i < path.Count; i++)
         {
             var cell = FindCell(path[i].x, path[i].y);
             if (cell == null) continue;
-            if (cell == _village || cell == _temple || cell == _cemetery || cell == _swamp) continue;
+            sum += cell.height;
+            n++;
+        }
+        if (n == 0) return;
+        float roadH = Mathf.Max(heightStep, Mathf.Round((sum / n) / heightStep) * heightStep);
+        for (int i = 0; i < path.Count; i++)
+        {
+            var cell = FindCell(path[i].x, path[i].y);
+            if (cell == null) continue;
+            SetHexHeight(cell, roadH);
+            cell.road = true;
             cell.kind = "дорога";
-            cell.baseColor = roadColor;
-            if (cell.mat != null) cell.mat.color = roadColor;
+            cell.baseColor = new Color(0.45f, 0.36f, 0.22f);
+            if (cell.mat != null) cell.mat.color = cell.baseColor;
             _road.Add(cell);
         }
     }
 
+    void SetHexHeight(HexCell cell, float h)
+    {
+        cell.height = h;
+        var p = cell.go.transform.position;
+        p.y = h * 0.5f;
+        cell.go.transform.position = p;
+        var mesh = HexMesh.Prism(hexSize * 1.005f, h);
+        var mf = cell.go.GetComponent<MeshFilter>();
+        var mc = cell.go.GetComponent<MeshCollider>();
+        if (mf != null) mf.sharedMesh = mesh;
+        if (mc != null) mc.sharedMesh = mesh;
+        cell.sideNormals = BuildSideNormals(cell.go.transform);
+    }
+
+    void DrawRoadRibbon()
+    {
+        if (_road.Count < 2) return;
+        float top = _road[0].go.transform.position.y + _road[0].height * 0.5f + 0.05f;
+        var line = RegionLayout.RoadLine(hexSize);
+        if (line == null || line.Count < 2) return;
+        var local = new List<Vector3>(line.Count);
+        for (int i = 0; i < line.Count; i++)
+        {
+            var w = new Vector3(line[i].x, top, line[i].z);
+            local.Add(transform.InverseTransformPoint(w));
+        }
+
+        var go = new GameObject("Road");
+        go.transform.SetParent(transform, false);
+        var mf = go.AddComponent<MeshFilter>();
+        var mr = go.AddComponent<MeshRenderer>();
+        mf.sharedMesh = RibbonMesh(local, hexSize * 0.28f);
+        var mat = hexMaterial != null ? new Material(hexMaterial) : new Material(Shader.Find("Universal Render Pipeline/Lit"));
+        if (mat.shader == null || mat.shader.name.Contains("Error"))
+            mat = new Material(Shader.Find("Standard"));
+        mat.color = new Color(0.45f, 0.36f, 0.22f);
+        mr.sharedMaterial = mat;
+
+        for (int i = 0; i < _road.Count; i++)
+        {
+            var cell = _road[i];
+            var wp = cell.go.transform.position;
+            int best = 0;
+            float bestD = float.MaxValue;
+            for (int k = 0; k < line.Count; k++)
+            {
+                float d = (line[k].x - wp.x) * (line[k].x - wp.x) + (line[k].z - wp.z) * (line[k].z - wp.z);
+                if (d < bestD) { bestD = d; best = k; }
+            }
+            int a = Mathf.Max(0, best - 1);
+            int b = Mathf.Min(line.Count - 1, best + 1);
+            var tan = line[b] - line[a];
+            tan.y = 0f;
+            cell.roadDir = tan.sqrMagnitude > 0.0001f ? tan.normalized : Vector3.forward;
+        }
+    }
+
+    static Mesh RibbonMesh(List<Vector3> line, float width)
+    {
+        int n = line.Count;
+        if (n < 2) return new Mesh();
+        var mesh = new Mesh();
+        mesh.name = "RoadRibbon";
+        var verts = new Vector3[n * 2];
+        var tris = new int[(n - 1) * 6];
+        float half = width * 0.5f;
+        Vector3 prevSide = Vector3.right;
+        for (int i = 0; i < n; i++)
+        {
+            var prev = line[Mathf.Max(0, i - 1)];
+            var next = line[Mathf.Min(n - 1, i + 1)];
+            var tan = next - prev;
+            tan.y = 0f;
+            if (tan.sqrMagnitude < 0.0001f) tan = Vector3.forward;
+            tan.Normalize();
+            var side = new Vector3(-tan.z, 0f, tan.x);
+            if (Vector3.Dot(side, prevSide) < 0f) side = -side;
+            prevSide = side;
+            var p = line[i];
+            verts[i * 2] = p - side * half;
+            verts[i * 2 + 1] = p + side * half;
+        }
+        int ti = 0;
+        for (int i = 0; i < n - 1; i++)
+        {
+            int a = i * 2, b = a + 1, c = a + 2, d = a + 3;
+            tris[ti++] = a; tris[ti++] = c; tris[ti++] = b;
+            tris[ti++] = b; tris[ti++] = c; tris[ti++] = d;
+        }
+        mesh.vertices = verts;
+        mesh.triangles = tris;
+        mesh.RecalculateNormals();
+        mesh.RecalculateBounds();
+        return mesh;
+    }
+
     void AddSiteLabels()
     {
-        AddLabel(_village, "деревня");
+        AddLabel(_village, "населенный пункт");
         AddLabel(_temple, "храм");
         AddLabel(_howling, "Воющая пуща");
     }
@@ -418,6 +524,47 @@ public class RegionHexMap : MonoBehaviour
         for (int i = 0; i < _cells.Count; i++)
             if (_cells[i].q == q && _cells[i].r == r) return _cells[i];
         return null;
+    }
+
+    HexCell FindCellFromHit(GameObject hitGo)
+    {
+        var go = hitGo;
+        while (go != null)
+        {
+            for (int i = 0; i < _cells.Count; i++)
+                if (_cells[i].go == go) return _cells[i];
+            if (go.transform.parent == null) break;
+            go = go.transform.parent.gameObject;
+        }
+        return null;
+    }
+
+    void ApplyHexTypes()
+    {
+        if (hexTypesAsset == null) return;
+        for (int i = 0; i < _cells.Count; i++)
+            ApplyType(_cells[i]);
+    }
+
+    void ApplyType(HexCell cell)
+    {
+        if (cell == null || cell.go == null) return;
+        var entry = hexTypesAsset.Find(cell.kind);
+        if (entry == null || entry.hexPrefab == null) return;
+
+        var inst = Instantiate(entry.hexPrefab, cell.go.transform);
+        inst.name = cell.kind;
+        inst.transform.localPosition = Vector3.zero;
+        inst.transform.localRotation = Quaternion.identity;
+        inst.transform.localScale = Vector3.one;
+        if (entry.hideBase)
+        {
+            var mr = cell.go.GetComponent<MeshRenderer>();
+            if (mr != null) mr.enabled = false;
+        }
+        var content = inst.GetComponent<HexContent>();
+        if (content != null)
+            content.Generate(SeedFor(cell.q, cell.r), hexSize, cell.height * 0.5f, cell.road, cell.roadDir);
     }
 
     static List<Vector2Int> HexLine(int q0, int r0, int q1, int r1)
@@ -567,6 +714,12 @@ public class RegionHexMap : MonoBehaviour
 
     void Clear()
     {
+        var old = transform.Find("Road");
+        if (old != null)
+        {
+            if (Application.isPlaying) Destroy(old.gameObject);
+            else DestroyImmediate(old.gameObject);
+        }
         foreach (var c in _cells)
             if (c.go != null) Destroy(c.go);
         _cells.Clear();
@@ -603,42 +756,6 @@ public class RegionHexMap : MonoBehaviour
         return n;
     }
 
-    static Mesh BuildHexPrism(float size, float height)
-    {
-        var mesh = new Mesh();
-        const int sides = 6;
-        var verts = new Vector3[sides * 2 + 2];
-        var tris = new List<int>(sides * 12);
-
-        verts[0] = new Vector3(0, height * 0.5f, 0);
-        verts[1] = new Vector3(0, -height * 0.5f, 0);
-
-        for (int i = 0; i < sides; i++)
-        {
-            float a = i * Mathf.PI * 2f / sides + Mathf.PI / 6f;
-            float x = Mathf.Cos(a) * size;
-            float z = Mathf.Sin(a) * size;
-            verts[2 + i] = new Vector3(x, height * 0.5f, z);
-            verts[2 + sides + i] = new Vector3(x, -height * 0.5f, z);
-        }
-
-        for (int i = 0; i < sides; i++)
-        {
-            int n = (i + 1) % sides;
-            tris.Add(0); tris.Add(2 + i); tris.Add(2 + n);
-            tris.Add(1); tris.Add(2 + sides + n); tris.Add(2 + sides + i);
-            int t0 = 2 + i, t1 = 2 + n, b0 = 2 + sides + i, b1 = 2 + sides + n;
-            tris.Add(t0); tris.Add(b0); tris.Add(t1);
-            tris.Add(t1); tris.Add(b0); tris.Add(b1);
-        }
-
-        mesh.vertices = verts;
-        mesh.triangles = tris.ToArray();
-        mesh.RecalculateNormals();
-        mesh.RecalculateBounds();
-        return mesh;
-    }
-
 #if UNITY_EDITOR
     void OnDrawGizmos()
     {
@@ -669,6 +786,9 @@ public static class RegionLayout
     public static Vector2Int Swamp;
     public static Vector2Int Howling;
     public static readonly List<Vector2Int> Road = new List<Vector2Int>();
+
+    static List<Vector3> _roadLine;
+    static float _roadLineSize = -1f;
 
     public static void Build(int seed)
     {
@@ -706,6 +826,76 @@ public static class RegionLayout
         }
         RegionHexMap.HowlingQ = Howling.x;
         RegionHexMap.HowlingR = Howling.y;
+
+        _roadLine = null;
+        _roadLineSize = -1f;
+    }
+
+    /// <summary>Извилистая лента деревня→храм в мировых (или визуальных) координатах. Один и тот же путь на карте региона и на местности.</summary>
+    public static List<Vector3> RoadLine(float hexSize)
+    {
+        if (Seed == 0 || hexSize < 1f) return _roadLine ?? new List<Vector3>();
+        if (_roadLine != null && Mathf.Approximately(_roadLineSize, hexSize))
+            return _roadLine;
+        _roadLine = BuildRoadLine(hexSize);
+        _roadLineSize = hexSize;
+        return _roadLine;
+    }
+
+    static List<Vector3> BuildRoadLine(float hexSize)
+    {
+        var path = HexLine(Village.x, Village.y, Temple.x, Temple.y);
+        var knots = new List<Vector3>(path.Count);
+        for (int i = 0; i < path.Count; i++)
+        {
+            var p = path[i];
+            float x = hexSize * (Mathf.Sqrt(3f) * p.x + Mathf.Sqrt(3f) * 0.5f * p.y);
+            float z = hexSize * (1.5f * p.y);
+            knots.Add(new Vector3(x, 0f, z));
+        }
+        if (knots.Count < 2) return knots;
+        return Winding(knots, Seed, hexSize);
+    }
+
+    static List<Vector3> Winding(List<Vector3> knots, int roadSeed, float hexSize)
+    {
+        var rnd = new System.Random(roadSeed ^ 0x51A7);
+        var line = new List<Vector3>(knots.Count * 6);
+        int n = knots.Count;
+        const int steps = 6;
+        for (int i = 0; i < n - 1; i++)
+        {
+            var p0 = knots[Mathf.Max(0, i - 1)];
+            var p1 = knots[i];
+            var p2 = knots[i + 1];
+            var p3 = knots[Mathf.Min(n - 1, i + 2)];
+            for (int s = 0; s < steps; s++)
+            {
+                float t = s / (float)steps;
+                var p = Catmull(p0, p1, p2, p3, t);
+                var tan = Catmull(p0, p1, p2, p3, Mathf.Min(1f, t + 0.05f)) - p;
+                tan.y = 0f;
+                if (tan.sqrMagnitude < 0.0001f) tan = p2 - p1;
+                tan.Normalize();
+                var side = new Vector3(-tan.z, 0f, tan.x);
+                float wave = Mathf.Sin((i + t) * 1.6f) * hexSize * 0.22f;
+                wave += ((float)rnd.NextDouble() - 0.5f) * hexSize * 0.1f;
+                line.Add(p + side * wave);
+            }
+        }
+        line.Add(knots[n - 1]);
+        return line;
+    }
+
+    static Vector3 Catmull(Vector3 p0, Vector3 p1, Vector3 p2, Vector3 p3, float t)
+    {
+        float t2 = t * t;
+        float t3 = t2 * t;
+        return 0.5f * (
+            2f * p1 +
+            (-p0 + p2) * t +
+            (2f * p0 - 5f * p1 + 4f * p2 - p3) * t2 +
+            (-p0 + 3f * p1 - 3f * p2 + p3) * t3);
     }
 
     public static bool IsRoadHex(int q, int r)
@@ -717,7 +907,7 @@ public static class RegionLayout
     public static string KindAt(int q, int r)
     {
         var p = new Vector2Int(q, r);
-        if (p == Village) return "деревня";
+        if (p == Village) return "населенный пункт";
         if (p == Temple) return "старый храм";
         if (p == Cemetery) return "погост";
         if (p == Swamp) return "болото";
@@ -805,10 +995,33 @@ public static class HexSpawnRequest
         Seed = seed;
         HexWorldSize = hexWorldSize;
         HasRequest = true;
+        // переживает смену сцены даже если домен перезагрузится
+        PlayerPrefs.SetInt("HexSpawn_Q", q);
+        PlayerPrefs.SetInt("HexSpawn_R", r);
+        PlayerPrefs.SetFloat("HexSpawn_H", height);
+        PlayerPrefs.SetInt("HexSpawn_Seed", seed);
+        PlayerPrefs.SetFloat("HexSpawn_Size", hexWorldSize);
+        PlayerPrefs.SetInt("HexSpawn_Has", 1);
+        PlayerPrefs.Save();
+    }
+
+    public static bool TryRestore()
+    {
+        if (HasRequest) return true;
+        if (PlayerPrefs.GetInt("HexSpawn_Has", 0) != 1) return false;
+        Q = PlayerPrefs.GetInt("HexSpawn_Q");
+        R = PlayerPrefs.GetInt("HexSpawn_R");
+        Height = PlayerPrefs.GetFloat("HexSpawn_H");
+        Seed = PlayerPrefs.GetInt("HexSpawn_Seed");
+        HexWorldSize = PlayerPrefs.GetFloat("HexSpawn_Size", 200f);
+        HasRequest = true;
+        return true;
     }
 
     public static void Clear()
     {
         HasRequest = false;
+        PlayerPrefs.DeleteKey("HexSpawn_Has");
+        PlayerPrefs.Save();
     }
 }

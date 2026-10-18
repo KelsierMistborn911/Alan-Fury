@@ -37,6 +37,11 @@ public class Pathfinder : MonoBehaviour
     private Vector3 _origin;
     private bool _ready;
 
+    private float[] _g;
+    private int[] _prev;
+    private bool[] _closed;
+    private MinHeap _heap;
+
     private const float SQRT2 = 1.41421356f;
 
     // ============ Построение ============
@@ -124,12 +129,14 @@ public class Pathfinder : MonoBehaviour
         if (start == goal) return false; // уже на месте
 
         int n = _w * _d;
-        float[] g = new float[n];
-        int[] prev = new int[n];
-        bool[] closed = new bool[n];
-        for (int i = 0; i < n; i++) { g[i] = float.MaxValue; prev[i] = -1; }
+        EnsurePathBuffers(n);
+        float[] g = _g;
+        int[] prev = _prev;
+        bool[] closed = _closed;
+        for (int i = 0; i < n; i++) { g[i] = float.MaxValue; prev[i] = -1; closed[i] = false; }
 
-        var heap = new MinHeap(n + 1);
+        var heap = _heap;
+        heap.Clear();
         g[start] = 0f;
         heap.Push(start, Heuristic(sx, sz, tx, tz));
 
@@ -295,6 +302,19 @@ public class Pathfinder : MonoBehaviour
         return (bx - ax) == (cx - bx) && (bz - az) == (cz - bz);
     }
 
+    private void EnsurePathBuffers(int n)
+    {
+        if (_g == null || _g.Length < n)
+        {
+            _g = new float[n];
+            _prev = new int[n];
+            _closed = new bool[n];
+            _heap = new MinHeap(n + 1);
+        }
+        else if (_heap == null)
+            _heap = new MinHeap(n + 1);
+    }
+
     private float Heuristic(int x1, int z1, int x2, int z2)
     {
         int dx = Mathf.Abs(x1 - x2);
@@ -340,6 +360,8 @@ public class Pathfinder : MonoBehaviour
         }
 
         public int Count => count;
+
+        public void Clear() { count = 0; }
 
         public void Push(int node, float cost)
         {

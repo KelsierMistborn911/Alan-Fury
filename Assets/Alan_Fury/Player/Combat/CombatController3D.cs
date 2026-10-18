@@ -12,7 +12,7 @@ public class CombatController3D : HumanoidCombat
     protected override void Awake()
     {
         if (sheathAfterPeaceSeconds <= 0f) sheathAfterPeaceSeconds = 60f;
-        combatLingerSeconds = 0.35f;
+        combatLingerSeconds = 10f;
         if (targeting == null) targeting = GetComponent<PlayerTargeting>();
         _composer = GetComponent<SpellComposer>();
         _spellSlots = GetComponent<SpellSlots>();

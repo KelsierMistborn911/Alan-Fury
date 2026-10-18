@@ -145,6 +145,7 @@ public class MapGrid : MonoBehaviour
             _ready = false;
             return;
         }
+        float t0 = Time.realtimeSinceStartup;
         if (chunkedBuilder == null) chunkedBuilder = GetComponent<ChunkedTerrainBuilder>();
         _ts = ResolveTileSize();
         _streaming = true;
@@ -175,7 +176,8 @@ public class MapGrid : MonoBehaviour
         _regionBlocked = new bool[_rw * _rd];
 
         _ready = true;
-        Debug.Log($"MapGrid stream: window {_w}×{_d} at cell ({_streamOx},{_streamOz}), tile={_ts}");
+        float ms = (Time.realtimeSinceStartup - t0) * 1000f;
+        Debug.Log($"[AF.Load] MapGrid.BuildStream {ms:0.0}ms window {_w}×{_d} at ({_streamOx},{_streamOz}) tile={_ts}");
     }
 
     /// <summary>Сдвинуть окно, если игрок ушёл от центра.</summary>

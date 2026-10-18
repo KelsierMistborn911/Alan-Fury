@@ -4,7 +4,7 @@ using UnityEngine;
 /// <summary>
 /// Стриминг местности от гексагональной карты регионов.
 /// Карта не квадратная и не фиксированного размера — чанки строятся вокруг игрока.
-/// Высота в любой точке считается от базовых высот ближайших гексов + локальный шум.
+/// Высота — террасы гексов: внутри плоская, у края пологий склон только при малом перепаде.
 /// Сторона гекса = 100 м. Деревья/трава не хранятся — генерируются заново.
 /// </summary>
 [DefaultExecutionOrder(-20)]
@@ -28,7 +28,9 @@ public class LocationStream : MonoBehaviour, ICellGround
     public float heightStep = 0.25f;
     public float forestBase = 2.2f;
     public float forestVariation = 0.35f;
-    public float detailNoise = 0.25f;      // локальные холмики поверх макро-высоты
+    public float detailNoise = 0.12f;      // мелкая рябь на террасе
+    public float minorDelta = 0.5f;        // перепад ≤ этого — пологий склон
+    public float slopeWidth = 15f;         // ширина склона у края гекса (м)
 
     [Header("Связи")]
     public NaturePlacement nature;
@@ -49,6 +51,7 @@ public class LocationStream : MonoBehaviour, ICellGround
     private int _pcx = int.MinValue;
     private int _pcz = int.MinValue;
     private bool _begun;
+    private int _holdHexFrames;
 
     // кэш высот гексов (q,r) → height
     private readonly Dictionary<long, float> _hexHeights = new Dictionary<long, float>(128);
@@ -83,6 +86,7 @@ public class LocationStream : MonoBehaviour, ICellGround
         Debug.Log($"LocationStream.Begin request={HexSpawnRequest.HasRequest} q={CurrentHexQ} r={CurrentHexR}");
 
         // если пришли из RegionMap — берём сид и стартовый гекс
+        HexSpawnRequest.TryRestore();
         if (HexSpawnRequest.HasRequest)
         {
             seed = HexSpawnRequest.Seed;
@@ -90,6 +94,7 @@ public class LocationStream : MonoBehaviour, ICellGround
             CurrentHexQ = HexSpawnRequest.Q;
             CurrentHexR = HexSpawnRequest.R;
             RegionLayout.Build(seed);
+            Debug.Log($"LocationStream: с карты региона → гекс {CurrentHexQ},{CurrentHexR}");
         }
         else
         {
@@ -104,7 +109,14 @@ public class LocationStream : MonoBehaviour, ICellGround
         EnsureGrid(center);
         Debug.Log($"LocationStream: чанков {_chunks.Count}, старт {CurrentHexQ},{CurrentHexR}, builder={(chunkBuilder != null)}");
         SnapToHex(CurrentHexQ, CurrentHexR);
-        if (HexSpawnRequest.HasRequest) HexSpawnRequest.Clear();
+        if (HexSpawnRequest.HasRequest)
+        {
+            _holdHexFrames = 8;
+            // дорожный PlayerSpawnPoint не должен перебить центр
+            var points = FindObjectsOfType<PlayerSpawnPoint>();
+            for (int i = 0; i < points.Length; i++)
+                if (points[i] != null) points[i].playOnStart = false;
+        }
 
         UpdatePoi();
     }
@@ -146,6 +158,15 @@ public class LocationStream : MonoBehaviour, ICellGround
         if (driveWorld) Begin();
     }
 
+    void LateUpdate()
+    {
+        if (_holdHexFrames <= 0) return;
+        SnapToHex(CurrentHexQ, CurrentHexR);
+        _holdHexFrames--;
+        if (_holdHexFrames == 0 && HexSpawnRequest.HasRequest)
+            HexSpawnRequest.Clear();
+    }
+
     void Update()
     {
         if (!_begun || player == null) return;
@@ -160,7 +181,11 @@ public class LocationStream : MonoBehaviour, ICellGround
         }
 
         // сдвиг окна MapGrid при необходимости
-        if (_grid == null) _grid = FindObjectOfType<MapGrid>();
+        if (_grid == null)
+        {
+            _grid = FindObjectOfType<MapGrid>();
+            if (_grid == null) _grid = GetComponent<MapGrid>();
+        }
         if (_grid != null && _grid.Streaming)
             _grid.UpdateStream(player.position);
 
@@ -201,14 +226,8 @@ public class LocationStream : MonoBehaviour, ICellGround
     {
         float macro = SampleHexHeight(wx, wz);
         float n = Noise(wx, wz, 0.018f, 0f);
-        float n2 = Noise(wx, wz, 0.055f, 17f);
-        float h = macro + (n - 0.5f) * detailNoise + (n2 - 0.5f) * 0.15f;
-        // редкие холмы и овраги
-        float feature = Noise(wx, wz, 0.003f, 40f);
-        if (feature > 0.82f) h += (feature - 0.82f) * 18f;
-        else if (feature < 0.12f) h -= (0.12f - feature) * 14f;
+        float h = macro + (n - 0.5f) * detailNoise;
         // дорога чуть примята и ровнее
-        var hex = WorldToHex(new Vector3(wx, 0f, wz));
         if (IsRoadWorld(wx, wz))
             h = macro * 0.15f + 0.4f;
         return h;
@@ -223,32 +242,45 @@ public class LocationStream : MonoBehaviour, ICellGround
 
     float SampleHexHeight(float wx, float wz)
     {
-        // берём гекс точки и 6 соседей, блендим по расстоянию до центров
+        // терраса: внутри гекса плоская высота, у края — пологий склон только если перепад небольшой
         var center = WorldToHex(new Vector3(wx, 0f, wz));
-        float sum = 0f;
-        float wsum = 0f;
+        float h0 = HexHeight(center.x, center.y);
+        var c0 = HexToWorld(center.x, center.y);
 
-        // сам + кольцо
-        Accumulate(center.x, center.y, wx, wz, ref sum, ref wsum);
+        float bestT = 0f;
+        float bestHn = h0;
+
         for (int i = 0; i < 6; i++)
         {
             var n = HexNeighbor(center.x, center.y, i);
-            Accumulate(n.x, n.y, wx, wz, ref sum, ref wsum);
+            float hn = HexHeight(n.x, n.y);
+            if (Mathf.Abs(hn - h0) > minorDelta) continue;
+
+            var cn = HexToWorld(n.x, n.y);
+            float mx = (c0.x + cn.x) * 0.5f;
+            float mz = (c0.z + cn.z) * 0.5f;
+            float dx = cn.x - c0.x;
+            float dz = cn.z - c0.z;
+            float len = Mathf.Sqrt(dx * dx + dz * dz);
+            if (len < 0.01f) continue;
+            dx /= len; dz /= len;
+
+            // signed: >0 к соседу, <0 внутрь своего гекса. 0 = край.
+            float signed = (wx - mx) * dx + (wz - mz) * dz;
+            float distFromEdge = -signed;
+            if (distFromEdge >= slopeWidth || distFromEdge < 0f) continue;
+
+            float t = 1f - distFromEdge / slopeWidth;
+            t = t * t * (3f - 2f * t); // smoothstep
+            if (t > bestT)
+            {
+                bestT = t;
+                bestHn = hn;
+            }
         }
 
-        return wsum > 0.001f ? sum / wsum : HexHeight(center.x, center.y);
-    }
-
-    void Accumulate(int q, int r, float wx, float wz, ref float sum, ref float wsum)
-    {
-        var c = HexToWorld(q, r);
-        float dx = wx - c.x;
-        float dz = wz - c.z;
-        float d2 = dx * dx + dz * dz;
-        // вес падает к краю гекса
-        float w = 1f / (1f + d2 / (hexSize * hexSize * 0.35f));
-        sum += HexHeight(q, r) * w;
-        wsum += w;
+        // у края — половина пути к соседу (симметрично с той стороны)
+        return Mathf.Lerp(h0, (h0 + bestHn) * 0.5f, bestT);
     }
 
     public float HexHeight(int q, int r)
@@ -291,42 +323,36 @@ public class LocationStream : MonoBehaviour, ICellGround
     {
         float wx = (x + 0.5f) * tileSize;
         float wz = (z + 0.5f) * tileSize;
-        var hex = WorldToHex(new Vector3(wx, 0f, wz));
-        if (!RegionLayout.IsRoadHex(hex.x, hex.y)
-            && hex != RegionLayout.Village && hex != RegionLayout.Temple)
-            return false;
-        // полоса через центр гекса, не весь гекс
-        var center = HexToWorld(hex.x, hex.y);
-        Vector3 dir = RoadDir(hex);
-        float dx = wx - center.x;
-        float dz = wz - center.z;
-        float along = dx * dir.x + dz * dir.z;
-        float side = dx * -dir.z + dz * dir.x;
-        float half = hexSize * 0.55f;
-        return Mathf.Abs(along) < half && Mathf.Abs(side) < roadHalfWidth;
+        var line = RegionLayout.RoadLine(hexSize);
+        if (line == null || line.Count < 2) return false;
+        return DistToPolyline(wx, wz, line) < roadHalfWidth;
     }
 
-    public float roadHalfWidth = 7f;
+    public float roadHalfWidth = 18f;
 
-    Vector3 RoadDir(Vector2Int hex)
+    static float DistToPolyline(float wx, float wz, List<Vector3> line)
     {
-        // направление на соседний дорожный / деревню / храм
-        for (int d = 0; d < 6; d++)
+        float best = float.MaxValue;
+        for (int i = 0; i < line.Count - 1; i++)
         {
-            int nq = hex.x + _dq[d];
-            int nr = hex.y + _dr[d];
-            var n = new Vector2Int(nq, nr);
-            if (n == RegionLayout.Village || n == RegionLayout.Temple || RegionLayout.IsRoadHex(nq, nr))
-            {
-                var a = HexToWorld(hex.x, hex.y);
-                var b = HexToWorld(nq, nr);
-                var dir = b - a;
-                dir.y = 0f;
-                if (dir.sqrMagnitude < 0.01f) break;
-                return dir.normalized;
-            }
+            var a = line[i];
+            var b = line[i + 1];
+            float d = DistToSegment(wx, wz, a.x, a.z, b.x, b.z);
+            if (d < best) best = d;
         }
-        return Vector3.forward;
+        return best;
+    }
+
+    static float DistToSegment(float px, float pz, float ax, float az, float bx, float bz)
+    {
+        float abx = bx - ax, abz = bz - az;
+        float apx = px - ax, apz = pz - az;
+        float ab2 = abx * abx + abz * abz;
+        if (ab2 < 0.0001f) return Mathf.Sqrt(apx * apx + apz * apz);
+        float t = Mathf.Clamp01((apx * abx + apz * abz) / ab2);
+        float dx = px - (ax + abx * t);
+        float dz = pz - (az + abz * t);
+        return Mathf.Sqrt(dx * dx + dz * dz);
     }
 
     static readonly int[] _dq = { 1, 1, 0, -1, -1, 0 };
@@ -371,14 +397,21 @@ public class LocationStream : MonoBehaviour, ICellGround
             Debug.LogError("LocationStream: нет ChunkedTerrainBuilder");
             return;
         }
+        float t0 = Time.realtimeSinceStartup;
         chunkBuilder.tileSize = tileSize;
         int cs = Mathf.Max(4, chunkCells);
         var go = chunkBuilder.BuildStreamChunk(sx, sz, (x, z) => Height(x, z), cs);
-        if (go == null) return;
+        if (go == null)
+        {
+            Debug.LogWarning($"[AF.Load] LocationStream.BuildChunk {sx},{sz} вернул null");
+            return;
+        }
         _chunks[new Vector2Int(sx, sz)] = new Chunk { go = go, sx = sx, sz = sz };
         StampRoad(sx, sz, go.transform);
         if (nature != null && nature.IsReady)
             nature.PlaceStreamSector(sx, sz);
+        float ms = (Time.realtimeSinceStartup - t0) * 1000f;
+        Debug.Log($"[AF.Load] LocationStream.BuildChunk {sx},{sz} {ms:0.0}ms chunks={_chunks.Count}");
     }
 
     void StampRoad(int sx, int sz, Transform parent)
@@ -476,7 +509,7 @@ public class LocationStream : MonoBehaviour, ICellGround
         return HexRound(q, r);
     }
 
-    Vector3 HexToWorld(int q, int r)
+    public Vector3 HexToWorld(int q, int r)
     {
         float x = hexSize * (Mathf.Sqrt(3f) * q + Mathf.Sqrt(3f) * 0.5f * r);
         float z = hexSize * (1.5f * r);
