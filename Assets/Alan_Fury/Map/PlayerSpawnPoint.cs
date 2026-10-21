@@ -53,11 +53,27 @@ public class PlayerSpawnPoint : MonoBehaviour
     void Start()
     {
         if (!playOnStart) return;
+        // Пришли с карты региона — центр гекса ставит LocationStream. Дорогу не трогать.
+        HexSpawnRequest.TryRestore();
+        if (HexSpawnRequest.HasRequest)
+        {
+            playOnStart = false;
+            enabled = false;
+            return;
+        }
         Spawn(player, out _, out _);
     }
 
     public void Spawn(Transform actor, out Vector3 position, out Quaternion rotation)
     {
+        // Запрос с RegionMap — не перебивать центр выбранного гекса дорогой.
+        HexSpawnRequest.TryRestore();
+        if (HexSpawnRequest.HasRequest)
+        {
+            position = actor != null ? actor.position : Vector3.zero;
+            rotation = actor != null ? actor.rotation : Quaternion.identity;
+            return;
+        }
         Vector3 pos = transform.position;
         if (randomRadius > 0.01f)
         {

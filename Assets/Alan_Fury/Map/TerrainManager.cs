@@ -27,6 +27,7 @@ public class TerrainManager : MonoBehaviour
     public FogPlacer fogPlacer;                         // очаги тумана на карте
     public Pathfinder pathfinder;                       // сетка проходимости для AI (строится после деревьев)
     public MapBoundary mapBoundary;                     // мягкая граница карты (пересчёт после генерации)
+    public LocationStream locationStream;               // локация без полной сетки: хаб и дорога А→Б
 
     [Header("Размер карты")]
     [Tooltip("Пишется в HeightMapGenerator перед генерацией. 300×800 клеток, тайл 4 м = 1.2×3.2 км.")]
@@ -59,6 +60,28 @@ public class TerrainManager : MonoBehaviour
 
     void Start()
     {
+        if (locationStream == null) locationStream = GetComponent<LocationStream>();
+        // Гекс-режим: LocationStream сам строит чанки вокруг игрока от карты регионов.
+        // Старая квадратная заливка (HeightMapGenerator, MapLayout, hub/road) не запускается.
+        if (locationStream != null && locationStream.enabled && locationStream.driveWorld)
+        {
+            AutoAssignComponents();
+            if (mapBoundary != null) mapBoundary.enabled = false;
+            if (mapGrid != null)
+            {
+                mapGrid.streamGround = locationStream;
+            }
+            if (heightGenerator != null)
+                heightGenerator.BindStream(locationStream);
+            locationStream.Begin();
+            if (mapGrid != null)
+            {
+                var p = FindObjectOfType<PlayerMovement3D>();
+                if (p != null) mapGrid.BuildStream(p.transform.position);
+            }
+            Debug.Log("[TerrainManager] Hex stream active — old square map skipped.");
+            return;
+        }
         if (generateOnStart) GenerateAll();
     }
 
@@ -202,6 +225,7 @@ public class TerrainManager : MonoBehaviour
         if (fogPlacer == null) fogPlacer = GetComponent<FogPlacer>();
         if (pathfinder == null) pathfinder = GetComponent<Pathfinder>();
         if (mapBoundary == null) mapBoundary = GetComponent<MapBoundary>();
+        if (locationStream == null) locationStream = GetComponent<LocationStream>();
 
         if (mapGrid != null)
         {

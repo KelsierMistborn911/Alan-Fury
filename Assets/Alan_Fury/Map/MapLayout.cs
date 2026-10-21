@@ -618,6 +618,15 @@ public class MapLayout : MonoBehaviour
     {
         if (!showZoneMarkup) return;
         KillZoneMarkupObject();
+
+        var stream = GetComponent<LocationStream>();
+        if (stream == null) stream = FindObjectOfType<LocationStream>();
+        if (stream != null && stream.driveWorld)
+        {
+            DrawHexZones(stream);
+            return;
+        }
+
         EnsureZones();
         if (zones == null) return;
         CacheZoneRects();
@@ -629,6 +638,63 @@ public class MapLayout : MonoBehaviour
         DrawZoneSheet(forestRects, forestGizmoColor, ts);
         DrawZoneSheet(thicketRects, thicketGizmoColor, ts);
         DrawZoneSheet(clearingRects, clearingGizmoColor, ts);
+    }
+
+    void DrawHexZones(LocationStream stream)
+    {
+        RegionLayout.Build(stream.seed);
+        float size = stream.hexSize > 1f ? stream.hexSize : 100f;
+        int radius = 6;
+        int cq = stream.CurrentHexQ;
+        int cr = stream.CurrentHexR;
+        for (int dq = -radius; dq <= radius; dq++)
+        for (int dr = -radius; dr <= radius; dr++)
+        {
+            int q = cq + dq;
+            int r = cr + dr;
+            int dist = (Mathf.Abs(dq) + Mathf.Abs(dr) + Mathf.Abs(dq + dr)) / 2;
+            if (dist > radius) continue;
+            var zone = RegionLayout.ZoneForHex(q, r);
+            bool road = RegionLayout.IsRoadHex(q, r);
+            var col = HexZoneColor(zone, road);
+            var center = HexToWorld(q, r, size);
+            center.y = 0.2f;
+            DrawHexFoot(center, size * 0.92f, col);
+        }
+    }
+
+    static Color HexZoneColor(NaturePlacement.Zone z, bool road)
+    {
+        if (road) return new Color(0.45f, 0.36f, 0.22f, 0.35f);
+        switch (z)
+        {
+            case NaturePlacement.Zone.Grove: return new Color(0.55f, 0.78f, 0.35f, 0.28f);
+            case NaturePlacement.Zone.Thicket: return new Color(0.08f, 0.22f, 0.1f, 0.4f);
+            case NaturePlacement.Zone.Clearing: return new Color(0.75f, 0.72f, 0.4f, 0.3f);
+            default: return new Color(0.22f, 0.48f, 0.22f, 0.25f);
+        }
+    }
+
+    static Vector3 HexToWorld(int q, int r, float size)
+    {
+        float x = size * (Mathf.Sqrt(3f) * q + Mathf.Sqrt(3f) * 0.5f * r);
+        float z = size * (1.5f * r);
+        return new Vector3(x, 0f, z);
+    }
+
+    static void DrawHexFoot(Vector3 center, float size, Color color)
+    {
+        UnityEditor.Handles.color = color;
+        var pts = new Vector3[6];
+        for (int i = 0; i < 6; i++)
+        {
+            float a = i * Mathf.PI * 2f / 6f + Mathf.PI / 6f;
+            pts[i] = center + new Vector3(Mathf.Cos(a) * size, 0f, Mathf.Sin(a) * size);
+        }
+        UnityEditor.Handles.DrawSolidRectangleWithOutline(
+            new[] { pts[0], pts[1], pts[2], pts[3] }, color, color);
+        UnityEditor.Handles.DrawSolidRectangleWithOutline(
+            new[] { pts[3], pts[4], pts[5], pts[0] }, color, color);
     }
 
     private void DrawZoneSheet(List<RectInt> rects, Color color, float ts)

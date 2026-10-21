@@ -1,10 +1,10 @@
-﻿using UnityEngine;
+using UnityEngine;
 using UnityEngine.Rendering;
 using System.Collections.Generic;
 
 /// <summary>
-/// Отдельное поле травы: меш только из допущенных клеток + материал Dynamic Grass FX / Nature/GrassField.
-/// Зоны читает у NaturePlacement. На клетки деревьев не ставится.
+/// Поле травы чанками секторов, как NaturePlacement.
+/// Меш сектора — только допущенные клетки + материал Dynamic Grass FX / Nature/GrassField.
 /// Не слой NaturePlacement.Grass и не SpriteVegetationPlacer.
 /// </summary>
 public class GrassField : MonoBehaviour
@@ -14,7 +14,6 @@ public class GrassField : MonoBehaviour
     public ChunkedTerrainBuilder terrainBuilder;
     public MapGrid mapGrid;
     public NaturePlacement naturePlacement;
-    public MapLayout mapLayout;
 
     [Header("Материал пакета")]
     [Tooltip("Материал из Dynamic Grass FX после Import.")]
@@ -25,7 +24,6 @@ public class GrassField : MonoBehaviour
     public int skipBorderCells = 2;
     [Tooltip("Пропуск клетки, если размах высот углов больше этого (м).")]
     public float maxSlope = 1.6f;
-    public int chunkSize = 10;
     [Tooltip("На сколько резать клетку. 4 = квады ~1м, плотность шейдера не упирается в лимит GS.")]
     [Range(1, 6)] public int cellSubdiv = 2;
 
@@ -56,6 +54,12 @@ public class GrassField : MonoBehaviour
     public float minForwardSpeed = 1.2f;
     [Range(0f, 1f)] public float forwardDot = 0.25f;
 
+    [Header("Стриминг")]
+    [Tooltip("Как NatureRenderer.streamCheckEveryNFrames.")]
+    public int streamCheckEveryNFrames = 20;
+    [Tooltip("За сколько метров дальше drawRadius держать сектор.")]
+    public float unloadExtra = 25f;
+
     [Header("Отступ от тени / деревьев")]
     [Tooltip("Круг вокруг якоря дерева, не вырез клетки.")]
     public bool useTreeCircles = true;
@@ -64,7 +68,7 @@ public class GrassField : MonoBehaviour
     public bool skipWater = true;
     public float waterLevel = 0f;
     public bool skipRoads = true;
-    [Tooltip("Только клетки, уже помеченные Tree в MapGrid. На старте сектор деревьев ещё не загружен.")]
+    [Tooltip("Клетка с флагом Tree в MapGrid. Сектор деревьев должен быть уже загружен.")]
     public bool skipUnderTrees = true;
 
     [Header("Зоны (как Nature, если naturePlacement задан)")]
@@ -81,11 +85,21 @@ public class GrassField : MonoBehaviour
     public ShadowCastingMode shadowCasting = ShadowCastingMode.Off;
     public bool receiveShadows = true;
 
-    public bool IsBuilt => _root != null && _root.childCount > 0;
+    public bool IsBuilt => _sectors.Count > 0;
+
+    private class SectorMesh
+    {
+        public Mesh mesh;
+        public GameObject go;
+        public MeshRenderer renderer;
+        public int treeStamp;
+    }
 
     private Transform _root;
-    private readonly List<Mesh> _owned = new List<Mesh>();
+    private readonly Dictionary<Vector2Int, SectorMesh> _sectors = new Dictionary<Vector2Int, SectorMesh>();
     private readonly List<MeshRenderer> _renderers = new List<MeshRenderer>();
+    private readonly List<Vector2Int> _toUnload = new List<Vector2Int>();
+    private readonly List<Vector2> _sectorTrees = new List<Vector2>(64);
     private MaterialPropertyBlock _block;
     private const int StampCount = 8;
     private readonly Vector4[] _stamps = new Vector4[StampCount];
@@ -95,9 +109,7 @@ public class GrassField : MonoBehaviour
     private Vector3 _lastPlayerPos;
     private bool _hasLastPlayer;
     private float _nextStampTime;
-    private float[,] _open;
-    private List<Vector2> _trees;
-    private int _w, _d, _cs, _border, _div, _chunksX, _chunksZ;
+    private int _w, _d, _border, _div, _sectorSize;
     private float _ts;
     private Vector3 _origin;
     private bool _prepared;
@@ -108,28 +120,36 @@ public class GrassField : MonoBehaviour
 
     private void Start()
     {
-        if (!IsBuilt && heightSource != null && heightSource.isGenerated && grassMaterial != null)
-            Build();
+        TryPrepare();
     }
 
     [ContextMenu("Build")]
     public void Build()
     {
-        if (!ResolveSources()) return;
+        if (!TryPrepare())
+        {
+            Debug.LogError("GrassField: HeightMap не готов.");
+            return;
+        }
         if (grassMaterial == null)
         {
             Debug.LogWarning("GrassField: нет grassMaterial — импортируйте Dynamic Grass FX и перетащите материал.");
             return;
         }
-
-        Clear();
-        if (!PrepareCache()) return;
-        BakeAll();
+        UpdateStreaming();
     }
 
     [ContextMenu("Clear")]
     public void Clear()
     {
+        _toUnload.Clear();
+        foreach (var key in _sectors.Keys)
+            _toUnload.Add(key);
+        for (int i = 0; i < _toUnload.Count; i++)
+            UnloadSector(_toUnload[i]);
+        _sectors.Clear();
+        _renderers.Clear();
+
         if (_root != null)
         {
             if (Application.isPlaying) Destroy(_root.gameObject);
@@ -144,62 +164,119 @@ public class GrassField : MonoBehaviour
             else DestroyImmediate(leftover.gameObject);
         }
 
-        for (int i = 0; i < _owned.Count; i++)
-        {
-            if (_owned[i] == null) continue;
-            if (Application.isPlaying) Destroy(_owned[i]);
-            else DestroyImmediate(_owned[i]);
-        }
-        _owned.Clear();
-        _renderers.Clear();
         _prepared = false;
-        _open = null;
     }
 
     private void LateUpdate()
     {
-        if (_renderers.Count == 0) return;
+        if (!_prepared && !TryPrepare()) return;
+        if (grassMaterial == null) return;
+
         ResolvePlayer();
+        if (Time.frameCount % Mathf.Max(1, streamCheckEveryNFrames) == 0)
+            UpdateStreaming();
+
+        if (_renderers.Count == 0) return;
         TickStamps();
         FillBlock();
-        for (int i = 0; i < _renderers.Count; i++)
+        // штампы стареют каждый кадр, но SetPropertyBlock на все секторы — дорого. Раз в 2 кадра достаточно.
+        if ((Time.frameCount & 1) == 0)
         {
-            if (_renderers[i] != null)
-                _renderers[i].SetPropertyBlock(_block);
+            for (int i = 0; i < _renderers.Count; i++)
+            {
+                if (_renderers[i] != null)
+                    _renderers[i].SetPropertyBlock(_block);
+            }
         }
     }
 
-    private bool PrepareCache()
+    private bool TryPrepare()
     {
+        if (_prepared) return true;
+        if (heightSource == null) heightSource = GetComponent<HeightMapGenerator>();
+        if (terrainBuilder == null) terrainBuilder = GetComponent<ChunkedTerrainBuilder>();
+        if (mapGrid == null) mapGrid = GetComponent<MapGrid>();
+        if (naturePlacement == null) naturePlacement = GetComponent<NaturePlacement>();
+        if (natureRenderer == null) natureRenderer = GetComponent<NatureRenderer>();
+        if (heightSource == null || !heightSource.isGenerated) return false;
+
         _w = heightSource.width;
         _d = heightSource.depth;
         _ts = terrainBuilder != null ? terrainBuilder.tileSize : 4f;
         _origin = new Vector3(-_w * _ts * 0.5f, 0f, -_d * _ts * 0.5f);
-        _cs = Mathf.Max(1, terrainBuilder != null ? terrainBuilder.chunkSize : chunkSize);
         _border = Mathf.Max(0, skipBorderCells);
         _div = Mathf.Max(1, cellSubdiv);
-        _chunksX = Mathf.CeilToInt((float)_w / _cs);
-        _chunksZ = Mathf.CeilToInt((float)_d / _cs);
+        _sectorSize = naturePlacement != null ? Mathf.Max(1, naturePlacement.sectorSize) : 16;
         EnsureRoot();
-        if (_trees == null) _trees = new List<Vector2>(256);
-        else _trees.Clear();
-        CollectTreePoints(_trees, _w, _d, _ts, _origin);
-        _open = BuildOpennessField();
         _prepared = true;
-        FillBlock();
         return true;
     }
 
-    private void BakeAll()
+    private void UpdateStreaming()
     {
+        if (!_prepared || grassMaterial == null) return;
+        ResolvePlayer();
+        if (player == null) return;
+
+        if (naturePlacement != null && naturePlacement.IsReady)
+            naturePlacement.UpdateStreaming(player.position);
+
+        float sectorWorld = Mathf.Max(0.01f, _sectorSize * _ts);
+        Vector3 playerLocal = terrainBuilder != null
+            ? terrainBuilder.WorldToMapLocal(player.position)
+            : player.position;
+        int pcx = Mathf.FloorToInt((playerLocal.x - _origin.x) / sectorWorld);
+        int pcz = Mathf.FloorToInt((playerLocal.z - _origin.z) / sectorWorld);
+
+        if (matchTreeRadius && natureRenderer != null)
+            drawRadius = natureRenderer.drawRadius;
+        float loadMeters = Mathf.Max(drawRadius, 40f);
+        int loadR = Mathf.Max(1, Mathf.CeilToInt(loadMeters / sectorWorld));
+        int unloadR = Mathf.Max(loadR + 1, Mathf.CeilToInt((loadMeters + unloadExtra) / sectorWorld));
+
+        for (int sx = pcx - loadR; sx <= pcx + loadR; sx++)
+        {
+            for (int sz = pcz - loadR; sz <= pcz + loadR; sz++)
+            {
+                if (sx < 0 || sz < 0 || sx * _sectorSize >= _w || sz * _sectorSize >= _d) continue;
+                var key = new Vector2Int(sx, sz);
+                int stamp = TreeStamp(sx, sz);
+                if (_sectors.TryGetValue(key, out var existing))
+                {
+                    if (existing.treeStamp == stamp) continue;
+                    UnloadSector(key);
+                }
+                BakeSector(sx, sz, stamp);
+            }
+        }
+
+        _toUnload.Clear();
+        foreach (var key in _sectors.Keys)
+        {
+            if (Mathf.Abs(key.x - pcx) > unloadR || Mathf.Abs(key.y - pcz) > unloadR)
+                _toUnload.Add(key);
+        }
+        for (int i = 0; i < _toUnload.Count; i++)
+            UnloadSector(_toUnload[i]);
+    }
+
+    private void BakeSector(int sx, int sz, int treeStamp)
+    {
+        float t0 = Time.realtimeSinceStartup;
+        int x0 = sx * _sectorSize;
+        int z0 = sz * _sectorSize;
+        int x1 = Mathf.Min(_w, x0 + _sectorSize);
+        int z1 = Mathf.Min(_d, z0 + _sectorSize);
+        CollectSectorTrees(x0, z0, x1, z1);
+
         _verts.Clear();
         _tris.Clear();
         _uvs.Clear();
         _cols.Clear();
 
-        for (int x = 0; x < _w; x++)
+        for (int x = x0; x < x1; x++)
         {
-            for (int z = 0; z < _d; z++)
+            for (int z = z0; z < z1; z++)
             {
                 if (x < _border || z < _border || x >= _w - _border || z >= _d - _border)
                     continue;
@@ -212,30 +289,30 @@ public class GrassField : MonoBehaviour
                 if (Mathf.Max(Mathf.Max(h00, h10), Mathf.Max(h11, h01)) - Mathf.Min(Mathf.Min(h00, h10), Mathf.Min(h11, h01)) > maxSlope)
                     continue;
 
-                int x1c = Mathf.Min(x + 1, _w);
-                int z1c = Mathf.Min(z + 1, _d);
-                float o00 = _open[x, z];
-                float o10 = _open[x1c, z];
-                float o11 = _open[x1c, z1c];
-                float o01 = _open[x, z1c];
+                float mapX = _origin.x + x * _ts;
+                float mapZ = _origin.z + z * _ts;
+                float o00 = OpenAt(mapX, mapZ);
+                float o10 = OpenAt(mapX + _ts, mapZ);
+                float o11 = OpenAt(mapX + _ts, mapZ + _ts);
+                float o01 = OpenAt(mapX, mapZ + _ts);
                 float zm = Mathf.Lerp(0.35f, 1f, GrassDensity(ResolveZone(x, z)));
                 o00 *= zm; o10 *= zm; o11 *= zm; o01 *= zm;
                 if (o00 + o10 + o11 + o01 < 0.02f) continue;
 
                 float yOff = heightOffset;
-                for (int sx = 0; sx < _div; sx++)
+                for (int ix = 0; ix < _div; ix++)
                 {
-                    for (int sz = 0; sz < _div; sz++)
+                    for (int iz = 0; iz < _div; iz++)
                     {
-                        float u0 = sx / (float)_div;
-                        float v0 = sz / (float)_div;
-                        float u1 = (sx + 1) / (float)_div;
-                        float v1 = (sz + 1) / (float)_div;
+                        float u0 = ix / (float)_div;
+                        float v0 = iz / (float)_div;
+                        float u1 = (ix + 1) / (float)_div;
+                        float v1 = (iz + 1) / (float)_div;
                         int i = _verts.Count;
-                        _verts.Add(ToMesh(_origin.x + (x + u0) * _ts, Hlerp(h00, h10, h01, h11, u0, v0) + yOff, _origin.z + (z + v0) * _ts));
-                        _verts.Add(ToMesh(_origin.x + (x + u1) * _ts, Hlerp(h00, h10, h01, h11, u1, v0) + yOff, _origin.z + (z + v0) * _ts));
-                        _verts.Add(ToMesh(_origin.x + (x + u1) * _ts, Hlerp(h00, h10, h01, h11, u1, v1) + yOff, _origin.z + (z + v1) * _ts));
-                        _verts.Add(ToMesh(_origin.x + (x + u0) * _ts, Hlerp(h00, h10, h01, h11, u0, v1) + yOff, _origin.z + (z + v1) * _ts));
+                        _verts.Add(ToMesh(mapX + u0 * _ts, Hlerp(h00, h10, h01, h11, u0, v0) + yOff, mapZ + v0 * _ts));
+                        _verts.Add(ToMesh(mapX + u1 * _ts, Hlerp(h00, h10, h01, h11, u1, v0) + yOff, mapZ + v0 * _ts));
+                        _verts.Add(ToMesh(mapX + u1 * _ts, Hlerp(h00, h10, h01, h11, u1, v1) + yOff, mapZ + v1 * _ts));
+                        _verts.Add(ToMesh(mapX + u0 * _ts, Hlerp(h00, h10, h01, h11, u0, v1) + yOff, mapZ + v1 * _ts));
                         _uvs.Add(new Vector2(u0, v0));
                         _uvs.Add(new Vector2(u1, v0));
                         _uvs.Add(new Vector2(u1, v1));
@@ -251,34 +328,150 @@ public class GrassField : MonoBehaviour
             }
         }
 
-        if (_verts.Count == 0)
+        var entry = new SectorMesh { treeStamp = treeStamp };
+        if (_verts.Count > 0)
         {
-            Debug.LogWarning("GrassField: меш пустой — ни одна клетка не прошла фильтр.");
-            return;
+            var mesh = new Mesh();
+            mesh.name = "GrassField_" + sx + "_" + sz;
+            mesh.indexFormat = _verts.Count > 65000 ? IndexFormat.UInt32 : IndexFormat.UInt16;
+            mesh.SetVertices(_verts);
+            mesh.SetTriangles(_tris, 0);
+            mesh.SetUVs(0, _uvs);
+            mesh.SetColors(_cols);
+            mesh.RecalculateNormals();
+            mesh.RecalculateBounds();
+
+            var go = new GameObject(mesh.name);
+            go.transform.SetParent(_root, false);
+            var mf = go.AddComponent<MeshFilter>();
+            mf.sharedMesh = mesh;
+            var mr = go.AddComponent<MeshRenderer>();
+            mr.sharedMaterial = grassMaterial;
+            mr.shadowCastingMode = shadowCasting;
+            mr.receiveShadows = receiveShadows;
+            if (_block != null) mr.SetPropertyBlock(_block);
+            _renderers.Add(mr);
+
+            entry.mesh = mesh;
+            entry.go = go;
+            entry.renderer = mr;
+        }
+        _sectors[new Vector2Int(sx, sz)] = entry;
+        float ms = (Time.realtimeSinceStartup - t0) * 1000f;
+        Debug.Log($"[AF.Load] GrassField.BakeSector {sx},{sz} {ms:0.0}ms verts={_verts.Count}");
+    }
+
+    private void UnloadSector(Vector2Int key)
+    {
+        if (!_sectors.TryGetValue(key, out var s)) return;
+        if (s.renderer != null) _renderers.Remove(s.renderer);
+        if (s.go != null)
+        {
+            if (Application.isPlaying) Destroy(s.go);
+            else DestroyImmediate(s.go);
+        }
+        if (s.mesh != null)
+        {
+            if (Application.isPlaying) Destroy(s.mesh);
+            else DestroyImmediate(s.mesh);
+        }
+        _sectors.Remove(key);
+    }
+
+    private int TreeStamp(int sx, int sz)
+    {
+        if (!useTreeCircles || mapGrid == null || !mapGrid.IsReady) return 0;
+        int x0 = sx * _sectorSize;
+        int z0 = sz * _sectorSize;
+        int margin = Mathf.CeilToInt((trunkRadius + fadeMeters) / Mathf.Max(0.01f, _ts));
+        int xa = Mathf.Max(0, x0 - margin);
+        int za = Mathf.Max(0, z0 - margin);
+        int xb = Mathf.Min(_w - 1, x0 + _sectorSize + margin);
+        int zb = Mathf.Min(_d - 1, z0 + _sectorSize + margin);
+        int n = 0;
+        for (int x = xa; x <= xb; x++)
+            for (int z = za; z <= zb; z++)
+                if (mapGrid.HasFlag(x, z, MapGrid.OccupancyFlags.Tree))
+                    n++;
+        return n;
+    }
+
+    private void CollectSectorTrees(int x0, int z0, int x1, int z1)
+    {
+        _sectorTrees.Clear();
+        if (!useTreeCircles) return;
+
+        float margin = trunkRadius + fadeMeters;
+        if (naturePlacement != null && naturePlacement.IsReady && naturePlacement.allVariants != null)
+        {
+            float sectorWorld = Mathf.Max(0.01f, _sectorSize * _ts);
+            int ms = Mathf.CeilToInt(margin / sectorWorld);
+            int sx0 = x0 / _sectorSize - ms;
+            int sz0 = z0 / _sectorSize - ms;
+            int sx1 = (x1 - 1) / _sectorSize + ms;
+            int sz1 = (z1 - 1) / _sectorSize + ms;
+            var variants = naturePlacement.allVariants;
+            var layers = naturePlacement.variantLayer;
+            for (int vi = 0; vi < variants.Count; vi++)
+            {
+                if (layers == null || vi >= layers.Count || !layers[vi].IsTree) continue;
+                var lists = variants[vi].sectorLists;
+                if (lists == null) continue;
+                for (int sx = sx0; sx <= sx1; sx++)
+                {
+                    for (int sz = sz0; sz <= sz1; sz++)
+                    {
+                        if (!lists.TryGetValue(new Vector2Int(sx, sz), out var list) || list == null) continue;
+                        for (int i = 0; i < list.Count; i++)
+                        {
+                            Vector3 p = list[i].GetColumn(3);
+                            _sectorTrees.Add(new Vector2(p.x, p.z));
+                        }
+                    }
+                }
+            }
         }
 
-        var mesh = new Mesh();
-        mesh.name = "GrassField";
-        mesh.indexFormat = IndexFormat.UInt32;
-        mesh.SetVertices(_verts);
-        mesh.SetTriangles(_tris, 0);
-        mesh.SetUVs(0, _uvs);
-        mesh.SetColors(_cols);
-        mesh.RecalculateNormals();
-        mesh.RecalculateBounds();
-        _owned.Add(mesh);
+        if (_sectorTrees.Count > 0 || mapGrid == null || !mapGrid.IsReady) return;
+        int m = Mathf.CeilToInt(margin / Mathf.Max(0.01f, _ts));
+        int xa = Mathf.Max(0, x0 - m);
+        int za = Mathf.Max(0, z0 - m);
+        int xb = Mathf.Min(_w - 1, x1 + m);
+        int zb = Mathf.Min(_d - 1, z1 + m);
+        for (int x = xa; x <= xb; x++)
+        {
+            for (int z = za; z <= zb; z++)
+            {
+                if (!mapGrid.HasFlag(x, z, MapGrid.OccupancyFlags.Tree)) continue;
+                Vector3 w = WorldOf(_origin.x + (x + 0.5f) * _ts, 0f, _origin.z + (z + 0.5f) * _ts);
+                _sectorTrees.Add(new Vector2(w.x, w.z));
+            }
+        }
+    }
 
-        var go = new GameObject("GrassFieldMesh");
-        go.transform.SetParent(_root, false);
-        var mf = go.AddComponent<MeshFilter>();
-        mf.sharedMesh = mesh;
-        var mr = go.AddComponent<MeshRenderer>();
-        mr.sharedMaterial = grassMaterial;
-        mr.SetPropertyBlock(_block);
-        mr.shadowCastingMode = shadowCasting;
-        mr.receiveShadows = receiveShadows;
-        _renderers.Add(mr);
-        Debug.Log($"GrassField: mesh verts={_verts.Count} shader={(grassMaterial.shader != null ? grassMaterial.shader.name : "null")}");
+    private float OpenAt(float mapX, float mapZ)
+    {
+        if (!useTreeCircles || _sectorTrees.Count == 0) return 1f;
+        Vector3 w = WorldOf(mapX, 0f, mapZ);
+        float best = float.MaxValue;
+        for (int i = 0; i < _sectorTrees.Count; i++)
+        {
+            float dx = w.x - _sectorTrees[i].x;
+            float dz = w.z - _sectorTrees[i].y;
+            float d2 = dx * dx + dz * dz;
+            if (d2 < best) best = d2;
+        }
+        float dist = Mathf.Sqrt(best);
+        float inner = Mathf.Max(0.2f, trunkRadius);
+        float fade = Mathf.Max(0.2f, fadeMeters);
+        return Mathf.Clamp01((dist - inner) / fade);
+    }
+
+    private Vector3 WorldOf(float x, float y, float z)
+    {
+        return terrainBuilder != null
+            ? terrainBuilder.MapLocalToWorld(new Vector3(x, y, z))
+            : new Vector3(x, y, z);
     }
 
     private void ResolvePlayer()
@@ -414,69 +607,6 @@ public class GrassField : MonoBehaviour
         return NaturePlacement.Zone.Forest;
     }
 
-    private void CollectTreePoints(List<Vector2> dst, int w, int d, float ts, Vector3 origin)
-    {
-        for (int x = 0; x < w; x++)
-        {
-            for (int z = 0; z < d; z++)
-            {
-                bool tree = false;
-                if (mapGrid != null && mapGrid.IsReady && mapGrid.HasFlag(x, z, MapGrid.OccupancyFlags.Tree))
-                    tree = true;
-                if (!tree) continue;
-                dst.Add(new Vector2(origin.x + (x + 0.5f) * ts, origin.z + (z + 0.5f) * ts));
-            }
-        }
-    }
-
-    private float[,] BuildOpennessField()
-    {
-        var dist = new float[_w + 1, _d + 1];
-        for (int x = 0; x <= _w; x++)
-            for (int z = 0; z <= _d; z++)
-                dist[x, z] = 999f;
-
-        var q = new Queue<Vector2Int>(_w * 4);
-        if (useTreeCircles && _trees != null)
-        {
-            for (int i = 0; i < _trees.Count; i++)
-            {
-                int ix = Mathf.Clamp(Mathf.RoundToInt((_trees[i].x - _origin.x) / _ts), 0, _w);
-                int iz = Mathf.Clamp(Mathf.RoundToInt((_trees[i].y - _origin.z) / _ts), 0, _d);
-                if (dist[ix, iz] > 0f)
-                {
-                    dist[ix, iz] = 0f;
-                    q.Enqueue(new Vector2Int(ix, iz));
-                }
-            }
-        }
-
-        int[] ox = { 1, -1, 0, 0 };
-        int[] oz = { 0, 0, 1, -1 };
-        while (q.Count > 0)
-        {
-            var c = q.Dequeue();
-            float nd = dist[c.x, c.y] + _ts;
-            for (int k = 0; k < 4; k++)
-            {
-                int nx = c.x + ox[k];
-                int nz = c.y + oz[k];
-                if (nx < 0 || nz < 0 || nx > _w || nz > _d) continue;
-                if (nd >= dist[nx, nz]) continue;
-                dist[nx, nz] = nd;
-                q.Enqueue(new Vector2Int(nx, nz));
-            }
-        }
-
-        float inner = Mathf.Max(0.2f, trunkRadius);
-        float fade = Mathf.Max(0.2f, fadeMeters);
-        var open = new float[_w + 1, _d + 1];
-        for (int x = 0; x <= _w; x++)
-            for (int z = 0; z <= _d; z++)
-                open[x, z] = Mathf.Clamp01((dist[x, z] - inner) / fade);
-        return open;
-    }
-
     private static Color Oc(float o)
     {
         o = Mathf.Clamp01(o);
@@ -497,23 +627,6 @@ public class GrassField : MonoBehaviour
         return (h ^ (h >> 16)) * (1f / 4294967295f);
     }
 
-    private bool ResolveSources()
-    {
-        if (heightSource == null) heightSource = GetComponent<HeightMapGenerator>();
-        if (terrainBuilder == null) terrainBuilder = GetComponent<ChunkedTerrainBuilder>();
-        if (mapGrid == null) mapGrid = GetComponent<MapGrid>();
-        if (naturePlacement == null) naturePlacement = GetComponent<NaturePlacement>();
-        if (natureRenderer == null) natureRenderer = GetComponent<NatureRenderer>();
-        if (mapLayout == null) mapLayout = GetComponent<MapLayout>();
-
-        if (heightSource == null || !heightSource.isGenerated)
-        {
-            Debug.LogError("GrassField: HeightMap не готов.");
-            return false;
-        }
-        return true;
-    }
-
     private void EnsureRoot()
     {
         var existing = transform.Find("GrassFields");
@@ -532,9 +645,7 @@ public class GrassField : MonoBehaviour
 
     private Vector3 ToMesh(float x, float y, float z)
     {
-        Vector3 world = terrainBuilder != null
-            ? terrainBuilder.MapLocalToWorld(new Vector3(x, y, z))
-            : new Vector3(x, y, z);
+        Vector3 world = WorldOf(x, y, z);
         return _root != null ? _root.InverseTransformPoint(world) : world;
     }
 }

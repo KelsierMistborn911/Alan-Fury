@@ -38,6 +38,14 @@ public class MapGrid : MonoBehaviour
     [Header("Источники")]
     public HeightMapGenerator heightSource;
     public ChunkedTerrainBuilder chunkedBuilder;
+    public ICellGround streamGround;          // hex-режим: высоты от LocationStream
+
+    [Header("Стрим")]
+    public int streamWindowCells = 256;       // окно вокруг игрока
+    public int streamShiftThreshold = 64;     // сдвиг окна, когда игрок близко к краю
+
+    private int _streamOx, _streamOz;         // абсолютная клетка угла окна
+    private bool _streaming;
 
     [Header("Уровни сетки")]
     [Tooltip("Sector = N×N base-клеток.")]
@@ -125,6 +133,70 @@ public class MapGrid : MonoBehaviour
         _ready = true;
         Debug.Log($"MapGrid: {_w}×{_d} base, sector {ss}→{_sw}×{_sd}, region {rs}→{_rw}×{_rd}, tileSize={_ts}");
     }
+
+    /// <summary>
+    /// Hex-режим: окно клеток вокруг игрока. Высоты из streamGround.
+    /// </summary>
+    public void BuildStream(Vector3 playerWorld)
+    {
+        if (streamGround == null)
+        {
+            Debug.LogError("MapGrid.BuildStream: streamGround не задан");
+            _ready = false;
+            return;
+        }
+        float t0 = Time.realtimeSinceStartup;
+        if (chunkedBuilder == null) chunkedBuilder = GetComponent<ChunkedTerrainBuilder>();
+        _ts = ResolveTileSize();
+        _streaming = true;
+
+        int pcx = Mathf.FloorToInt(playerWorld.x / _ts);
+        int pcz = Mathf.FloorToInt(playerWorld.z / _ts);
+        int half = streamWindowCells / 2;
+        _streamOx = pcx - half;
+        _streamOz = pcz - half;
+        _w = streamWindowCells;
+        _d = streamWindowCells;
+        _origin = new Vector3(_streamOx * _ts, 0f, _streamOz * _ts);
+
+        int n = _w * _d;
+        _flags = new OccupancyFlags[n];
+        _cost = new float[n];
+        _coverMode = new SightCoverMode[n];
+        _coverHeight = new float[n];
+        for (int i = 0; i < n; i++) _cost[i] = 1f;
+
+        int ss = Mathf.Max(1, sectorSize);
+        int rs = Mathf.Max(1, regionSize);
+        _sw = (_w + ss - 1) / ss;
+        _sd = (_d + ss - 1) / ss;
+        _rw = (_w + rs - 1) / rs;
+        _rd = (_d + rs - 1) / rs;
+        _sectorBlocked = new bool[_sw * _sd];
+        _regionBlocked = new bool[_rw * _rd];
+
+        _ready = true;
+        float ms = (Time.realtimeSinceStartup - t0) * 1000f;
+        Debug.Log($"[AF.Load] MapGrid.BuildStream {ms:0.0}ms window {_w}×{_d} at ({_streamOx},{_streamOz}) tile={_ts}");
+    }
+
+    /// <summary>Сдвинуть окно, если игрок ушёл от центра.</summary>
+    public void UpdateStream(Vector3 playerWorld)
+    {
+        if (!_streaming || !_ready) return;
+        int pcx = Mathf.FloorToInt(playerWorld.x / _ts);
+        int pcz = Mathf.FloorToInt(playerWorld.z / _ts);
+        int cx = pcx - _streamOx;
+        int cz = pcz - _streamOz;
+        int margin = streamShiftThreshold;
+        if (cx > margin && cx < _w - margin && cz > margin && cz < _d - margin) return;
+        // пересобрать окно (флаги сбрасываются — природа перегенерирует секторы)
+        BuildStream(playerWorld);
+    }
+
+    public bool Streaming => _streaming;
+    public int StreamOriginX => _streamOx;
+    public int StreamOriginZ => _streamOz;
 
     public void Clear()
     {
@@ -454,9 +526,11 @@ public class MapGrid : MonoBehaviour
     /// <summary>Мировая точка клетки (как Pathfinder: origin + index * tileSize, y = высота).</summary>
     public Vector3 CellToWorld(int cx, int cz)
     {
-        float h = (heightSource != null && heightSource.isGenerated)
-            ? heightSource.GetHeight(Mathf.Clamp(cx, 0, _w - 1), Mathf.Clamp(cz, 0, _d - 1))
-            : 0f;
+        float h = 0f;
+        if (streamGround != null)
+            h = streamGround.Height(_streamOx + cx, _streamOz + cz);
+        else if (heightSource != null && heightSource.isGenerated)
+            h = heightSource.GetHeight(Mathf.Clamp(cx, 0, _w - 1), Mathf.Clamp(cz, 0, _d - 1));
         return new Vector3(_origin.x + cx * _ts, h, _origin.z + cz * _ts);
     }
 

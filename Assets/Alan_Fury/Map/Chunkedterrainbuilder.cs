@@ -19,7 +19,7 @@ public class ChunkedTerrainBuilder : MonoBehaviour
 
     [Header("Склоны / стенки")]
     [Tooltip("Разница высот с соседом ДО этого порога — вертикальная стенка. БОЛЬШЕ порога — плавный скат.")]
-    public float slopeThreshold = 0.2f;
+    public float slopeThreshold = 1.1f;
 
     [Header("Размер чанка (в тайлах)")]
     [Tooltip("10 = каждый чанк покрывает 10×10 тайлов. Для карты 40×40 получится 16 чанков.")]
@@ -491,4 +491,141 @@ public class ChunkedTerrainBuilder : MonoBehaviour
     }
 
     void OnDestroy() => ClearTerrain();
+
+    // =================== Стрим-чанк (гексы) ===================
+
+    /// <summary>
+    /// Один чанк по запросу. Высоты из функции (клетка → метры).
+    /// Координаты мировые: клетка (x,z) → (x*tileSize, z*tileSize).
+    /// Скаты/стенки как в обычном билде, но только внутри этого чанка + бордюр.
+    /// </summary>
+    public GameObject BuildStreamChunk(int chunkX, int chunkZ, System.Func<int, int, float> heightAt, int cells)
+    {
+        cells = Mathf.Max(2, cells);
+        int x0 = chunkX * cells;
+        int z0 = chunkZ * cells;
+        int n = cells + 2; // бордюр для сварки углов
+        var hLocal = new float[n, n];
+        for (int iz = 0; iz < n; iz++)
+        for (int ix = 0; ix < n; ix++)
+            hLocal[ix, iz] = heightAt(x0 + ix - 1, z0 + iz - 1);
+
+        // углы локальных клеток 1..cells (бордюр 0 и n-1 только для соседей)
+        var corner = new float[cells + 1, cells + 1, 4];
+        for (int lx = 0; lx < cells; lx++)
+        for (int lz = 0; lz < cells; lz++)
+            for (int k = 0; k < 4; k++)
+                corner[lx, lz, k] = hLocal[lx + 1, lz + 1];
+
+        WeldLocal(hLocal, corner, cells);
+
+        var verts = new List<Vector3>();
+        var tris = new List<int>();
+        var colors = new List<Color>();
+        var cache = new Dictionary<long, int>();
+
+        for (int lx = 0; lx < cells; lx++)
+        for (int lz = 0; lz < cells; lz++)
+        {
+            int wx = x0 + lx;
+            int wz = z0 + lz;
+            float px0 = wx * tileSize;
+            float px1 = (wx + 1) * tileSize;
+            float pz0 = wz * tileSize;
+            float pz1 = (wz + 1) * tileSize;
+
+            int v00 = GetVert(px0, corner[lx, lz, 0], pz0, verts, colors, cache);
+            int v10 = GetVert(px1, corner[lx, lz, 1], pz0, verts, colors, cache);
+            int v11 = GetVert(px1, corner[lx, lz, 2], pz1, verts, colors, cache);
+            int v01 = GetVert(px0, corner[lx, lz, 3], pz1, verts, colors, cache);
+            tris.Add(v00); tris.Add(v01); tris.Add(v11);
+            tris.Add(v00); tris.Add(v11); tris.Add(v10);
+
+            // стенка на восток, если сосед в чанке и высоты разъехались
+            if (lx + 1 < cells)
+            {
+                float myA = corner[lx, lz, 1], myB = corner[lx, lz, 2];
+                float nbA = corner[lx + 1, lz, 0], nbB = corner[lx + 1, lz, 3];
+                if (Mathf.Abs(myA - nbA) > Eps || Mathf.Abs(myB - nbB) > Eps)
+                {
+                    Color c = StreamColor(Mathf.Min(myA, myB, nbA, nbB));
+                    AddVQuad(new Vector3(px1, myA, pz0), new Vector3(px1, nbA, pz0),
+                             new Vector3(px1, myB, pz1), new Vector3(px1, nbB, pz1), c, verts, tris, colors);
+                }
+            }
+            if (lz + 1 < cells)
+            {
+                float myA = corner[lx, lz, 3], myB = corner[lx, lz, 2];
+                float nbA = corner[lx, lz + 1, 0], nbB = corner[lx, lz + 1, 1];
+                if (Mathf.Abs(myA - nbA) > Eps || Mathf.Abs(myB - nbB) > Eps)
+                {
+                    Color c = StreamColor(Mathf.Min(myA, myB, nbA, nbB));
+                    AddVQuad(new Vector3(px0, nbA, pz1), new Vector3(px0, myA, pz1),
+                             new Vector3(px1, nbB, pz1), new Vector3(px1, myB, pz1), c, verts, tris, colors);
+                }
+            }
+        }
+
+        if (verts.Count == 0) return null;
+
+        EnsureChunksRoot();
+        var go = new GameObject($"Chunk_{chunkX}_{chunkZ}");
+        go.transform.SetParent(chunksRoot, false);
+        go.isStatic = true;
+        int terrainLayer = LayerMask.NameToLayer("Terrain");
+        if (terrainLayer >= 0) go.layer = terrainLayer;
+
+        var mesh = new Mesh { name = go.name, indexFormat = UnityEngine.Rendering.IndexFormat.UInt32 };
+        mesh.SetVertices(verts);
+        mesh.SetTriangles(tris, 0);
+        mesh.SetColors(colors);
+        mesh.RecalculateNormals();
+        mesh.RecalculateBounds();
+        go.AddComponent<MeshFilter>().sharedMesh = mesh;
+        var mr = go.AddComponent<MeshRenderer>();
+        mr.sharedMaterial = terrainMaterial != null
+            ? terrainMaterial
+            : new Material(Shader.Find("Universal Render Pipeline/Lit"));
+        go.AddComponent<MeshCollider>().sharedMesh = mesh;
+        chunks.Add(go);
+        return go;
+    }
+
+    public void ReleaseStreamChunk(GameObject go)
+    {
+        if (go == null) return;
+        chunks.Remove(go);
+        if (Application.isPlaying) Destroy(go);
+        else DestroyImmediate(go);
+    }
+
+    void WeldLocal(float[,] hLocal, float[,,] corner, int cells)
+    {
+        // упрощённая сварка: если соседняя клетка близка — общий угол усредняется
+        for (int lx = 0; lx < cells; lx++)
+        for (int lz = 0; lz < cells; lz++)
+        {
+            float h = hLocal[lx + 1, lz + 1];
+            // SW с левым и нижним
+            corner[lx, lz, 0] = AvgWeld(h, hLocal[lx, lz + 1], hLocal[lx + 1, lz]);
+            corner[lx, lz, 1] = AvgWeld(h, hLocal[lx + 2, lz + 1], hLocal[lx + 1, lz]);
+            corner[lx, lz, 2] = AvgWeld(h, hLocal[lx + 2, lz + 1], hLocal[lx + 1, lz + 2]);
+            corner[lx, lz, 3] = AvgWeld(h, hLocal[lx, lz + 1], hLocal[lx + 1, lz + 2]);
+        }
+    }
+
+    float AvgWeld(float h, float a, float b)
+    {
+        float s = h; int n = 1;
+        if (Welds(h, a)) { s += a; n++; }
+        if (Welds(h, b)) { s += b; n++; }
+        return s / n;
+    }
+
+    Color StreamColor(float h)
+    {
+        float maxH = heightSource != null ? heightSource.maxHeight : 8f;
+        float t = Mathf.InverseLerp(0f, Mathf.Max(0.5f, maxH), h);
+        return Color.Lerp(lowColor, highColor, t);
+    }
 }

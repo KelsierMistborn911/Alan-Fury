@@ -262,6 +262,7 @@ GameObject:
   - component: {fileID: 513820049935331392}
   - component: {fileID: 3702021059671560228}
   - component: {fileID: -768134931306652445}
+  - component: {fileID: 3971391403722877795}
   m_Layer: 6
   m_Name: Player
   m_TagString: Player
@@ -278,7 +279,7 @@ Transform:
   m_GameObject: {fileID: 6846430933918887357}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalPosition: {x: 173.20508, y: 2.0500002, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
@@ -523,7 +524,6 @@ MonoBehaviour:
   heavyChargeThreshold: 0.55
   sheathVisualDelay: 0.35
   combatLingerSeconds: 15
-  battleStepHold: 10
   sheathAfterPeaceSeconds: 0
   combatFaceRange: 10
   parryWindow: 0.25
@@ -560,7 +560,6 @@ MonoBehaviour:
   strikeLead: 0.08
   sweepHitAt: 0.6
   stanceEnterWindup: 0.22
-  stanceSettleDelay: 1
   chainWindupMult: 0.62
   slashFaceOutward: 25
   EnemyLayers:
@@ -651,6 +650,7 @@ MonoBehaviour:
   sweepColor: {r: 1, g: 0.12, b: 0.08, a: 0.42}
   strikeColor: {r: 1, g: 0.92, b: 0.55, a: 0.92}
   strikeWindupColor: {r: 1, g: 0.85, b: 0.2, a: 0.35}
+  readyBladeLength: 1.15
   debugShowZone: 1
   visual: {fileID: 2635667669542674056}
 --- !u!120 &4663724128358875171
@@ -947,7 +947,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d5a57f767e5e46a458fc5d3c628d0cbb, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  GlobalObjectIdHash: 532751515
+  GlobalObjectIdHash: 1352778639
   InScenePlacedSourceGlobalObjectIdHash: 0
   AlwaysReplicateAsRoot: 0
   SynchronizeTransform: 1
@@ -1282,6 +1282,36 @@ MonoBehaviour:
   m_LightCookieSize: {x: 1, y: 1}
   m_LightCookieOffset: {x: 0, y: 0}
   m_SoftShadowQuality: 0
+--- !u!114 &3971391403722877795
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6846430933918887357}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 63a76262ae063aa4986c83e7e805d555, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  player: {fileID: 3200823202175224380}
+  seed: 24011
+  tileSize: 4
+  hexSize: 100
+  chunkCells: 16
+  loadRadiusChunks: 3
+  unloadRadiusChunks: 5
+  chunksPerFrame: 2
+  heightStep: 0.5
+  forestBase: 2.5
+  forestVariation: 1.5
+  detailNoise: 0.6
+  minorDelta: 0.5
+  slopeWidth: 15
+  nature: {fileID: 0}
+  chunkBuilder: {fileID: 0}
+  driveWorld: 1
+  roadHalfWidth: 7
 --- !u!1001 &169118963850245983
 PrefabInstance:
   m_ObjectHideFlags: 0

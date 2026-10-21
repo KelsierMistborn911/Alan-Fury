@@ -1,4 +1,4 @@
-﻿using UnityEngine;
+using UnityEngine;
 using System.Collections.Generic;
 
 /// <summary>
@@ -113,9 +113,12 @@ public class ObjectPlacer : MonoBehaviour
     {
         if (heightSource == null || !heightSource.isGenerated)
         {
-            Debug.LogError("ObjectPlacer: ����� ������������������ HeightMapGenerator!");
+            Debug.LogError("ObjectPlacer: нужен готовый HeightMapGenerator (или BindStream)!");
             return false;
         }
+        // в hex-режиме heightMap-массива нет — ставим вокруг игрока
+        if (heightSource.streamGround != null)
+            return objectTypes.Count > 0;
         if (chunkedBuilder == null)
         {
             Debug.LogError("ObjectPlacer: нужен ChunkedTerrainBuilder!");
@@ -131,12 +134,21 @@ public class ObjectPlacer : MonoBehaviour
 
     private void FetchData()
     {
-        heights = heightSource.heightMap;
-        width = heights.GetLength(0);
-        depth = heights.GetLength(1);
         if (chunkedBuilder == null) chunkedBuilder = GetComponent<ChunkedTerrainBuilder>();
         if (mapGrid == null) mapGrid = GetComponent<MapGrid>();
         tileSize = ResolveTileSize();
+        if (heightSource != null && heightSource.streamGround != null)
+        {
+            // hex: нет квадратного массива
+            width = 0;
+            depth = 0;
+            heights = null;
+            mapOrigin = Vector3.zero;
+            return;
+        }
+        heights = heightSource.heightMap;
+        width = heights.GetLength(0);
+        depth = heights.GetLength(1);
         mapOrigin = new Vector3(-width * tileSize / 2f, 0, -depth * tileSize / 2f);
     }
 
@@ -210,10 +222,20 @@ public class ObjectPlacer : MonoBehaviour
             return;
         }
 
-        // ������ �� ����������� margin ����� ����� ������� ���������
+        // hex-режим: ставим в радиусе вокруг игрока (текущий гекс + запас)
+        bool stream = heightSource != null && heightSource.streamGround != null;
+        Vector3 center = Vector3.zero;
+        float radius = 80f;
+        if (stream)
+        {
+            var p = FindObjectOfType<PlayerMovement3D>();
+            if (p != null) center = p.transform.position;
+            radius = 90f;
+        }
+
         float margin = tileSize * 2;
-        float rangeX = width * tileSize - margin * 2;
-        float rangeZ = depth * tileSize - margin * 2;
+        float rangeX = stream ? radius * 2f : width * tileSize - margin * 2;
+        float rangeZ = stream ? radius * 2f : depth * tileSize - margin * 2;
         if (rangeX <= 0 || rangeZ <= 0)
         {
             Debug.LogWarning($"ObjectPlacer: ����� ������� ���� ��� ��������, margin ������� � 0 ��� '{objType.name}'.");
@@ -234,9 +256,11 @@ public class ObjectPlacer : MonoBehaviour
             if (Random.value > objType.spawnChance)
                 continue;
 
-            float rx = Random.Range(margin, margin + rangeX);
-            float rz = Random.Range(margin, margin + rangeZ);
-            Vector3 worldPos = mapOrigin + new Vector3(rx, 0, rz);
+            float rx = stream ? Random.Range(-radius, radius) : Random.Range(margin, margin + rangeX);
+            float rz = stream ? Random.Range(-radius, radius) : Random.Range(margin, margin + rangeZ);
+            Vector3 worldPos = stream
+                ? center + new Vector3(rx, 0, rz)
+                : mapOrigin + new Vector3(rx, 0, rz);
 
             float h = heightSource.GetHeightAtWorldPos(worldPos, tileSize, mapOrigin);
 

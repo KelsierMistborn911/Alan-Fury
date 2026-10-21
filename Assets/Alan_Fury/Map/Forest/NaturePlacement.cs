@@ -120,6 +120,9 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
     public Vector2 grassClusterOffset = new Vector2(41.2f, 8.7f);
 
     public bool IsReady => _ready;
+    public ICellGround streamGround;
+    /// <summary>Растёт на каждой загрузке/выгрузке сектора. NatureRenderer по нему решает, пересобирать ли списки.</summary>
+    public int StreamStamp { get; private set; }
 
     private bool _ready;
     private readonly HashSet<Vector2Int> _loaded = new HashSet<Vector2Int>();
@@ -264,7 +267,25 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
 
     public void UpdateStreaming(Vector3 playerPos)
     {
-        if (!_ready || heightSource == null || !heightSource.isGenerated || terrainBuilder == null)
+        if (!_ready) return;
+
+        if (streamGround != null)
+        {
+            float tile = terrainBuilder != null ? terrainBuilder.TileSize : 4f;
+            int cells = Mathf.Max(4, sectorSize);
+            int hx = Mathf.FloorToInt(playerPos.x / (tile * cells));
+            int hz = Mathf.FloorToInt(playerPos.z / (tile * cells));
+            int ring = 2;
+            for (int dx = -ring; dx <= ring; dx++)
+            for (int dz = -ring; dz <= ring; dz++)
+            {
+                if (dx * dx + dz * dz > ring * ring + ring) continue;
+                PlaceStreamSector(hx + dx, hz + dz);
+            }
+            return;
+        }
+
+        if (heightSource == null || !heightSource.isGenerated || terrainBuilder == null)
             return;
 
         float ts = terrainBuilder.TileSize;
@@ -288,6 +309,7 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
                 if (sx < 0 || sz < 0 || sx * sectorSize >= w || sz * sectorSize >= d) continue;
                 GenerateSector(sx, sz);
                 _loaded.Add(key);
+                StreamStamp++;
             }
         }
 
@@ -302,6 +324,7 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
             UnloadSector(_toUnload[i].x, _toUnload[i].y);
             _loaded.Remove(_toUnload[i]);
         }
+        if (_toUnload.Count > 0) StreamStamp++;
     }
 
     [ContextMenu("Unload All")]
@@ -312,6 +335,7 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
         for (int i = 0; i < _toUnload.Count; i++)
             UnloadSector(_toUnload[i].x, _toUnload[i].y);
         _loaded.Clear();
+        StreamStamp++;
     }
 
     public bool RemoveInstance(int typeIndex, Vector2Int sector, Vector3 worldPos)
@@ -333,17 +357,48 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
         return false;
     }
 
+    public void PlaceStreamSector(int sx, int sz)
+    {
+        if (streamGround == null) return;
+        if (!_ready) Init();
+        if (!_ready) return;
+        var key = new Vector2Int(sx, sz);
+        if (_loaded.Contains(key)) return;
+        GenerateSector(sx, sz);
+        _loaded.Add(key);
+        StreamStamp++;
+        int n = 0;
+        for (int i = 0; i < allVariants.Count; i++)
+            if (allVariants[i].sectorLists != null && allVariants[i].sectorLists.TryGetValue(key, out var l) && l != null)
+                n += l.Count;
+        if (n == 0 && (StreamStamp % 32) == 1)
+            Debug.Log($"[AF.Load] NaturePlacement сектор {sx},{sz} пуст (stamp={StreamStamp})");
+    }
+
+    public void ReleaseStreamSector(int sx, int sz)
+    {
+        if (!_ready) return;
+        UnloadSector(sx, sz);
+        _loaded.Remove(new Vector2Int(sx, sz));
+        StreamStamp++;
+    }
+
     private void GenerateSector(int sx, int sz)
     {
-        float ts = terrainBuilder.TileSize;
-        int w = heightSource.width;
-        int d = heightSource.depth;
-        Vector3 origin = new Vector3(-w * ts / 2f, 0f, -d * ts / 2f);
+        float t0 = Time.realtimeSinceStartup;
+        float ts = terrainBuilder != null ? terrainBuilder.TileSize : 4f;
+        bool stream = streamGround != null;
+        int w = stream ? int.MaxValue / 4 : heightSource.width;
+        int d = stream ? int.MaxValue / 4 : heightSource.depth;
+        Vector3 origin = stream
+            ? streamGround.CellOrigin
+            : new Vector3(-w * ts / 2f, 0f, -d * ts / 2f);
+        int border = stream ? 0 : borderCells;
 
         int x0 = sx * sectorSize;
         int z0 = sz * sectorSize;
-        int x1 = Mathf.Min(w, x0 + sectorSize);
-        int z1 = Mathf.Min(d, z0 + sectorSize);
+        int x1 = stream ? x0 + sectorSize : Mathf.Min(w, x0 + sectorSize);
+        int z1 = stream ? z0 + sectorSize : Mathf.Min(d, z0 + sectorSize);
         var key = new Vector2Int(sx, sz);
 
         for (int pass = 0; pass < 2; pass++)
@@ -364,6 +419,9 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
             int fp = layer.IsTree ? Mathf.Max(1, layer.footprint) : 1;
             int half = fp / 2;
             bool useGrid = mapGrid != null && mapGrid.IsReady && layer.IsTree;
+            // в stream абсолютные клетки → локальные индекса окна MapGrid
+            int cellOx = (stream && mapGrid != null && mapGrid.Streaming) ? mapGrid.StreamOriginX : 0;
+            int cellOz = (stream && mapGrid != null && mapGrid.Streaming) ? mapGrid.StreamOriginZ : 0;
             int step = layer.IsTree ? Mathf.Max(1, fp) : 1;
             Quaternion spriteRot = Quaternion.Euler(v.spriteEuler);
 
@@ -371,14 +429,18 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
             foreach (var ov in layer.variants) if (ov != null) layerWeightSum += Mathf.Max(0f, ov.weight);
             float myChance = layerWeightSum > 0f ? Mathf.Max(0f, v.weight) / layerWeightSum : 1f;
 
-            for (int x = Mathf.Max(borderCells + half, x0); x < Mathf.Min(w - borderCells - half, x1); x += step)
+            int xLo = stream ? x0 : Mathf.Max(x0, border + half);
+            int zLo = stream ? z0 : Mathf.Max(z0, border + half);
+            int xHi = stream ? x1 : Mathf.Min(w - border - half, x1);
+            int zHi = stream ? z1 : Mathf.Min(d - border - half, z1);
+            for (int x = xLo; x < xHi; x += step)
             {
-                for (int z = Mathf.Max(borderCells + half, z0); z < Mathf.Min(d - borderCells - half, z1); z += step)
+                for (int z = zLo; z < zHi; z += step)
                 {
-                    float h = heightSource.GetHeight(x, z);
+                    float h = stream ? streamGround.Height(x, z) : heightSource.GetHeight(x, z);
                     if (h <= waterLevel) continue;
 
-                    Zone zone = GetZone(x, z);
+                    Zone zone = stream ? streamGround.ZoneAt(x, z) : GetZone(x, z);
                     if (!CanGrow(layer, zone)) continue;
 
                     bool stable = true;
@@ -386,20 +448,42 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
                     if (Hash01(x, z, vi, 0) > dens) continue;
                     if (Hash01(x, z, vi, 1) > myChance) continue;
 
-                    if (!layer.IsTree && mapGrid != null && mapGrid.IsReady)
-                    {
-                        if (mapGrid.HasFlag(x, z, MapGrid.OccupancyFlags.Road)) continue;
-                    }
+                    bool road = stream
+                        ? streamGround.IsRoad(x, z)
+                        : mapGrid != null && mapGrid.IsReady && mapGrid.HasFlag(x, z, MapGrid.OccupancyFlags.Road);
+                    if (road) continue;
 
                     if (useGrid)
                     {
-                        if (!mapGrid.CanPlace(x, z, fp, fp, anchorCenter: true)) continue;
-                        if (mapGrid.HasFlag(x, z, MapGrid.OccupancyFlags.Road)) continue;
-                        if (FootprintHitsRoad(x, z, fp)) continue;
+                        int lx = x - cellOx;
+                        int lz = z - cellOz;
+                        if (!mapGrid.CanPlace(lx, lz, fp, fp, anchorCenter: true)) continue;
+                        if (!stream && FootprintHitsRoad(x, z, fp)) continue;
                     }
 
                     Vector3 pos;
-                    if (layer.IsTree)
+                    if (stream)
+                    {
+                        // в hex-режиме клетки уже в мировых координатах, origin = CellOrigin (обычно 0)
+                        if (layer.IsTree)
+                        {
+                            pos = new Vector3(
+                                origin.x + (x + 0.5f) * ts,
+                                h + v.heightOffset,
+                                origin.z + (z + 0.5f) * ts);
+                        }
+                        else
+                        {
+                            float m = ts * 0.15f;
+                            float rx = stable ? Hash01(x, z, vi, 10) : Random.value;
+                            float rz = stable ? Hash01(x, z, vi, 20) : Random.value;
+                            pos = new Vector3(
+                                origin.x + x * ts + Mathf.Lerp(m, ts - m, rx),
+                                h + v.heightOffset,
+                                origin.z + z * ts + Mathf.Lerp(m, ts - m, rz));
+                        }
+                    }
+                    else if (layer.IsTree)
                     {
                         pos = terrainBuilder.MapLocalToWorld(new Vector3(
                             origin.x + (x + 0.5f) * ts,
@@ -433,20 +517,30 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
 
                     if (useGrid)
                     {
-                        mapGrid.Occupy(x, z, fp, fp, MapGrid.OccupancyFlags.Tree, anchorCenter: true);
+                        int lx = x - cellOx;
+                        int lz = z - cellOz;
+                        mapGrid.Occupy(lx, lz, fp, fp, MapGrid.OccupancyFlags.Tree, anchorCenter: true);
                         ResolveCover(layer, v, out var coverMode, out var coverH);
-                        mapGrid.SetSightCover(x, z, fp, fp, coverMode, coverH, anchorCenter: true);
+                        mapGrid.SetSightCover(lx, lz, fp, fp, coverMode, coverH, anchorCenter: true);
                     }
                     else if (layer.kind == LayerKind.Bush && mapGrid != null && mapGrid.IsReady)
                     {
+                        int lx = x - cellOx;
+                        int lz = z - cellOz;
                         ResolveCover(layer, v, out var coverMode, out var coverH);
-                        mapGrid.SetSightCover(x, z, 1, 1, coverMode, coverH, anchorCenter: true);
+                        mapGrid.SetSightCover(lx, lz, 1, 1, coverMode, coverH, anchorCenter: true);
                     }
                 }
             }
 
             v.sectors[key] = SplitToBatches(list);
         }
+        float ms = (Time.realtimeSinceStartup - t0) * 1000f;
+        int inst = 0;
+        for (int i = 0; i < allVariants.Count; i++)
+            if (allVariants[i].sectorLists != null && allVariants[i].sectorLists.TryGetValue(key, out var ls) && ls != null)
+                inst += ls.Count;
+        Debug.Log($"[AF.Load] NaturePlacement.GenerateSector {sx},{sz} {ms:0.0}ms instances={inst} stamp={StreamStamp}");
     }
 
     private void UnloadSector(int sx, int sz)
@@ -564,9 +658,9 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
             kind = LayerKind.Grass,
             enabled = true,
             footprint = 1,
-            densityGrove = 0.62f,
-            densityForest = 0.22f,
-            densityThicket = 0.06f,
+            densityGrove = 0.7f,
+            densityForest = 0.55f,
+            densityThicket = 0.12f,
             growInGrove = true,
             growInForest = true,
             growInThicket = true,
@@ -599,9 +693,9 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
         float sum = grass.densityGrove + grass.densityForest + grass.densityThicket;
         if (sum <= 0.0001f)
         {
-            grass.densityGrove = 0.62f;
-            grass.densityForest = 0.22f;
-            grass.densityThicket = 0.06f;
+            grass.densityGrove = 0.7f;
+            grass.densityForest = 0.55f;
+            grass.densityThicket = 0.12f;
         }
         grass.growInGrove = true;
         grass.growInForest = true;
@@ -612,6 +706,8 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
     private float EffectiveDensity(NatureLayer layer, Zone zone, int x, int z)
     {
         float dens = GetDensity(layer, zone);
+        if (streamGround is LocationStream hexStream)
+            dens *= hexStream.DensityAt(x, z);
         if (layer == null || layer.kind != LayerKind.Grass) return dens;
         if (CellHasTree(x, z)) dens *= grassUnderTreeMult;
         float n = Mathf.PerlinNoise(
@@ -697,6 +793,17 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
             }
         }
         Debug.Log(sb.ToString());
+    }
+
+    public bool TryCellOrigin(out Vector3 origin)
+    {
+        if (streamGround == null)
+        {
+            origin = default;
+            return false;
+        }
+        origin = streamGround.CellOrigin;
+        return true;
     }
 
     public Zone GetZone(int x, int z)
@@ -911,6 +1018,16 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
 
     private bool Validate()
     {
+        // в hex-режиме HeightMap не генерируется — достаточно streamGround и TileSize
+        if (streamGround != null)
+        {
+            if (terrainBuilder == null)
+            {
+                Debug.LogError("NaturePlacement: нет ChunkedTerrainBuilder (нужен TileSize)!");
+                return false;
+            }
+            return true;
+        }
         if (heightSource == null || !heightSource.isGenerated)
         {
             Debug.LogError("NaturePlacement: HeightMapGenerator не готов!");

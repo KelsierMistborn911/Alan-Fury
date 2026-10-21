@@ -181,7 +181,9 @@ public class FogPlacer : MonoBehaviour
     private bool Validate()
     {
         if (heightSource == null || !heightSource.isGenerated)
-        { Debug.LogError("FogPlacer: HeightMapGenerator не готов!"); return false; }
+        { Debug.LogError("FogPlacer: HeightMapGenerator не готов (или BindStream)!"); return false; }
+        if (heightSource.streamGround != null)
+            return fogPrefab != null;
         if (terrainBuilder == null)
         { Debug.LogError("FogPlacer: нет ChunkedTerrainBuilder!"); return false; }
         if (fogPrefab == null)
