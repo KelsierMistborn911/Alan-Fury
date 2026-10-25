@@ -66,12 +66,25 @@ public class PlayerSpawnPoint : MonoBehaviour
 
     public void Spawn(Transform actor, out Vector3 position, out Quaternion rotation)
     {
-        // Запрос с RegionMap — не перебивать центр выбранного гекса дорогой.
+        // Запрос с RegionMap — сажаем в центр выбранного гекса, дорога не участвует.
         HexSpawnRequest.TryRestore();
         if (HexSpawnRequest.HasRequest)
         {
-            position = actor != null ? actor.position : Vector3.zero;
-            rotation = actor != null ? actor.rotation : Quaternion.identity;
+            var center = HexSpawnRequest.WorldCenter();
+            Vector3 hexPos = Ground(new Vector3(center.x, center.y + 20f, center.z));
+            if (hexPos.y < 0.5f) hexPos.y = center.y + 1.5f;
+            position = hexPos;
+            rotation = actor != null ? actor.rotation : transform.rotation;
+            if (actor != null)
+                Plant(actor, hexPos, rotation);
+
+            var hexArrival = GetComponent<SpawnArrivalLight>();
+            if (hexArrival != null)
+            {
+                hexArrival.playOnStart = false;
+                if (actor != null) hexArrival.Arm(actor);
+                hexArrival.Play(hexPos);
+            }
             return;
         }
         Vector3 pos = transform.position;

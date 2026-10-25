@@ -1018,6 +1018,15 @@ public static class HexSpawnRequest
         return true;
     }
 
+    /// <summary>Центр выбранного гекса в мире. Та же формула, что LocationStream.HexToWorld.</summary>
+    public static Vector3 WorldCenter()
+    {
+        float size = HexWorldSize > 1f ? HexWorldSize : 100f;
+        float x = size * (Mathf.Sqrt(3f) * Q + Mathf.Sqrt(3f) * 0.5f * R);
+        float z = size * (1.5f * R);
+        return new Vector3(x, Height, z);
+    }
+
     public static void Clear()
     {
         HasRequest = false;

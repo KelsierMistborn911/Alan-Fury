@@ -3,7 +3,9 @@ using System.Collections.Generic;
 
 /// <summary>
 /// Отрисовка + hybrid live + стриминг.
-/// Материалы — оригинальные (ProPixelizer). VisionFade-подмена убрана.
+/// Обычное дерево — родной материал префаба (ProPixelizer), без подмены.
+/// Если дерево между камерой и клеткой видимости: сначала темнеет на родном,
+/// потом становится тёмно-прозрачным (Nature/TreeSeeThrough).
 /// Live — коллайдер; картинка всегда инстанс.
 /// </summary>
 public class NatureRenderer : MonoBehaviour
@@ -27,6 +29,17 @@ public class NatureRenderer : MonoBehaviour
     [Tooltip("Множитель альбедо инстансов. Ставит TimeOfDayController.")]
     public Color todTint = Color.white;
 
+    [Header("Прозрачность")]
+    [Tooltip("Дерево между камерой и клеткой видимости: темнеет, потом тёмно-прозрачное.")]
+    public bool fadeTreesInVision = true;
+    public float darkenSeconds = 0.3f;
+    public float fadeSeconds = 0.35f;
+    [Range(0.15f, 0.9f)]
+    public float seeThroughAlpha = 0.72f;
+    public Color silhouetteColor = new Color(0.06f, 0.06f, 0.07f, 1f);
+    [Tooltip("Насколько близко дерево к лучу камера→клетка, чтобы считаться заслоном.")]
+    public float coverRadius = 3.2f;
+
     [Header("Live")]
     public int liveCheckEveryNFrames = 12;
     public Transform liveRoot;
@@ -46,8 +59,19 @@ public class NatureRenderer : MonoBehaviour
     private readonly List<long> _toRemove = new List<long>();
 
     private readonly List<Matrix4x4> _partBatch = new List<Matrix4x4>(256);
-    private MaterialPropertyBlock _tintBlock;
+    private readonly List<Matrix4x4> _solidRoots = new List<Matrix4x4>(256);
+    private readonly List<Matrix4x4> _fadeRoots = new List<Matrix4x4>(64);
+    private readonly List<float> _fadeLevel = new List<float>(64);
+    private readonly List<Vector3> _visCenters = new List<Vector3>(256);
+    private readonly List<Vector2Int> _visCells = new List<Vector2Int>(256);
+    private readonly Dictionary<long, float> _fade = new Dictionary<long, float>();
+    private readonly List<long> _fadeDrop = new List<long>();
+    private readonly HashSet<long> _fadeSeen = new HashSet<long>();
+    private readonly Dictionary<Material, Material> _seeThroughMats = new Dictionary<Material, Material>();
+    private Shader _seeThroughShader;
+    private MaterialPropertyBlock _oneBlock;
     private Matrix4x4[] _drawSlice = new Matrix4x4[1023];
+    private Matrix4x4[] _oneSlice = new Matrix4x4[1];
     private readonly List<List<Matrix4x4>> _drawCache = new List<List<Matrix4x4>>();
     private int _cacheStamp = int.MinValue;
     private int _cachePcx = int.MinValue, _cachePcz = int.MinValue, _cacheR = int.MinValue;
@@ -180,6 +204,9 @@ public class NatureRenderer : MonoBehaviour
         if (dirty)
             RebuildDrawCache(pcx, pcz, r, stamp);
 
+        if (fadeTreesInVision && playerVision != null)
+            RefreshVisibleCenters();
+
         for (int vi = 0; vi < placement.allVariants.Count; vi++)
         {
             var v = placement.allVariants[vi];
@@ -191,7 +218,67 @@ public class NatureRenderer : MonoBehaviour
             var shadows = v.castShadows
                 ? UnityEngine.Rendering.ShadowCastingMode.On
                 : UnityEngine.Rendering.ShadowCastingMode.Off;
-            DrawParts(v, layer, roots, v.propertyBlock, shadows, fade: false);
+
+            bool canFade = fadeTreesInVision && layer != null && layer.IsTree && playerVision != null;
+            if (!canFade)
+            {
+                DrawNative(v, roots, v.propertyBlock, shadows);
+                continue;
+            }
+
+            _solidRoots.Clear();
+            _fadeRoots.Clear();
+            _fadeLevel.Clear();
+
+            float dt = Time.deltaTime;
+            float darkStep = dt / Mathf.Max(0.05f, darkenSeconds);
+            float fadeStep = dt / Mathf.Max(0.05f, fadeSeconds);
+
+            for (int i = 0; i < roots.Count; i++)
+            {
+                Vector3 pos = roots[i].GetColumn(3);
+                long h = PosHash(pos);
+                _fadeSeen.Add(h);
+                bool covers = CoversVisibleCell(pos);
+                _fade.TryGetValue(h, out float t);
+                if (covers)
+                {
+                    if (t < 1f) t = Mathf.Min(1f, t + darkStep);
+                    else t = Mathf.Min(2f, t + fadeStep);
+                }
+                else
+                {
+                    if (t > 1f) t = Mathf.Max(1f, t - fadeStep);
+                    else t = Mathf.Max(0f, t - darkStep);
+                }
+                if (t <= 0.001f)
+                {
+                    _fade.Remove(h);
+                    _solidRoots.Add(roots[i]);
+                    continue;
+                }
+                _fade[h] = t;
+                _fadeRoots.Add(roots[i]);
+                _fadeLevel.Add(t);
+            }
+
+            if (_solidRoots.Count > 0)
+                DrawNative(v, _solidRoots, v.propertyBlock, shadows);
+            for (int i = 0; i < _fadeRoots.Count; i++)
+                DrawFadingOne(v, _fadeRoots[i], _fadeLevel[i], shadows);
+        }
+
+        if (_fade.Count > 0)
+        {
+            _fadeDrop.Clear();
+            foreach (var kv in _fade)
+            {
+                if (!_fadeSeen.Contains(kv.Key))
+                    _fadeDrop.Add(kv.Key);
+            }
+            for (int i = 0; i < _fadeDrop.Count; i++)
+                _fade.Remove(_fadeDrop[i]);
+            _fadeSeen.Clear();
         }
 
         if (Time.unscaledTime >= _nextSummary)
@@ -238,19 +325,83 @@ public class NatureRenderer : MonoBehaviour
     }
 
 
-    private void DrawParts(NaturePlacement.NatureVariant v, NaturePlacement.NatureLayer layer,
-        List<Matrix4x4> roots,
-        MaterialPropertyBlock block, UnityEngine.Rendering.ShadowCastingMode shadows, bool fade)
+    private void RefreshVisibleCenters()
+    {
+        _visCenters.Clear();
+        if (playerVision == null || playerVision.mapGrid == null || !playerVision.mapGrid.IsReady)
+            return;
+        playerVision.CollectVisibleCells(_visCells);
+        var grid = playerVision.mapGrid;
+        for (int i = 0; i < _visCells.Count; i++)
+        {
+            var c = _visCells[i];
+            _visCenters.Add(grid.CellCenterWorld(c.x, c.y));
+        }
+    }
+
+    private bool CoversVisibleCell(Vector3 treePos)
+    {
+        if (cam == null || _visCenters.Count == 0) return false;
+        Vector3 camPos = cam.transform.position;
+        float r2 = coverRadius * coverRadius;
+        for (int i = 0; i < _visCenters.Count; i++)
+        {
+            Vector3 cell = _visCenters[i];
+            Vector3 toCell = cell - camPos;
+            float len2 = toCell.sqrMagnitude;
+            if (len2 < 4f) continue;
+            float along = Vector3.Dot(treePos - camPos, toCell) / len2;
+            if (along < 0.12f || along > 0.9f) continue;
+            Vector3 closest = camPos + toCell * along;
+            float sx = treePos.x - closest.x;
+            float sz = treePos.z - closest.z;
+            if (sx * sx + sz * sz <= r2)
+                return true;
+        }
+        return false;
+    }
+
+    private void DrawNative(NaturePlacement.NatureVariant v, List<Matrix4x4> roots,
+        MaterialPropertyBlock block, UnityEngine.Rendering.ShadowCastingMode shadows)
+    {
+        DrawParts(v, roots, block, shadows, false);
+    }
+
+    private void DrawFadingOne(NaturePlacement.NatureVariant v, Matrix4x4 root, float t,
+        UnityEngine.Rendering.ShadowCastingMode shadows)
+    {
+        bool ghost = t >= 1f;
+        if (!ghost)
+        {
+            DrawOne(v, root, v.propertyBlock, shadows, false);
+            return;
+        }
+
+        if (_oneBlock == null) _oneBlock = new MaterialPropertyBlock();
+        _oneBlock.Clear();
+        float u = t - 1f;
+        float alpha = Mathf.Lerp(0.15f, seeThroughAlpha, u);
+        Color c = silhouetteColor;
+        c.a = alpha;
+        _oneBlock.SetColor("_Color", c);
+        _oneBlock.SetColor("_BaseColor", c);
+        DrawOne(v, root, _oneBlock, UnityEngine.Rendering.ShadowCastingMode.Off, true);
+    }
+
+    private void DrawParts(NaturePlacement.NatureVariant v, List<Matrix4x4> roots,
+        MaterialPropertyBlock block, UnityEngine.Rendering.ShadowCastingMode shadows, bool ghost)
     {
         if (roots.Count == 0 || v.parts == null) return;
-
         for (int p = 0; p < v.parts.Count; p++)
         {
             var part = v.parts[p];
             if (part.mesh == null || part.material == null) continue;
-
             Material mat = part.material;
-            MaterialPropertyBlock pb = block;
+            if (ghost)
+            {
+                var swapped = SeeThroughOf(part.material);
+                if (swapped != null) mat = swapped;
+            }
             bool ident = part.localToRoot.isIdentity;
             List<Matrix4x4> list = roots;
             if (!ident)
@@ -260,41 +411,54 @@ public class NatureRenderer : MonoBehaviour
                     _partBatch.Add(roots[i] * part.localToRoot);
                 list = _partBatch;
             }
-
-            pb = TintOpaqueBlock(block, part.material);
-
-            DrawList(part.mesh, mat, pb, list, shadows, part.submesh);
+            DrawList(part.mesh, mat, block, list, shadows, part.submesh);
         }
     }
 
-    private void ApplyTodTint(MaterialPropertyBlock block, Material src)
+    private void DrawOne(NaturePlacement.NatureVariant v, Matrix4x4 root,
+        MaterialPropertyBlock block, UnityEngine.Rendering.ShadowCastingMode shadows, bool ghost)
     {
-        if (block == null || todTint == Color.white) return;
-        Color c = Color.white;
-        if (block.HasColor(ColorId)) c = block.GetColor(ColorId);
-        else if (src != null && src.HasProperty(ColorId)) c = src.GetColor(ColorId);
-        else if (src != null && src.HasProperty(BaseColorId)) c = src.GetColor(BaseColorId);
-        c *= todTint;
-        block.SetColor(ColorId, c);
-        block.SetColor(BaseColorId, c);
-        block.SetColor(TodTintId, todTint);
+        if (v.parts == null) return;
+        for (int p = 0; p < v.parts.Count; p++)
+        {
+            var part = v.parts[p];
+            if (part.mesh == null || part.material == null) continue;
+            Material mat = part.material;
+            if (ghost)
+            {
+                var swapped = SeeThroughOf(part.material);
+                if (swapped != null) mat = swapped;
+            }
+            _oneSlice[0] = part.localToRoot.isIdentity ? root : root * part.localToRoot;
+            int sub = part.submesh;
+            if (sub < 0 || sub >= part.mesh.subMeshCount) sub = 0;
+            Graphics.DrawMeshInstanced(part.mesh, sub, mat, _oneSlice, 1, block, shadows, false);
+        }
     }
 
-    private MaterialPropertyBlock TintOpaqueBlock(MaterialPropertyBlock srcBlock, Material src)
+    private Material SeeThroughOf(Material src)
     {
-        if (todTint == Color.white) return srcBlock;
-        if (_tintBlock == null) _tintBlock = new MaterialPropertyBlock();
-        _tintBlock.Clear();
-        Color c = Color.white;
-        if (src != null && src.HasProperty(ColorId)) c = src.GetColor(ColorId);
-        else if (src != null && src.HasProperty(BaseColorId)) c = src.GetColor(BaseColorId);
-        else if (srcBlock != null && srcBlock.HasColor(ColorId)) c = srcBlock.GetColor(ColorId);
-        c *= todTint;
-        c.a = 1f;
-        _tintBlock.SetColor(ColorId, c);
-        _tintBlock.SetColor(BaseColorId, c);
-        _tintBlock.SetColor(TodTintId, todTint);
-        return _tintBlock;
+        if (src == null) return null;
+        if (_seeThroughMats.TryGetValue(src, out var cached) && cached != null)
+            return cached;
+
+        if (_seeThroughShader == null)
+            _seeThroughShader = Shader.Find("Nature/TreeSeeThrough");
+        if (_seeThroughShader == null)
+        {
+            if (Time.frameCount % 300 == 0)
+                Debug.LogWarning("NatureRenderer: нет шейдера Nature/TreeSeeThrough — прозрачность не включится.");
+            return src;
+        }
+
+        var m = new Material(_seeThroughShader);
+        m.name = "TreeSilhouette";
+        Color c = silhouetteColor;
+        c.a = seeThroughAlpha;
+        m.SetColor(BaseColorId, c);
+        m.enableInstancing = true;
+        _seeThroughMats[src] = m;
+        return m;
     }
 
     private void DrawList(Mesh mesh, Material mat, MaterialPropertyBlock block,
@@ -302,14 +466,6 @@ public class NatureRenderer : MonoBehaviour
     {
         if (list.Count == 0 || mesh == null || mat == null) return;
         if (submesh < 0 || submesh >= mesh.subMeshCount) submesh = 0;
-        mat.enableInstancing = true;
-
-        // ProPixelizer materials often sit on Transparent queue; DrawMeshInstanced then
-        // drops them. Force AlphaTest for the draw, restore after.
-        int savedQueue = mat.renderQueue;
-        bool forced = savedQueue > 2450;
-        if (forced)
-            mat.renderQueue = 2450;
 
         const int BS = 1023;
         if (_drawSlice == null || _drawSlice.Length < BS)
@@ -321,9 +477,6 @@ public class NatureRenderer : MonoBehaviour
                 _drawSlice[i] = list[start + i];
             Graphics.DrawMeshInstanced(mesh, submesh, mat, _drawSlice, len, block, shadows, false);
         }
-
-        if (forced)
-            mat.renderQueue = savedQueue;
     }
 
     private void UpdateLive()
@@ -447,7 +600,12 @@ public class NatureRenderer : MonoBehaviour
         }
     }
 
-    public bool IsCellFading(int cx, int cz) => false;
+    public bool IsCellFading(int cx, int cz)
+    {
+        if (!fadeTreesInVision || playerVision == null) return false;
+        if (playerVision.mapGrid == null || !playerVision.mapGrid.IsReady) return false;
+        return playerVision.InShape(playerVision.mapGrid.CellCenterWorld(cx, cz));
+    }
 
     [ContextMenu("Clear Live")]
     public void ClearLive()

@@ -29,6 +29,23 @@ public class WerewolfPackManager : MonoBehaviour
 
     public enum PackPhase { Patrol, Alert, Hunt }
 
+    public enum Occupation { Free, Patrol, Hunter, Retinue }
+
+    /// <summary>Точка логова. Пусто — ищем WolfDenPoint.</summary>
+    public WolfDenPoint den;
+
+    [Header("Занятость стаи")]
+    public int patrolSlots = 6;
+    public int retinuePeace = 2;
+    public float rollCallInterval = 300f;
+    public float occupationInterval = 4f;
+
+    [Header("Присутствие")]
+    [Tooltip("Запасной радиус, если нет LocationStream. Иначе зона = кольцо чанков террейна.")]
+    public float presenceRadius = 100f;
+    [Tooltip("Как часто граница зоны пересчитывается (сек). Между проверками круг не двигается.")]
+    public float presenceInterval = 6f;
+
     /// <summary>Что менеджер требует от мозга волка. Реализует WerewolfAttackBrain.</summary>
     public interface IPackAgent
     {
@@ -66,6 +83,10 @@ public class WerewolfPackManager : MonoBehaviour
     public float spawnRadius = 12f;
     [Tooltip("Точка, вокруг которой спавнятся волки. Пусто — вокруг самого менеджера.")]
     public Transform spawnCenter;
+
+    [Header("Альфа (слот)")]
+    [Tooltip("Префаб альфы. Если Alpha Transform пуст — появляется в логове при старте, а не стоит сразу на карте.")]
+    public GameObject alphaPrefab;
 
     [Header("Старшинство")]
     [Tooltip("Глашатай. Пусто — первый волк стаи, который не альфа.")]
@@ -259,6 +280,16 @@ public class WerewolfPackManager : MonoBehaviour
     private float _howlTimer;
     private bool _howled;
     private PackPhase _phase = PackPhase.Patrol;
+    private float _nextOccupation;
+    private float _nextPresence;
+    private float _nextAbstract;
+    private Vector3 _zoneCenter;
+    private bool _zoneSet;
+    private bool _warnedNoStream;
+    private bool _packSpawned;
+    private float _nextRollCall;
+    private readonly System.Collections.Generic.Dictionary<Transform, Occupation> _job = new System.Collections.Generic.Dictionary<Transform, Occupation>();
+    private readonly System.Collections.Generic.Dictionary<Transform, int> _patrolHex = new System.Collections.Generic.Dictionary<Transform, int>();
 
     public PackPhase Phase => _phase;
 
@@ -285,6 +316,95 @@ public class WerewolfPackManager : MonoBehaviour
         _howlTimer = howlDelay; // отсчёт до воя стартует со сцены
     }
 
+    void Start()
+    {
+        // WolfDenPoint ставит себя в своём Start; ждём кадр, чтобы логово уже стояло.
+        StartCoroutine(SpawnAlphaWhenReady());
+    }
+
+    System.Collections.IEnumerator SpawnAlphaWhenReady()
+    {
+        LocationStream stream = null;
+        for (int i = 0; i < 180; i++)
+        {
+            if (player == null) player = PlayerRegistry.ResolvePrimary();
+            if (den == null) den = FindObjectOfType<WolfDenPoint>();
+            stream = FindObjectOfType<LocationStream>();
+            if (player != null && stream != null) break;
+            yield return null;
+        }
+        if (player == null)
+            Debug.LogWarning("WerewolfPackManager: игрок не найден к моменту спавна стаи.");
+        if (stream == null)
+            Debug.LogWarning("WerewolfPackManager: LocationStream не найден, логово без высоты карты.");
+        yield return null;
+        yield return new WaitForFixedUpdate();
+
+        Vector3 pos = PlaceDenInHowling(stream);
+        if (stream != null)
+            pos.y = stream.HeightAtWorld(pos.x, pos.z) + 1.5f;
+
+        SpawnAlphaAt(pos);
+
+        if (wolfPrefab != null && _wolves.Count <= 1)
+            SpawnPack();
+    }
+
+    Vector3 PlaceDenInHowling(LocationStream stream)
+    {
+        int q = RegionLayout.Howling.x;
+        int r = RegionLayout.Howling.y;
+        if (q == 0 && r == 0)
+        {
+            q = RegionHexMap.HowlingQ;
+            r = RegionHexMap.HowlingR;
+        }
+        Vector3 center = stream != null
+            ? stream.HexToWorld(q, r)
+            : DenPoint();
+        if (stream != null)
+            center.y = stream.HeightAtWorld(center.x, center.z);
+        if (den != null)
+            den.transform.position = center;
+        return center;
+    }
+
+    /// <summary>Слот альфы: префаб задан и Alpha Transform пуст — спавнит в логове на земле.</summary>
+    [ContextMenu("Spawn Alpha")]
+    public void TrySpawnAlpha()
+    {
+        if (alphaTransform != null) return;
+        if (alphaPrefab == null)
+        {
+            Debug.LogWarning("WerewolfPackManager: alphaPrefab пуст, альфа не появится.");
+            return;
+        }
+        if (den == null) den = FindObjectOfType<WolfDenPoint>();
+        Vector3 pos = DenPoint();
+        var stream = FindObjectOfType<LocationStream>();
+        if (stream != null)
+        {
+            pos.y = stream.HeightAtWorld(pos.x, pos.z) + 1.5f;
+            Physics.SyncTransforms();
+        }
+        SpawnAlphaAt(pos);
+    }
+
+    void SpawnAlphaAt(Vector3 pos)
+    {
+        if (alphaTransform != null || alphaPrefab == null) return;
+        var go = Instantiate(alphaPrefab, pos, Quaternion.identity);
+        go.name = "Alfa";
+        var cc = go.GetComponent<CharacterController>();
+        if (cc != null) cc.enabled = false;
+        go.transform.position = pos;
+        alphaTransform = go.transform;
+        SyncRanks();
+        if (go.GetComponent<WolfDuty>() == null)
+            go.AddComponent<WolfDuty>();
+        Debug.Log($"WerewolfPackManager: альфа появился в логове {pos}");
+    }
+
     private void ResolvePathfinder()
     {
         if (pathfinder != null) return;
@@ -306,6 +426,8 @@ public class WerewolfPackManager : MonoBehaviour
     public void Register(IPackAgent wolf)
     {
         if (wolf != null && !_wolves.Contains(wolf)) _wolves.Add(wolf);
+        if (wolf != null && wolf.Transform != null && wolf.Transform.GetComponent<WolfDuty>() == null)
+            wolf.Transform.gameObject.AddComponent<WolfDuty>();
     }
 
     public int WolfOrder(Transform t)
@@ -341,13 +463,21 @@ public class WerewolfPackManager : MonoBehaviour
             Debug.LogWarning("WerewolfPackManager: не назначен wolfPrefab — спавнить нечего.");
             return;
         }
+        if (_packSpawned)
+        {
+            Debug.LogWarning("WerewolfPackManager: стая уже поднята, второй спавн пропущен.");
+            return;
+        }
+        _packSpawned = true;
 
         bool useAlpha = alphaTransform != null;
 
-        // Центр спавна: у альфы (если есть) или как раньше — spawnCenter/менеджер.
-        Vector3 center = useAlpha
-            ? alphaTransform.position
-            : (spawnCenter != null ? spawnCenter.position : transform.position);
+        // Центр спавна: логово, иначе альфа, иначе spawnCenter.
+        Vector3 center = den != null
+            ? den.Position
+            : (useAlpha
+                ? alphaTransform.position
+                : (spawnCenter != null ? spawnCenter.position : transform.position));
 
         // Базовое направление веера: от игрока к альфе (дальняя от игрока сторона).
         Vector3 baseDir = Vector3.forward;
@@ -375,8 +505,16 @@ public class WerewolfPackManager : MonoBehaviour
                 dir = new Vector3(Mathf.Cos(ang), 0f, Mathf.Sin(ang));
             }
 
-            Instantiate(wolfPrefab, center + dir * spawnRadius, Quaternion.identity);
-            // Волк сам зарегистрируется в Awake.
+            var pos = center + dir * spawnRadius;
+            var stream = FindObjectOfType<LocationStream>();
+            if (stream != null)
+                pos.y = stream.HeightAtWorld(pos.x, pos.z) + 1.5f;
+            else
+                pos.y = center.y;
+            var wolf = Instantiate(wolfPrefab, pos, Quaternion.identity);
+            var cc = wolf.GetComponent<CharacterController>();
+            if (cc != null) cc.enabled = false;
+            // Волк сам зарегистрируется в Awake. Контроллер включится в зоне игрока.
         }
 
         _phase = PackPhase.Patrol;
@@ -436,6 +574,8 @@ public class WerewolfPackManager : MonoBehaviour
             : Quaternion.identity;
 
         var go = Instantiate(wolfPrefab, pos, rot);
+        var cc = go.GetComponent<CharacterController>();
+        if (cc != null) cc.enabled = false;
 
         var perc = go.GetComponent<NpcPerception>();
         if (perc != null)
@@ -451,6 +591,9 @@ public class WerewolfPackManager : MonoBehaviour
 
     void Update()
     {
+        TickOccupation();
+        TickPresence();
+        TickAbstract();
         // После сетевого спавна игрока — подхватить из реестра (Awake часто раньше Host).
         if (player == null)
             player = PlayerRegistry.ResolvePrimary();
@@ -1266,6 +1409,21 @@ public class WerewolfPackManager : MonoBehaviour
     }
 
 #if UNITY_EDITOR
+    void OnDrawGizmos()
+    {
+        var style = new GUIStyle(UnityEditor.EditorStyles.boldLabel);
+        style.normal.textColor = new Color(0.75f, 0.95f, 0.7f);
+        style.fontSize = 11;
+        style.alignment = TextAnchor.MiddleCenter;
+        int n = PatrolPointCount;
+        for (int i = 0; i < n; i++)
+        {
+            var p = PatrolPoint(i);
+            p.y += 2.5f;
+            UnityEditor.Handles.Label(p, "П" + (i + 1), style);
+        }
+    }
+
     void OnDrawGizmosSelected()
     {
         Vector3 c = spawnCenter != null ? spawnCenter.position : transform.position;
@@ -1273,4 +1431,238 @@ public class WerewolfPackManager : MonoBehaviour
         Gizmos.DrawWireSphere(c, spawnRadius);
     }
 #endif
+
+    // ===================== Занятость вне боя =====================
+
+    void TickOccupation()
+    {
+        if (den == null) den = FindObjectOfType<WolfDenPoint>();
+        if (Time.time < _nextOccupation) return;
+        _nextOccupation = Time.time + occupationInterval;
+        AssignOccupations();
+        if (_phase != PackPhase.Hunt && Time.time >= _nextRollCall)
+        {
+            _nextRollCall = Time.time + rollCallInterval;
+            // перекличка: один вой на стаю, не чаще раза в 5 минут вне боя
+            var howl = HowlOn(alphaTransform != null ? alphaTransform : transform);
+            if (howl != null) howl.BeginHerald(WerewolfHowl.Type.LinkRequest, 8f);
+        }
+    }
+
+    void TickPresence()
+    {
+        if (player == null) return;
+        if (_zoneSet && Time.time < _nextPresence) return;
+        _nextPresence = Time.time + presenceInterval;
+        _zoneCenter = player.position;
+        _zoneSet = true;
+        var stream = FindObjectOfType<LocationStream>();
+
+        ConsiderPresence(alphaTransform, stream);
+        for (int i = 0; i < _wolves.Count; i++)
+        {
+            var w = _wolves[i];
+            if (w == null || w.Transform == null) continue;
+            if (w.Transform == alphaTransform) continue;
+            ConsiderPresence(w.Transform, stream);
+        }
+    }
+
+    void ConsiderPresence(Transform t, LocationStream stream)
+    {
+        if (t == null) return;
+        var duty = t.GetComponent<WolfDuty>();
+        if (duty == null) duty = t.gameObject.AddComponent<WolfDuty>();
+        bool inside = false;
+        if (stream != null)
+            inside = stream.IsTerrainPrinted(t.position, _zoneCenter) && stream.HasBuiltChunk(t.position);
+        else
+            inside = (t.position - _zoneCenter).sqrMagnitude <= presenceRadius * presenceRadius;
+        if (duty.live != inside) duty.SetLive(inside);
+    }
+
+    void TickAbstract()
+    {
+        if (Time.time < _nextAbstract) return;
+        _nextAbstract = Time.time + 1f;
+        AdvanceOne(alphaTransform);
+        for (int i = 0; i < _wolves.Count; i++)
+        {
+            var w = _wolves[i];
+            if (w == null || w.Transform == null) continue;
+            if (w.Transform == alphaTransform) continue;
+            AdvanceOne(w.Transform);
+        }
+    }
+
+    void AdvanceOne(Transform t)
+    {
+        if (t == null) return;
+        var duty = t.GetComponent<WolfDuty>();
+        if (duty == null || duty.live) return;
+        duty.AdvanceAbstract();
+    }
+
+    void AssignOccupations()
+    {
+        var alive = new System.Collections.Generic.List<IPackAgent>();
+        for (int i = 0; i < _wolves.Count; i++)
+            if (_wolves[i] != null && _wolves[i].IsAlive && _wolves[i].Transform != null)
+                alive.Add(_wolves[i]);
+
+        // снять роль только с мёртвых и пропавших
+        var drop = new System.Collections.Generic.List<Transform>();
+        foreach (var kv in _job)
+        {
+            bool found = false;
+            for (int i = 0; i < alive.Count; i++)
+                if (alive[i].Transform == kv.Key) { found = true; break; }
+            if (!found) drop.Add(kv.Key);
+        }
+        for (int i = 0; i < drop.Count; i++)
+        {
+            _job.Remove(drop[i]);
+            _patrolHex.Remove(drop[i]);
+        }
+
+        int retinueHave = 0, patrolHave = 0;
+        for (int i = 0; i < alive.Count; i++)
+        {
+            if (!_job.TryGetValue(alive[i].Transform, out var job)) continue;
+            if (job == Occupation.Retinue) retinueHave++;
+            else if (job == Occupation.Patrol) patrolHave++;
+        }
+
+        int retinueNeed = _phase == PackPhase.Hunt ? alive.Count : retinuePeace;
+
+        // дырка в свите
+        for (int i = 0; i < alive.Count && retinueHave < retinueNeed; i++)
+        {
+            var t = alive[i].Transform;
+            if (IsAlphaTransform(t)) continue;
+            if (_job.ContainsKey(t)) continue;
+            _job[t] = Occupation.Retinue;
+            retinueHave++;
+        }
+
+        // дырка в патруле
+        for (int i = 0; i < alive.Count && patrolHave < patrolSlots; i++)
+        {
+            var t = alive[i].Transform;
+            if (IsAlphaTransform(t) || _job.ContainsKey(t)) continue;
+            _job[t] = Occupation.Patrol;
+            _patrolHex[t] = patrolHave;
+            PlaceOnPatrol(t, patrolHave);
+            patrolHave++;
+        }
+
+        // новичок без роли — охотник, альфа тоже
+        for (int i = 0; i < alive.Count; i++)
+        {
+            var t = alive[i].Transform;
+            if (_job.ContainsKey(t)) continue;
+            _job[t] = Occupation.Hunter;
+        }
+    }
+
+    public void GetOccupation(Transform t, out Occupation job, out int hex)
+    {
+        if (t == null || !_job.TryGetValue(t, out job)) job = Occupation.Free;
+        if (t == null || !_patrolHex.TryGetValue(t, out hex)) hex = 0;
+    }
+
+    public Vector3 DenPoint()
+    {
+        if (den != null) return den.Position;
+        var stream = FindObjectOfType<LocationStream>();
+        if (stream != null) return stream.HexToWorld(RegionHexMap.HowlingQ, RegionHexMap.HowlingR);
+        return transform.position;
+    }
+
+    public Vector3 HexCenter(int q, int r)
+    {
+        var stream = FindObjectOfType<LocationStream>();
+        if (stream != null) return stream.HexToWorld(q, r);
+        if (!_warnedNoStream)
+        {
+            _warnedNoStream = true;
+            Debug.LogWarning("WerewolfPackManager: LocationStream не найден, гекс пущи посчитан формулой.");
+        }
+        float hexSize = 200f;
+        return new Vector3(hexSize * (Mathf.Sqrt(3f) * q + Mathf.Sqrt(3f) * 0.5f * r), 0f, hexSize * 1.5f * r);
+    }
+
+    static readonly int[] _dq = { 1, 1, 0, -1, -1, 0 };
+    static readonly int[] _dr = { 0, -1, -1, 0, 1, 1 };
+
+    public int PatrolPointCount => 8;
+
+    public Vector3 PatrolPoint(int slot)
+    {
+        var c = HowlingCenter();
+        int n = PatrolPointCount;
+        int i = Mathf.Abs(slot) % n;
+        float ang = i * (Mathf.PI * 2f / n);
+        float rad = 96f;
+        return c + new Vector3(Mathf.Cos(ang) * rad, 0f, Mathf.Sin(ang) * rad);
+    }
+
+    Vector3 HowlingCenter()
+    {
+        int q = RegionLayout.Howling.x;
+        int r = RegionLayout.Howling.y;
+        if (q == 0 && r == 0)
+        {
+            q = RegionHexMap.HowlingQ;
+            r = RegionHexMap.HowlingR;
+        }
+        return HexCenter(q, r);
+    }
+
+    public int NextPatrol(int slot) => (Mathf.Abs(slot) + 1) % PatrolPointCount;
+
+    void PlaceOnPatrol(Transform t, int slot)
+    {
+        if (t == null) return;
+        var p = PatrolPoint(slot);
+        var stream = FindObjectOfType<LocationStream>();
+        if (stream != null)
+            p.y = stream.HeightAtWorld(p.x, p.z) + 1.2f;
+        else
+        {
+            Debug.LogWarning("WerewolfPackManager: нет LocationStream, патрульная точка без высоты земли.");
+            p.y = t.position.y;
+        }
+        t.position = p;
+        var duty = t.GetComponent<WolfDuty>();
+        if (duty != null) duty.BeginPatrol(slot);
+    }
+
+    public Vector3 HunterPoint(Vector3 from)
+    {
+        // вне кольца патруля: второй ряд гексов, дальше только если есть след
+        int i = Random.Range(0, 6);
+        int q = RegionHexMap.HowlingQ + _dq[i] * 2;
+        int r = RegionHexMap.HowlingR + _dr[i] * 2;
+        return HexCenter(q, r);
+    }
+
+    public Vector3 RetinuePoint(Transform wolf)
+    {
+        var a = alphaTransform != null ? alphaTransform.position : DenPoint();
+        return a + wolf.right * 4f - wolf.forward * 3f;
+    }
+
+    public Vector3 TerritoryPoint()
+    {
+        var c = HexCenter(RegionHexMap.HowlingQ, RegionHexMap.HowlingR);
+        var o = Random.insideUnitSphere * 70f;
+        o.y = 0f;
+        return c + o;
+    }
+
+    public Vector3 BorderPoint()
+    {
+        return PatrolPoint(Random.Range(0, 6));
+    }
 }

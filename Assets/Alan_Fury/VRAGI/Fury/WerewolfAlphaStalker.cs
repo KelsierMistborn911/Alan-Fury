@@ -333,7 +333,8 @@ public class WerewolfAlphaStalker : MonoBehaviour
     private bool MoveAlongPath(Vector3 goal, float speed, float dt)
     {
         if (locomotion == null) return false;
-        if (pathfinder == null || !pathfinder.IsReady)
+        if (pathfinder == null || !pathfinder.IsReady
+            || !pathfinder.ContainsWorld(goal) || !pathfinder.ContainsWorld(transform.position))
             return locomotion.MoveTo(goal, speed, dt);
 
         _repathTimer -= dt;
@@ -361,6 +362,7 @@ public class WerewolfAlphaStalker : MonoBehaviour
     private Vector3 ClampGoal(Vector3 goal)
     {
         if (pathfinder == null || !pathfinder.IsReady) return goal;
+        if (!pathfinder.ContainsWorld(goal)) return goal;
         return pathfinder.NearestWalkableWorld(goal, out _);
     }
 

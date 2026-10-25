@@ -81,6 +81,7 @@ public class WerewolfSurroundBrain : MonoBehaviour
 
     void Update()
     {
+        if (WolfDuty.BlocksMove(this)) return;
         var cc = GetComponent<CrowdControl>();
         if (cc != null && cc.IsStunned)
         {

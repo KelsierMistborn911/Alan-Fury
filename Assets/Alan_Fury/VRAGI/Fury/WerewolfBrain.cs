@@ -70,6 +70,7 @@ public class WerewolfBrain : MonoBehaviour
 
     void Update()
     {
+        if (WolfDuty.BlocksMove(this)) return;
         var cc = GetComponent<CrowdControl>();
         if (cc != null && cc.IsStunned) return;
 
@@ -252,7 +253,9 @@ public class WerewolfBrain : MonoBehaviour
     {
         if (locomotion == null) return false;
         goal = ClampGoal(goal);
-        if (pathfinder == null || !pathfinder.IsReady)
+        bool onGrid = pathfinder != null && pathfinder.IsReady && pathfinder.ContainsWorld(goal)
+            && pathfinder.ContainsWorld(transform.position);
+        if (!onGrid)
             return locomotion.MoveTo(goal, speed, dt);
 
         _repathTimer -= dt;
@@ -286,6 +289,7 @@ public class WerewolfBrain : MonoBehaviour
     public Vector3 ClampGoal(Vector3 goal)
     {
         if (pathfinder == null || !pathfinder.IsReady) return goal;
+        if (!pathfinder.ContainsWorld(goal)) return goal;
         return pathfinder.NearestWalkableWorld(goal, out _);
     }
 

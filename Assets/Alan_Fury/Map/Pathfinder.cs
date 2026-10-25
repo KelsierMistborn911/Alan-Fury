@@ -30,6 +30,15 @@ public class Pathfinder : MonoBehaviour
 
     public bool IsReady => _ready;
 
+    /// <summary>Точка внутри сетки. Вне — не зажимать на край.</summary>
+    public bool ContainsWorld(Vector3 pos)
+    {
+        if (!_ready) return false;
+        float x = (pos.x - _origin.x) / _ts;
+        float z = (pos.z - _origin.z) / _ts;
+        return x >= 0f && z >= 0f && x < _w && z < _d;
+    }
+
     private bool[] _walkable;
     private float[] _cost;
     private int _w, _d;

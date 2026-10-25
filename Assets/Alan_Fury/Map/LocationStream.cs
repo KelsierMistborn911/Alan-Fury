@@ -4,7 +4,7 @@ using UnityEngine;
 /// <summary>
 /// Стриминг местности от гексагональной карты регионов.
 /// Карта не квадратная и не фиксированного размера — чанки строятся вокруг игрока.
-/// Высота — террасы гексов: внутри плоская, у края пологий склон только при малом перепаде.
+/// Высота — органические террасы: клетка целиком плоская, перепад только на границе клеток.
 /// Сторона гекса = 100 м. Деревья/трава не хранятся — генерируются заново.
 /// </summary>
 [DefaultExecutionOrder(-20)]
@@ -27,10 +27,12 @@ public class LocationStream : MonoBehaviour, ICellGround
     [Header("Рельеф")]
     public float heightStep = 0.25f;
     public float forestBase = 2.2f;
-    public float forestVariation = 0.35f;
-    public float detailNoise = 0.12f;      // мелкая рябь на террасе
-    public float minorDelta = 0.5f;        // перепад ≤ этого — пологий склон
-    public float slopeWidth = 15f;         // ширина склона у края гекса (м)
+    public float forestVariation = 0.4f;
+    public float terraceAmp = 2.2f;        // редкие холмы и понижения
+    public float hexBlend = 0.55f;         // плавность перехода к соседнему гексу
+    public int minTerraceCells = 10;       // площадка меньше — прилипает
+    public float roadMaxStep = 0.1f;       // макс. подъём дороги
+    public float roadStepDist = 10f;       // на сколько метров
 
     [Header("Связи")]
     public NaturePlacement nature;
@@ -51,7 +53,7 @@ public class LocationStream : MonoBehaviour, ICellGround
     private int _pcx = int.MinValue;
     private int _pcz = int.MinValue;
     private bool _begun;
-    private int _holdHexFrames;
+    private float _holdHexUntil;
 
     // кэш высот гексов (q,r) → height
     private readonly Dictionary<long, float> _hexHeights = new Dictionary<long, float>(128);
@@ -71,6 +73,15 @@ public class LocationStream : MonoBehaviour, ICellGround
         {
             var move = FindObjectOfType<PlayerMovement3D>();
             if (move != null) player = move.transform;
+        }
+        if (nature == null)
+        {
+            var leshiy = FindObjectOfType<Leshiy>();
+            if (leshiy != null)
+            {
+                leshiy.EnsureDrawObject();
+                nature = leshiy.placement;
+            }
         }
         if (nature == null) nature = GetComponent<NaturePlacement>();
         if (chunkBuilder == null) chunkBuilder = GetComponent<ChunkedTerrainBuilder>();
@@ -111,11 +122,15 @@ public class LocationStream : MonoBehaviour, ICellGround
         SnapToHex(CurrentHexQ, CurrentHexR);
         if (HexSpawnRequest.HasRequest)
         {
-            _holdHexFrames = 8;
+            _holdHexUntil = Time.time + 2f;
             // дорожный PlayerSpawnPoint не должен перебить центр
             var points = FindObjectsOfType<PlayerSpawnPoint>();
             for (int i = 0; i < points.Length; i++)
-                if (points[i] != null) points[i].playOnStart = false;
+            {
+                if (points[i] == null) continue;
+                points[i].playOnStart = false;
+                points[i].enabled = false;
+            }
         }
 
         UpdatePoi();
@@ -141,16 +156,46 @@ public class LocationStream : MonoBehaviour, ICellGround
         _pcz = pcz;
         int r = Mathf.Max(1, loadRadiusChunks);
         for (int dz = -r; dz <= r; dz++)
-        for (int dx = -r; dx <= r; dx++)
-        {
-            if (dx * dx + dz * dz > r * r + r) continue;
-            int sx = pcx + dx;
-            int sz = pcz + dz;
-            var key = new Vector2Int(sx, sz);
-            if (_chunks.ContainsKey(key)) continue;
-            BuildChunk(sx, sz);
-            _queued.Remove(key);
-        }
+            for (int dx = -r; dx <= r; dx++)
+            {
+                if (dx * dx + dz * dz > r * r + r) continue;
+                int sx = pcx + dx;
+                int sz = pcz + dz;
+                var key = new Vector2Int(sx, sz);
+                if (_chunks.ContainsKey(key)) continue;
+                BuildChunk(sx, sz);
+                _queued.Remove(key);
+            }
+    }
+
+    /// <summary>Точка внутри кольца чанков, которое печатается вокруг игрока.</summary>
+    public bool IsTerrainPrinted(Vector3 world, Vector3 around)
+    {
+        int cs = Mathf.Max(4, chunkCells);
+        int pcx = Mathf.FloorToInt(Mathf.FloorToInt(around.x / tileSize) / (float)cs);
+        int pcz = Mathf.FloorToInt(Mathf.FloorToInt(around.z / tileSize) / (float)cs);
+        int wx = Mathf.FloorToInt(Mathf.FloorToInt(world.x / tileSize) / (float)cs);
+        int wz = Mathf.FloorToInt(Mathf.FloorToInt(world.z / tileSize) / (float)cs);
+        int dx = wx - pcx;
+        int dz = wz - pcz;
+        int r = Mathf.Max(1, loadRadiusChunks);
+        return dx * dx + dz * dz <= r * r + r;
+    }
+
+    /// <summary>Чанк под точкой уже построен, не только в радиусе печати.</summary>
+    public bool HasBuiltChunk(Vector3 world)
+    {
+        int cs = Mathf.Max(4, chunkCells);
+        int sx = Mathf.FloorToInt(Mathf.FloorToInt(world.x / tileSize) / (float)cs);
+        int sz = Mathf.FloorToInt(Mathf.FloorToInt(world.z / tileSize) / (float)cs);
+        return _chunks != null && _chunks.ContainsKey(new Vector2Int(sx, sz));
+    }
+
+    /// <summary>Построить чанки вокруг точки (логово, спавн вдали от игрока).</summary>
+    public void EnsureAround(Vector3 world)
+    {
+        if (!_begun) Begin();
+        BuildChunksAround(world);
     }
 
     void Start()
@@ -160,10 +205,14 @@ public class LocationStream : MonoBehaviour, ICellGround
 
     void LateUpdate()
     {
-        if (_holdHexFrames <= 0) return;
-        SnapToHex(CurrentHexQ, CurrentHexR);
-        _holdHexFrames--;
-        if (_holdHexFrames == 0 && HexSpawnRequest.HasRequest)
+        if (_holdHexUntil <= 0f) return;
+        if (Time.time < _holdHexUntil)
+        {
+            SnapToHex(CurrentHexQ, CurrentHexR);
+            return;
+        }
+        _holdHexUntil = 0f;
+        if (HexSpawnRequest.HasRequest)
             HexSpawnRequest.Clear();
     }
 
@@ -218,19 +267,185 @@ public class LocationStream : MonoBehaviour, ICellGround
 
     public float Height(int x, int z)
     {
-        // высота угла клетки — совпадает с вершинами меша в BuildChunk
-        return HeightAtWorld(x * tileSize, z * tileSize);
+        // высота клетки — все четыре угла одинаковые
+        float wx = (x + 0.5f) * tileSize;
+        float wz = (z + 0.5f) * tileSize;
+        return TerraceAt(wx, wz);
     }
 
     public float HeightAtWorld(float wx, float wz)
     {
-        float macro = SampleHexHeight(wx, wz);
-        float n = Noise(wx, wz, 0.018f, 0f);
-        float h = macro + (n - 0.5f) * detailNoise;
-        // дорога чуть примята и ровнее
+        int x = Mathf.FloorToInt(wx / tileSize);
+        int z = Mathf.FloorToInt(wz / tileSize);
+        return Height(x, z);
+    }
+
+    float TerraceAt(float wx, float wz)
+    {
+        // база — бленд высот своего гекса и соседей, переход плавный
+        float baseH = BlendHexHeight(wx, wz);
+        // внутри гекса рельеф гуляет крупно, не мелко
+        float n = Noise(wx, wz, 0.0045f, 3f);
+        float h = baseH;
+        if (n > 0.68f)
+            h += (n - 0.68f) * terraceAmp * 3f;
+        else if (n < 0.32f)
+            h -= (0.32f - n) * terraceAmp * 2.4f;
         if (IsRoadWorld(wx, wz))
-            h = macro * 0.15f + 0.4f;
+            h = RoadHeightAt(wx, wz);
+        if (heightStep > 0.001f)
+            h = Mathf.Round(h / heightStep) * heightStep;
+        return Mathf.Max(0.1f, h);
+    }
+
+    struct RoadSample
+    {
+        public float x, z, h, dist;
+    }
+
+    List<RoadSample> _roadSamples;
+    bool _roadSamplesReady;
+
+    float NaturalHeight(float wx, float wz)
+    {
+        float baseH = BlendHexHeight(wx, wz);
+        float n = Noise(wx, wz, 0.0045f, 3f);
+        float h = baseH;
+        if (n > 0.68f)
+            h += (n - 0.68f) * terraceAmp * 3f;
+        else if (n < 0.32f)
+            h -= (0.32f - n) * terraceAmp * 2.4f;
         return h;
+    }
+
+    void EnsureRoadSamples()
+    {
+        if (_roadSamplesReady) return;
+        _roadSamplesReady = true;
+        _roadSamples = new List<RoadSample>();
+
+        var line = RegionLayout.RoadLine(hexSize);
+        if (line == null || line.Count < 2) return;
+
+        float step = Mathf.Max(1f, roadStepDist);
+        float distAlong = 0f;
+        float nextAt = 0f;
+
+        void Add(float x, float z, float dist)
+        {
+            _roadSamples.Add(new RoadSample { x = x, z = z, dist = dist });
+        }
+
+        Add(line[0].x, line[0].z, 0f);
+
+        for (int i = 0; i < line.Count - 1; i++)
+        {
+            var a = line[i];
+            var b = line[i + 1];
+            float segLen = Mathf.Sqrt((b.x - a.x) * (b.x - a.x) + (b.z - a.z) * (b.z - a.z));
+            if (segLen < 0.001f) continue;
+            float segStart = distAlong;
+            distAlong += segLen;
+            while (nextAt <= distAlong + 0.001f)
+            {
+                if (nextAt > segStart + 0.001f)
+                {
+                    float t = (nextAt - segStart) / segLen;
+                    Add(Mathf.Lerp(a.x, b.x, t), Mathf.Lerp(a.z, b.z, t), nextAt);
+                }
+                nextAt += step;
+            }
+        }
+
+        var last = line[line.Count - 1];
+        if (_roadSamples.Count == 0 ||
+            (last.x - _roadSamples[_roadSamples.Count - 1].x) * (last.x - _roadSamples[_roadSamples.Count - 1].x) +
+            (last.z - _roadSamples[_roadSamples.Count - 1].z) * (last.z - _roadSamples[_roadSamples.Count - 1].z) > 1f)
+            Add(last.x, last.z, distAlong);
+
+        int n = _roadSamples.Count;
+        if (n == 0) return;
+
+        float[] targets = new float[n];
+        for (int i = 0; i < n; i++)
+            targets[i] = NaturalHeight(_roadSamples[i].x, _roadSamples[i].z);
+
+        float[] h = new float[n];
+        h[0] = targets[0];
+        for (int i = 1; i < n; i++)
+        {
+            float dd = _roadSamples[i].dist - _roadSamples[i - 1].dist;
+            float md = roadMaxStep * (dd / step);
+            h[i] = Mathf.Clamp(targets[i], h[i - 1] - md, h[i - 1] + md);
+        }
+        for (int i = n - 2; i >= 0; i--)
+        {
+            float dd = _roadSamples[i + 1].dist - _roadSamples[i].dist;
+            float md = roadMaxStep * (dd / step);
+            h[i] = Mathf.Clamp(h[i], h[i + 1] - md, h[i + 1] + md);
+        }
+        for (int i = 0; i < n; i++)
+        {
+            var s = _roadSamples[i];
+            s.h = h[i];
+            _roadSamples[i] = s;
+        }
+    }
+
+    float RoadHeightAt(float wx, float wz)
+    {
+        EnsureRoadSamples();
+        if (_roadSamples == null || _roadSamples.Count == 0)
+            return NaturalHeight(wx, wz);
+        if (_roadSamples.Count == 1)
+            return _roadSamples[0].h;
+
+        float bestD2 = float.MaxValue;
+        float bestH = _roadSamples[0].h;
+        for (int i = 0; i < _roadSamples.Count - 1; i++)
+        {
+            var a = _roadSamples[i];
+            var b = _roadSamples[i + 1];
+            float abx = b.x - a.x, abz = b.z - a.z;
+            float apx = wx - a.x, apz = wz - a.z;
+            float ab2 = abx * abx + abz * abz;
+            float t = ab2 > 0.0001f ? Mathf.Clamp01((apx * abx + apz * abz) / ab2) : 0f;
+            float cx = a.x + abx * t;
+            float cz = a.z + abz * t;
+            float d2 = (wx - cx) * (wx - cx) + (wz - cz) * (wz - cz);
+            if (d2 < bestD2)
+            {
+                bestD2 = d2;
+                bestH = Mathf.Lerp(a.h, b.h, t);
+            }
+        }
+        return bestH;
+    }
+
+    float BlendHexHeight(float wx, float wz)
+    {
+        var center = WorldToHex(new Vector3(wx, 0f, wz));
+        float sum = 0f;
+        float wsum = 0f;
+        AccumulateHex(center.x, center.y, wx, wz, ref sum, ref wsum);
+        for (int i = 0; i < 6; i++)
+        {
+            var n = HexNeighbor(center.x, center.y, i);
+            AccumulateHex(n.x, n.y, wx, wz, ref sum, ref wsum);
+        }
+        return wsum > 0.001f ? sum / wsum : HexHeight(center.x, center.y);
+    }
+
+    void AccumulateHex(int q, int r, float wx, float wz, ref float sum, ref float wsum)
+    {
+        var c = HexToWorld(q, r);
+        float dx = wx - c.x;
+        float dz = wz - c.z;
+        float d2 = dx * dx + dz * dz;
+        float span = hexSize * hexSize * Mathf.Max(0.15f, hexBlend);
+        float w = 1f / (1f + d2 / span);
+        sum += HexHeight(q, r) * w;
+        wsum += w;
     }
 
     bool IsRoadWorld(float wx, float wz)
@@ -238,49 +453,6 @@ public class LocationStream : MonoBehaviour, ICellGround
         int x = Mathf.FloorToInt(wx / tileSize);
         int z = Mathf.FloorToInt(wz / tileSize);
         return IsRoad(x, z);
-    }
-
-    float SampleHexHeight(float wx, float wz)
-    {
-        // терраса: внутри гекса плоская высота, у края — пологий склон только если перепад небольшой
-        var center = WorldToHex(new Vector3(wx, 0f, wz));
-        float h0 = HexHeight(center.x, center.y);
-        var c0 = HexToWorld(center.x, center.y);
-
-        float bestT = 0f;
-        float bestHn = h0;
-
-        for (int i = 0; i < 6; i++)
-        {
-            var n = HexNeighbor(center.x, center.y, i);
-            float hn = HexHeight(n.x, n.y);
-            if (Mathf.Abs(hn - h0) > minorDelta) continue;
-
-            var cn = HexToWorld(n.x, n.y);
-            float mx = (c0.x + cn.x) * 0.5f;
-            float mz = (c0.z + cn.z) * 0.5f;
-            float dx = cn.x - c0.x;
-            float dz = cn.z - c0.z;
-            float len = Mathf.Sqrt(dx * dx + dz * dz);
-            if (len < 0.01f) continue;
-            dx /= len; dz /= len;
-
-            // signed: >0 к соседу, <0 внутрь своего гекса. 0 = край.
-            float signed = (wx - mx) * dx + (wz - mz) * dz;
-            float distFromEdge = -signed;
-            if (distFromEdge >= slopeWidth || distFromEdge < 0f) continue;
-
-            float t = 1f - distFromEdge / slopeWidth;
-            t = t * t * (3f - 2f * t); // smoothstep
-            if (t > bestT)
-            {
-                bestT = t;
-                bestHn = hn;
-            }
-        }
-
-        // у края — половина пути к соседу (симметрично с той стороны)
-        return Mathf.Lerp(h0, (h0 + bestHn) * 0.5f, bestT);
     }
 
     public float HexHeight(int q, int r)
@@ -364,14 +536,14 @@ public class LocationStream : MonoBehaviour, ICellGround
     {
         int r = Mathf.Max(1, loadRadiusChunks);
         for (int dz = -r; dz <= r; dz++)
-        for (int dx = -r; dx <= r; dx++)
-        {
-            if (dx * dx + dz * dz > r * r + r) continue;
-            var key = new Vector2Int(pcx + dx, pcz + dz);
-            if (_chunks.ContainsKey(key) || _queued.Contains(key)) continue;
-            _queue.Enqueue(key);
-            _queued.Add(key);
-        }
+            for (int dx = -r; dx <= r; dx++)
+            {
+                if (dx * dx + dz * dz > r * r + r) continue;
+                var key = new Vector2Int(pcx + dx, pcz + dz);
+                if (_chunks.ContainsKey(key) || _queued.Contains(key)) continue;
+                _queue.Enqueue(key);
+                _queued.Add(key);
+            }
     }
 
     void DropFar(int pcx, int pcz)
@@ -399,6 +571,7 @@ public class LocationStream : MonoBehaviour, ICellGround
         }
         float t0 = Time.realtimeSinceStartup;
         chunkBuilder.tileSize = tileSize;
+        chunkBuilder.minTerraceCells = minTerraceCells;
         int cs = Mathf.Max(4, chunkCells);
         var go = chunkBuilder.BuildStreamChunk(sx, sz, (x, z) => Height(x, z), cs);
         if (go == null)
@@ -422,20 +595,20 @@ public class LocationStream : MonoBehaviour, ICellGround
         var verts = new List<Vector3>();
         var tris = new List<int>();
         for (int z = z0; z < z0 + cs; z++)
-        for (int x = x0; x < x0 + cs; x++)
-        {
-            if (!IsRoad(x, z)) continue;
-            float y = Height(x, z) + 0.08f;
-            float px = x * tileSize;
-            float pz = z * tileSize;
-            int b = verts.Count;
-            verts.Add(new Vector3(px, y, pz));
-            verts.Add(new Vector3(px + tileSize, y, pz));
-            verts.Add(new Vector3(px + tileSize, y, pz + tileSize));
-            verts.Add(new Vector3(px, y, pz + tileSize));
-            tris.Add(b); tris.Add(b + 2); tris.Add(b + 1);
-            tris.Add(b); tris.Add(b + 3); tris.Add(b + 2);
-        }
+            for (int x = x0; x < x0 + cs; x++)
+            {
+                if (!IsRoad(x, z)) continue;
+                float y = Height(x, z) + 0.08f;
+                float px = x * tileSize;
+                float pz = z * tileSize;
+                int b = verts.Count;
+                verts.Add(new Vector3(px, y, pz));
+                verts.Add(new Vector3(px + tileSize, y, pz));
+                verts.Add(new Vector3(px + tileSize, y, pz + tileSize));
+                verts.Add(new Vector3(px, y, pz + tileSize));
+                tris.Add(b); tris.Add(b + 2); tris.Add(b + 1);
+                tris.Add(b); tris.Add(b + 3); tris.Add(b + 2);
+            }
         if (verts.Count == 0) return;
         var road = new GameObject("Road");
         road.transform.SetParent(parent, false);
@@ -667,17 +840,17 @@ public class LocationStream : MonoBehaviour, ICellGround
         // зоны соседних гексов — как старая разметка, но по гексам
         int r = 2;
         for (int dq = -r; dq <= r; dq++)
-        for (int dr = -r; dr <= r; dr++)
-        {
-            int q = CurrentHexQ + dq;
-            int rr = CurrentHexR + dr;
-            if ((Mathf.Abs(dq) + Mathf.Abs(dr) + Mathf.Abs(dq + dr)) / 2 > r) continue;
-            var zone = RegionLayout.ZoneForHex(q, rr);
-            Gizmos.color = ZoneColor(zone, RegionLayout.IsRoadHex(q, rr));
-            var c = HexToWorld(q, rr);
-            c.y = HeightAtWorld(c.x, c.z) + 0.4f;
-            Gizmos.DrawCube(c, new Vector3(hexSize * 0.85f, 0.3f, hexSize * 0.85f));
-        }
+            for (int dr = -r; dr <= r; dr++)
+            {
+                int q = CurrentHexQ + dq;
+                int rr = CurrentHexR + dr;
+                if ((Mathf.Abs(dq) + Mathf.Abs(dr) + Mathf.Abs(dq + dr)) / 2 > r) continue;
+                var zone = RegionLayout.ZoneForHex(q, rr);
+                Gizmos.color = ZoneColor(zone, RegionLayout.IsRoadHex(q, rr));
+                var c = HexToWorld(q, rr);
+                c.y = HeightAtWorld(c.x, c.z) + 0.4f;
+                Gizmos.DrawCube(c, new Vector3(hexSize * 0.85f, 0.3f, hexSize * 0.85f));
+            }
     }
 
     static Color ZoneColor(NaturePlacement.Zone z, bool road)

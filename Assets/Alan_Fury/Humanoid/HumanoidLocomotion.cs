@@ -150,9 +150,11 @@ public class HumanoidLocomotion : MonoBehaviour
     public float rollDuration = 0.4f;
     public float rollCooldown = 1.2f;
 
-    [Header("Вичфаер-телепорт")]
-    public WitchLight witchLight;
+    [Header("Телепорт (свет)")]
     public float teleportDistance = 5f;
+
+    [Header("Инвеститурный свет")]
+    public InvestitureLight investiture;
 
     [Header("Паркур (перепрыгивание)")]
     public LayerMask vaultLayers;
@@ -559,7 +561,7 @@ public class HumanoidLocomotion : MonoBehaviour
         if (Resources != null) Resources.onDeath += HandleDeath;
 
         if (boundary == null) boundary = GetComponent<MapBoundary>();
-        if (witchLight == null) witchLight = GetComponentInChildren<WitchLight>();
+        if (investiture == null) investiture = GetComponentInChildren<InvestitureLight>();
         if (animator == null) animator = GetComponentInChildren<Animator>();
         CacheAnimParams();
     }
@@ -982,7 +984,7 @@ public class HumanoidLocomotion : MonoBehaviour
                     turn = _startTurnAngle;
                 else if (!isMoving)
                     turn = ComputeStandingTurnAngle();
-                animator.SetFloat("Turn", turn);
+                animator.SetFloat("Turn", Mathf.Clamp(turn / 180f, -1f, 1f));
             }
 
             float moveAngle = 0f;
@@ -1165,7 +1167,8 @@ public class HumanoidLocomotion : MonoBehaviour
             }
 
             float pulse = stepPlantFloor + (1f - stepPlantFloor) * _step.Curve;
-            float targetSpeed = _currentGait.speed * speedMult * pulse * _turnRecover;
+            float lightMult = investiture != null ? investiture.SpeedMultiplier : 1f;
+            float targetSpeed = _currentGait.speed * speedMult * pulse * _turnRecover * lightMult;
             if (_combatStepLock && _stepTravel > 0.05f && _stepDur > 0.05f)
                 targetSpeed = (_stepTravel / _stepDur) * pulse;
             Vector3 targetVelocity = moveDir * targetSpeed;

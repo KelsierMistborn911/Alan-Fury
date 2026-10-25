@@ -217,8 +217,22 @@ public class TerrainManager : MonoBehaviour
         if (heightGenerator == null) heightGenerator = GetComponent<HeightMapGenerator>();
         if (chunkedTerrainBuilder == null) chunkedTerrainBuilder = GetComponent<ChunkedTerrainBuilder>();
         if (objectPlacer == null) objectPlacer = GetComponent<ObjectPlacer>();
-        if (naturePlacement == null) naturePlacement = GetComponent<NaturePlacement>();
-        if (natureRenderer == null) natureRenderer = GetComponent<NatureRenderer>();
+
+        var leshiy = FindObjectOfType<Leshiy>();
+        if (leshiy != null)
+        {
+            leshiy.EnsureDrawObject();
+            naturePlacement = leshiy.placement;
+            natureRenderer = leshiy.renderer;
+            if (mapLayout == null) mapLayout = GetComponent<MapLayout>();
+            if (leshiy.layout == null) leshiy.layout = mapLayout;
+            leshiy.PushToPlacement(naturePlacement);
+        }
+        else
+        {
+            if (naturePlacement == null) naturePlacement = GetComponent<NaturePlacement>();
+            if (natureRenderer == null) natureRenderer = GetComponent<NatureRenderer>();
+        }
         if (mapGrid == null) mapGrid = GetComponent<MapGrid>();
         if (mapLayout == null) mapLayout = GetComponent<MapLayout>();
         if (fogCurtain == null) fogCurtain = GetComponent<MapFogCurtain>();

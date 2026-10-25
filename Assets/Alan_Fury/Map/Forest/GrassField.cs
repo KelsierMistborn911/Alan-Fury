@@ -24,14 +24,18 @@ public class GrassField : MonoBehaviour
     public int skipBorderCells = 2;
     [Tooltip("Пропуск клетки, если размах высот углов больше этого (м).")]
     public float maxSlope = 1.6f;
-    [Tooltip("На сколько резать клетку. 4 = квады ~1м, плотность шейдера не упирается в лимит GS.")]
-    [Range(1, 6)] public int cellSubdiv = 2;
+
+    [Header("Полоски")]
+    [Tooltip("Сколько пучков на клетку. Пучок = три травинки рядом, один кустик.")]
+    [Range(1, 32)] public int stripsPerCell = 12;
+    public float stripWidth = 0.09f;
+    public float stripHeight = 1.3f;
 
     [Header("Плотность / вид (пишется в материал)")]
     [Tooltip("Густота в центре открытого поля.")]
     [Range(1f, 32f)] public float centerBlades = 12f;
     [Tooltip("Густота сразу за кругом кроны.")]
-    [Range(0f, 16f)] public float edgeBlades = 2f;
+    [Range(0f, 16f)] public float edgeBlades = 3f;
     [Tooltip("Радиус без травы вокруг ствола (м).")]
     public float trunkRadius = 5.2f;
     [Tooltip("За сколько метров густота доходит до центра поля.")]
@@ -44,9 +48,9 @@ public class GrassField : MonoBehaviour
 
     [Header("Игрок")]
     public Transform player;
-    [Tooltip("Как NatureRenderer.drawRadius, если matchTreeRadius.")]
-    public float drawRadius = 55f;
-    public bool matchTreeRadius = true;
+    [Tooltip("Трава ближе деревьев: геометрия-шейдер на 55м слишком тяжёлый.")]
+    public float drawRadius = 28f;
+    public bool matchTreeRadius = false;
     public NatureRenderer natureRenderer;
     public float pushRadius = 1.35f;
     public float pushStrength = 1.05f;
@@ -56,7 +60,7 @@ public class GrassField : MonoBehaviour
 
     [Header("Стриминг")]
     [Tooltip("Как NatureRenderer.streamCheckEveryNFrames.")]
-    public int streamCheckEveryNFrames = 20;
+    public int streamCheckEveryNFrames = 60;
     [Tooltip("За сколько метров дальше drawRadius держать сектор.")]
     public float unloadExtra = 25f;
 
@@ -71,7 +75,9 @@ public class GrassField : MonoBehaviour
     [Tooltip("Клетка с флагом Tree в MapGrid. Сектор деревьев должен быть уже загружен.")]
     public bool skipUnderTrees = true;
 
-    [Header("Зоны (как Nature, если naturePlacement задан)")]
+    [Header("Зоны (слот травы из Forest / NaturePlacement)")]
+    public bool useForestSlots = true;
+    [Tooltip("Запас, если Forest ещё нет.")]
     public bool growInGrove = true;
     public bool growInForest = true;
     public bool growInThicket = true;
@@ -79,7 +85,13 @@ public class GrassField : MonoBehaviour
     [Range(0f, 1f)] public float densityGrove = 0.62f;
     [Range(0f, 1f)] public float densityForest = 0.22f;
     [Range(0f, 1f)] public float densityThicket = 0.06f;
-    [Range(0f, 1f)] public float coverage = 1f;
+    [Tooltip("Доля клеток зоны, которым вообще даём траву. Меньше — реже пятна.")]
+    [Range(0.05f, 1f)] public float cellKeep = 0.8f;
+    public float patchNoiseScale = 0.07f;
+    public Vector2 patchOffset = new Vector2(41.2f, 8.7f);
+    [Range(0f, 1f)] public float underTreeMult = 0.22f;
+    [Range(2f, 32f)] public float pixelSteps = 6f;
+    [Range(2f, 64f)] public float colorLevels = 16f;
 
     [Header("Рендер")]
     public ShadowCastingMode shadowCasting = ShadowCastingMode.Off;
@@ -113,10 +125,19 @@ public class GrassField : MonoBehaviour
     private float _ts;
     private Vector3 _origin;
     private bool _prepared;
+    private bool _stream;
+    private ICellGround _ground;
     private readonly List<Vector3> _verts = new List<Vector3>(4096);
     private readonly List<int> _tris = new List<int>(4096);
     private readonly List<Vector2> _uvs = new List<Vector2>(4096);
+    private readonly List<Vector2> _tufts = new List<Vector2>(4096);
     private readonly List<Color> _cols = new List<Color>(4096);
+
+    // Смещения/масштабы для трёх травинок в пучке (раздвинуты сильнее)
+    private static readonly float[] TuftDx = { 0.00f, 0.12f, -0.10f };
+    private static readonly float[] TuftDz = { 0.00f, 0.08f, 0.14f };
+    private static readonly float[] TuftHm = { 1.00f, 0.75f, 0.85f };
+    private static readonly float[] TuftSm = { 1.00f, 0.85f, 0.92f };
 
     private void Start()
     {
@@ -178,15 +199,12 @@ public class GrassField : MonoBehaviour
 
         if (_renderers.Count == 0) return;
         TickStamps();
+        if ((Time.frameCount % 12) != 0) return;
         FillBlock();
-        // штампы стареют каждый кадр, но SetPropertyBlock на все секторы — дорого. Раз в 2 кадра достаточно.
-        if ((Time.frameCount & 1) == 0)
+        for (int i = 0; i < _renderers.Count; i++)
         {
-            for (int i = 0; i < _renderers.Count; i++)
-            {
-                if (_renderers[i] != null)
-                    _renderers[i].SetPropertyBlock(_block);
-            }
+            if (_renderers[i] != null)
+                _renderers[i].SetPropertyBlock(_block);
         }
     }
 
@@ -198,18 +216,49 @@ public class GrassField : MonoBehaviour
         if (mapGrid == null) mapGrid = GetComponent<MapGrid>();
         if (naturePlacement == null) naturePlacement = GetComponent<NaturePlacement>();
         if (natureRenderer == null) natureRenderer = GetComponent<NatureRenderer>();
-        if (heightSource == null || !heightSource.isGenerated) return false;
+        if (naturePlacement != null && naturePlacement.streamGround != null)
+            _ground = naturePlacement.streamGround;
+        else if (heightSource != null)
+            _ground = heightSource.streamGround;
+        _stream = _ground != null;
+        if (!_stream && (heightSource == null || !heightSource.isGenerated)) return false;
 
-        _w = heightSource.width;
-        _d = heightSource.depth;
         _ts = terrainBuilder != null ? terrainBuilder.tileSize : 4f;
-        _origin = new Vector3(-_w * _ts * 0.5f, 0f, -_d * _ts * 0.5f);
-        _border = Mathf.Max(0, skipBorderCells);
-        _div = Mathf.Max(1, cellSubdiv);
+        if (_stream)
+        {
+            _origin = _ground.CellOrigin;
+            _w = int.MaxValue / 4;
+            _d = int.MaxValue / 4;
+            _border = 0;
+        }
+        else
+        {
+            _w = heightSource.width;
+            _d = heightSource.depth;
+            _origin = new Vector3(-_w * _ts * 0.5f, 0f, -_d * _ts * 0.5f);
+            _border = Mathf.Max(0, skipBorderCells);
+        }
+        _border = _stream ? 0 : Mathf.Max(0, skipBorderCells);
         _sectorSize = naturePlacement != null ? Mathf.Max(1, naturePlacement.sectorSize) : 16;
+        stripWidth = 0.09f;
+        stripHeight = 1.3f;
+        stripsPerCell = 12;
+        EnsureMaterial();
         EnsureRoot();
         _prepared = true;
         return true;
+    }
+
+    void EnsureMaterial()
+    {
+        if (grassMaterial != null && grassMaterial.shader != null && grassMaterial.shader.name == "Nature/GrassStrip")
+            return;
+        var sh = Shader.Find("Nature/GrassStrip");
+        if (sh == null) return;
+        grassMaterial = new Material(sh) { name = "GrassStrip" };
+        var px = Shader.Find("ProPixelizer/SRP/PixelizedWithOutline");
+        if (px != null && grassMaterial.HasProperty("_PixelSize"))
+            grassMaterial.SetFloat("_PixelSize", 2f);
     }
 
     private void UpdateStreaming()
@@ -222,15 +271,24 @@ public class GrassField : MonoBehaviour
             naturePlacement.UpdateStreaming(player.position);
 
         float sectorWorld = Mathf.Max(0.01f, _sectorSize * _ts);
-        Vector3 playerLocal = terrainBuilder != null
-            ? terrainBuilder.WorldToMapLocal(player.position)
-            : player.position;
-        int pcx = Mathf.FloorToInt((playerLocal.x - _origin.x) / sectorWorld);
-        int pcz = Mathf.FloorToInt((playerLocal.z - _origin.z) / sectorWorld);
+        int pcx, pcz;
+        if (_stream)
+        {
+            pcx = Mathf.FloorToInt(player.position.x / sectorWorld);
+            pcz = Mathf.FloorToInt(player.position.z / sectorWorld);
+        }
+        else
+        {
+            Vector3 playerLocal = terrainBuilder != null
+                ? terrainBuilder.WorldToMapLocal(player.position)
+                : player.position;
+            pcx = Mathf.FloorToInt((playerLocal.x - _origin.x) / sectorWorld);
+            pcz = Mathf.FloorToInt((playerLocal.z - _origin.z) / sectorWorld);
+        }
 
         if (matchTreeRadius && natureRenderer != null)
             drawRadius = natureRenderer.drawRadius;
-        float loadMeters = Mathf.Max(drawRadius, 40f);
+        float loadMeters = Mathf.Max(drawRadius, 16f);
         int loadR = Mathf.Max(1, Mathf.CeilToInt(loadMeters / sectorWorld));
         int unloadR = Mathf.Max(loadR + 1, Mathf.CeilToInt((loadMeters + unloadExtra) / sectorWorld));
 
@@ -238,7 +296,7 @@ public class GrassField : MonoBehaviour
         {
             for (int sz = pcz - loadR; sz <= pcz + loadR; sz++)
             {
-                if (sx < 0 || sz < 0 || sx * _sectorSize >= _w || sz * _sectorSize >= _d) continue;
+                if (!_stream && (sx < 0 || sz < 0 || sx * _sectorSize >= _w || sz * _sectorSize >= _d)) continue;
                 var key = new Vector2Int(sx, sz);
                 int stamp = TreeStamp(sx, sz);
                 if (_sectors.TryGetValue(key, out var existing))
@@ -265,65 +323,51 @@ public class GrassField : MonoBehaviour
         float t0 = Time.realtimeSinceStartup;
         int x0 = sx * _sectorSize;
         int z0 = sz * _sectorSize;
-        int x1 = Mathf.Min(_w, x0 + _sectorSize);
-        int z1 = Mathf.Min(_d, z0 + _sectorSize);
+        int x1 = _stream ? x0 + _sectorSize : Mathf.Min(_w, x0 + _sectorSize);
+        int z1 = _stream ? z0 + _sectorSize : Mathf.Min(_d, z0 + _sectorSize);
         CollectSectorTrees(x0, z0, x1, z1);
 
         _verts.Clear();
         _tris.Clear();
         _uvs.Clear();
+        _tufts.Clear();
         _cols.Clear();
 
         for (int x = x0; x < x1; x++)
         {
             for (int z = z0; z < z1; z++)
             {
-                if (x < _border || z < _border || x >= _w - _border || z >= _d - _border)
+                if (!_stream && (x < _border || z < _border || x >= _w - _border || z >= _d - _border))
                     continue;
                 if (!AcceptCell(x, z)) continue;
 
-                float h00 = heightSource.GetHeight(x, z);
-                float h10 = heightSource.GetHeight(Mathf.Min(x + 1, _w - 1), z);
-                float h11 = heightSource.GetHeight(Mathf.Min(x + 1, _w - 1), Mathf.Min(z + 1, _d - 1));
-                float h01 = heightSource.GetHeight(x, Mathf.Min(z + 1, _d - 1));
+                float h00 = CellHeight(x, z);
+                float h10 = CellHeight(x + 1, z);
+                float h11 = CellHeight(x + 1, z + 1);
+                float h01 = CellHeight(x, z + 1);
                 if (Mathf.Max(Mathf.Max(h00, h10), Mathf.Max(h11, h01)) - Mathf.Min(Mathf.Min(h00, h10), Mathf.Min(h11, h01)) > maxSlope)
                     continue;
 
                 float mapX = _origin.x + x * _ts;
                 float mapZ = _origin.z + z * _ts;
-                float o00 = OpenAt(mapX, mapZ);
-                float o10 = OpenAt(mapX + _ts, mapZ);
-                float o11 = OpenAt(mapX + _ts, mapZ + _ts);
-                float o01 = OpenAt(mapX, mapZ + _ts);
-                float zm = Mathf.Lerp(0.35f, 1f, GrassDensity(ResolveZone(x, z)));
-                o00 *= zm; o10 *= zm; o11 *= zm; o01 *= zm;
-                if (o00 + o10 + o11 + o01 < 0.02f) continue;
+                float open = OpenAt(mapX + _ts * 0.5f, mapZ + _ts * 0.5f) * CellOpen(x, z);
+                if (open < 0.05f) continue;
 
-                float yOff = heightOffset;
-                for (int ix = 0; ix < _div; ix++)
+                // Считаем плотность для этой клетки. Чем больше плотность — тем больше пучков.
+                var zone = ResolveZone(x, z);
+                float dens = GrassDensity(zone);
+                int n = Mathf.RoundToInt(stripsPerCell * dens);
+                if (n <= 0) continue;
+
+                float yBase = (h00 + h10 + h11 + h01) * 0.25f + heightOffset;
+                for (int k = 0; k < n; k++)
                 {
-                    for (int iz = 0; iz < _div; iz++)
-                    {
-                        float u0 = ix / (float)_div;
-                        float v0 = iz / (float)_div;
-                        float u1 = (ix + 1) / (float)_div;
-                        float v1 = (iz + 1) / (float)_div;
-                        int i = _verts.Count;
-                        _verts.Add(ToMesh(mapX + u0 * _ts, Hlerp(h00, h10, h01, h11, u0, v0) + yOff, mapZ + v0 * _ts));
-                        _verts.Add(ToMesh(mapX + u1 * _ts, Hlerp(h00, h10, h01, h11, u1, v0) + yOff, mapZ + v0 * _ts));
-                        _verts.Add(ToMesh(mapX + u1 * _ts, Hlerp(h00, h10, h01, h11, u1, v1) + yOff, mapZ + v1 * _ts));
-                        _verts.Add(ToMesh(mapX + u0 * _ts, Hlerp(h00, h10, h01, h11, u0, v1) + yOff, mapZ + v1 * _ts));
-                        _uvs.Add(new Vector2(u0, v0));
-                        _uvs.Add(new Vector2(u1, v0));
-                        _uvs.Add(new Vector2(u1, v1));
-                        _uvs.Add(new Vector2(u0, v1));
-                        _cols.Add(Oc(Hlerp(o00, o10, o01, o11, u0, v0)));
-                        _cols.Add(Oc(Hlerp(o00, o10, o01, o11, u1, v0)));
-                        _cols.Add(Oc(Hlerp(o00, o10, o01, o11, u1, v1)));
-                        _cols.Add(Oc(Hlerp(o00, o10, o01, o11, u0, v1)));
-                        _tris.Add(i); _tris.Add(i + 3); _tris.Add(i + 2);
-                        _tris.Add(i); _tris.Add(i + 2); _tris.Add(i + 1);
-                    }
+                    float hx = Hash01(x, z, k, 3);
+                    float hz = Hash01(x, z, k, 9);
+                    float h = stripHeight * Mathf.Lerp(0.85f, 1.1f, Hash01(x, z, k, 21));
+                    float px = mapX + hx * _ts;
+                    float pz = mapZ + hz * _ts;
+                    EmitStrip(px, yBase, pz, stripWidth, h, open);
                 }
             }
         }
@@ -337,8 +381,9 @@ public class GrassField : MonoBehaviour
             mesh.SetVertices(_verts);
             mesh.SetTriangles(_tris, 0);
             mesh.SetUVs(0, _uvs);
+            mesh.SetUVs(1, _tufts);
             mesh.SetColors(_cols);
-            mesh.RecalculateNormals();
+            // mesh.RecalculateNormals(); — убрано для производительности (Cull Off и так работает)
             mesh.RecalculateBounds();
 
             var go = new GameObject(mesh.name);
@@ -359,6 +404,50 @@ public class GrassField : MonoBehaviour
         _sectors[new Vector2Int(sx, sz)] = entry;
         float ms = (Time.realtimeSinceStartup - t0) * 1000f;
         Debug.Log($"[AF.Load] GrassField.BakeSector {sx},{sz} {ms:0.0}ms verts={_verts.Count}");
+    }
+
+    /// <summary>Пучок из трёх травинок вокруг точки (x,z). Все гнутся от общего центра пучка.</summary>
+    void EmitStrip(float x, float y, float z, float w, float h, float shade)
+    {
+        Vector3 centerWorld = WorldOf(x, y, z);
+        var tuftCenter = new Vector2(centerWorld.x, centerWorld.z);
+
+        for (int b = 0; b < 3; b++)
+        {
+            float bx = x + TuftDx[b];
+            float bz = z + TuftDz[b];
+            float bh = h * TuftHm[b];
+            float bs = shade * TuftSm[b];
+
+            int i = _verts.Count;
+            var col = new Color(bs, bs, bs, 1f);
+
+            _verts.Add(ToMesh(bx, y, bz));
+            _verts.Add(ToMesh(bx, y, bz));
+            _verts.Add(ToMesh(bx, y + bh, bz));
+            _verts.Add(ToMesh(bx, y + bh, bz));
+
+            _uvs.Add(new Vector2(0f, 0f));
+            _uvs.Add(new Vector2(1f, 0f));
+            _uvs.Add(new Vector2(1f, 1f));
+            _uvs.Add(new Vector2(0f, 1f));
+
+            // Общий центр пучка — один и тот же для всех трёх травинок
+            _tufts.Add(tuftCenter);
+            _tufts.Add(tuftCenter);
+            _tufts.Add(tuftCenter);
+            _tufts.Add(tuftCenter);
+
+            _cols.Add(col);
+            _cols.Add(col);
+            _cols.Add(col);
+            _cols.Add(col);
+
+            _tris.Add(i); _tris.Add(i + 2); _tris.Add(i + 1);
+            _tris.Add(i); _tris.Add(i + 3); _tris.Add(i + 2);
+
+            _ = w; // ширина травинки задаётся в шейдере через _Width
+        }
     }
 
     private void UnloadSector(Vector2Int key)
@@ -384,14 +473,14 @@ public class GrassField : MonoBehaviour
         int x0 = sx * _sectorSize;
         int z0 = sz * _sectorSize;
         int margin = Mathf.CeilToInt((trunkRadius + fadeMeters) / Mathf.Max(0.01f, _ts));
-        int xa = Mathf.Max(0, x0 - margin);
-        int za = Mathf.Max(0, z0 - margin);
-        int xb = Mathf.Min(_w - 1, x0 + _sectorSize + margin);
-        int zb = Mathf.Min(_d - 1, z0 + _sectorSize + margin);
+        int xa = _stream ? x0 - margin : Mathf.Max(0, x0 - margin);
+        int za = _stream ? z0 - margin : Mathf.Max(0, z0 - margin);
+        int xb = _stream ? x0 + _sectorSize + margin : Mathf.Min(_w - 1, x0 + _sectorSize + margin);
+        int zb = _stream ? z0 + _sectorSize + margin : Mathf.Min(_d - 1, z0 + _sectorSize + margin);
         int n = 0;
         for (int x = xa; x <= xb; x++)
             for (int z = za; z <= zb; z++)
-                if (mapGrid.HasFlag(x, z, MapGrid.OccupancyFlags.Tree))
+                if (CellHasTree(x, z))
                     n++;
         return n;
     }
@@ -434,15 +523,15 @@ public class GrassField : MonoBehaviour
 
         if (_sectorTrees.Count > 0 || mapGrid == null || !mapGrid.IsReady) return;
         int m = Mathf.CeilToInt(margin / Mathf.Max(0.01f, _ts));
-        int xa = Mathf.Max(0, x0 - m);
-        int za = Mathf.Max(0, z0 - m);
-        int xb = Mathf.Min(_w - 1, x1 + m);
-        int zb = Mathf.Min(_d - 1, z1 + m);
+        int xa = _stream ? x0 - m : Mathf.Max(0, x0 - m);
+        int za = _stream ? z0 - m : Mathf.Max(0, z0 - m);
+        int xb = _stream ? x1 + m : Mathf.Min(_w - 1, x1 + m);
+        int zb = _stream ? z1 + m : Mathf.Min(_d - 1, z1 + m);
         for (int x = xa; x <= xb; x++)
         {
             for (int z = za; z <= zb; z++)
             {
-                if (!mapGrid.HasFlag(x, z, MapGrid.OccupancyFlags.Tree)) continue;
+                if (!CellHasTree(x, z)) continue;
                 Vector3 w = WorldOf(_origin.x + (x + 0.5f) * _ts, 0f, _origin.z + (z + 0.5f) * _ts);
                 _sectorTrees.Add(new Vector2(w.x, w.z));
             }
@@ -469,6 +558,7 @@ public class GrassField : MonoBehaviour
 
     private Vector3 WorldOf(float x, float y, float z)
     {
+        if (_stream) return new Vector3(x, y, z);
         return terrainBuilder != null
             ? terrainBuilder.MapLocalToWorld(new Vector3(x, y, z))
             : new Vector3(x, y, z);
@@ -537,10 +627,16 @@ public class GrassField : MonoBehaviour
         _block.SetFloat("_BladeHeight", bladeHeight);
         _block.SetFloat("_BladeWidth", bladeWidth);
         _block.SetFloat("_ScreenPad", screenPad);
+        _block.SetFloat("_Width", stripWidth);
+        _block.SetColor("_Color", new Color(0.16f, 0.34f, 0.12f, 1f));
+        _block.SetColor("_TipColor", new Color(0.22f, 0.42f, 0.16f, 1f));
+        _block.SetFloat("_Brightness", 0.62f);
         _block.SetFloat("_WindStrength", windStrength);
         _block.SetFloat("_WindSpeed", windSpeed);
         _block.SetFloat("_PushRadius", pushRadius);
         _block.SetFloat("_PushStrength", pushStrength);
+        _block.SetFloat("_PixelSteps", pixelSteps);
+        _block.SetFloat("_ColorLevels", colorLevels);
         if (matchTreeRadius)
         {
             if (natureRenderer == null) natureRenderer = GetComponent<NatureRenderer>();
@@ -552,56 +648,88 @@ public class GrassField : MonoBehaviour
         else if (Camera.main != null) p = Camera.main.transform.position;
         else p = Vector3.zero;
         _block.SetVector("_PlayerPos", p);
-        _block.SetFloat("_DrawRadius", Mathf.Max(drawRadius, 40f));
+        _block.SetFloat("_DrawRadius", Mathf.Max(drawRadius, 16f));
         _block.SetVectorArray("_PushStamps", _stamps);
         _block.SetVectorArray("_PushDirs", _dirs);
     }
 
     private bool AcceptCell(int x, int z)
     {
-        float h = heightSource.GetHeight(x, z);
+        float h = CellHeight(x, z);
         if (skipWater && h <= waterLevel) return false;
 
-        if (mapGrid != null && mapGrid.IsReady)
+        if (_stream && _ground != null)
         {
-            if (skipRoads && mapGrid.HasFlag(x, z, MapGrid.OccupancyFlags.Road))
-                return false;
-            if (skipUnderTrees && mapGrid.HasFlag(x, z, MapGrid.OccupancyFlags.Tree))
-                return false;
+            if (skipRoads && _ground.IsRoad(x, z)) return false;
+        }
+        else if (mapGrid != null && mapGrid.IsReady)
+        {
+            if (skipRoads && mapGrid.HasFlag(x, z, MapGrid.OccupancyFlags.Road)) return false;
         }
 
         var zone = ResolveZone(x, z);
-        if (!ZoneAllowsGrass(zone)) return false;
-        if (coverage < 1f && Hash01(x, z, 71, 19) > coverage) return false;
+        float dens = GrassDensity(zone);
+        if (dens <= 0.0001f) return false;
+
         return true;
     }
 
-    private bool ZoneAllowsGrass(NaturePlacement.Zone zone)
+    float CellHeight(int x, int z)
     {
-        switch (zone)
+        if (_stream && _ground != null) return _ground.Height(x, z);
+        if (heightSource == null) return 0f;
+        if (!_stream)
         {
-            case NaturePlacement.Zone.Grove: return growInGrove;
-            case NaturePlacement.Zone.Forest: return growInForest;
-            case NaturePlacement.Zone.Thicket: return growInThicket;
-            case NaturePlacement.Zone.Clearing: return growInClearing;
-            default: return false;
+            x = Mathf.Clamp(x, 0, Mathf.Max(0, _w - 1));
+            z = Mathf.Clamp(z, 0, Mathf.Max(0, _d - 1));
         }
+        return heightSource.GetHeight(x, z);
+    }
+
+    /// <summary>Открытость клетки: зона из слота Forest, пятна, мало под деревом.</summary>
+    float CellOpen(int x, int z)
+    {
+        float patch = Mathf.PerlinNoise(
+            (x + patchOffset.x) * patchNoiseScale,
+            (z + patchOffset.y) * patchNoiseScale);
+        float open = Mathf.Lerp(0.7f, 1.15f, patch);
+        if (CellHasTree(x, z)) open *= underTreeMult;
+        return Mathf.Clamp01(open);
+    }
+
+    bool CellHasTree(int x, int z)
+    {
+        if (mapGrid == null || !mapGrid.IsReady) return false;
+        int lx = x, lz = z;
+        if (mapGrid.Streaming)
+        {
+            lx = x - mapGrid.StreamOriginX;
+            lz = z - mapGrid.StreamOriginZ;
+        }
+        return mapGrid.HasFlag(lx, lz, MapGrid.OccupancyFlags.Tree);
     }
 
     private float GrassDensity(NaturePlacement.Zone zone)
     {
+        if (useForestSlots && naturePlacement != null && naturePlacement.forest != null)
+            return naturePlacement.forest.DensityFor(zone, NaturePlacement.LayerKind.Grass);
         switch (zone)
         {
-            case NaturePlacement.Zone.Grove: return densityGrove;
-            case NaturePlacement.Zone.Forest: return densityForest;
-            case NaturePlacement.Zone.Thicket: return densityThicket;
-            case NaturePlacement.Zone.Clearing: return densityGrove;
+            case NaturePlacement.Zone.Grove: return growInGrove ? densityGrove : 0f;
+            case NaturePlacement.Zone.Forest: return growInForest ? densityForest : 0f;
+            case NaturePlacement.Zone.Thicket: return growInThicket ? densityThicket : 0f;
+            case NaturePlacement.Zone.Clearing: return growInClearing ? densityGrove : 0f;
+            case NaturePlacement.Zone.ForestBorder:
+                return naturePlacement != null && naturePlacement.forest != null
+                    ? naturePlacement.forest.DensityFor(zone, NaturePlacement.LayerKind.Grass)
+                    : densityForest * 0.6f;
             default: return 0f;
         }
     }
 
     private NaturePlacement.Zone ResolveZone(int x, int z)
     {
+        if (_stream && _ground != null) return _ground.ZoneAt(x, z);
         if (naturePlacement == null) naturePlacement = GetComponent<NaturePlacement>();
         if (naturePlacement != null) return naturePlacement.GetZone(x, z);
         return NaturePlacement.Zone.Forest;

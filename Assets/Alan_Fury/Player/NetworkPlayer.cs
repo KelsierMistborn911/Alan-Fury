@@ -2,22 +2,23 @@ using Unity.Netcode;
 using UnityEngine;
 
 /// <summary>
-/// Тонкая сетевая оболочка игрока (этап 1–2).
-/// Вешать на префаб игрока рядом с PlayerMovement3D / CombatController3D.
-/// Нужны: NetworkObject (+ по желанию NetworkTransform).
+/// РўРѕРЅРєР°СЏ СЃРµС‚РµРІР°СЏ РѕР±РѕР»РѕС‡РєР° РёРіСЂРѕРєР° (СЌС‚Р°Рї 1вЂ“2).
+/// Р’РµС€Р°С‚СЊ РЅР° РїСЂРµС„Р°Р± РёРіСЂРѕРєР° СЂСЏРґРѕРј СЃ PlayerMovement3D / CombatController3D
+/// (РѕРЅРё РЅР°СЃР»РµРґСѓСЋС‚ HumanoidLocomotion / HumanoidCombat).
+/// РќСѓР¶РЅС‹: NetworkObject (+ РїРѕ Р¶РµР»Р°РЅРёСЋ NetworkTransform).
 ///
-/// - Владелец: включает локальный ввод, цепляет камеру.
-/// - Чужой клиент: отключает ввод движения (пока без полного синка анимаций).
-/// - Без сети (нет NetworkManager / не заспавнен) — ничего не ломает, одиночка жива.
+/// - Р’Р»Р°РґРµР»РµС†: РІРєР»СЋС‡Р°РµС‚ Р»РѕРєР°Р»СЊРЅС‹Р№ РІРІРѕРґ, С†РµРїР»СЏРµС‚ РєР°РјРµСЂСѓ.
+/// - Р§СѓР¶РѕР№ РєР»РёРµРЅС‚: РѕС‚РєР»СЋС‡Р°РµС‚ РІРІРѕРґ РґРІРёР¶РµРЅРёСЏ (РїРѕРєР° Р±РµР· РїРѕР»РЅРѕРіРѕ СЃРёРЅРєР° Р°РЅРёРјР°С†РёР№).
+/// - Р‘РµР· СЃРµС‚Рё (РЅРµС‚ NetworkManager / РЅРµ Р·Р°СЃРїР°РІРЅРµРЅ) вЂ” РЅРёС‡РµРіРѕ РЅРµ Р»РѕРјР°РµС‚, РѕРґРёРЅРѕС‡РєР° Р¶РёРІР°.
 /// </summary>
 [RequireComponent(typeof(NetworkObject))]
 public class NetworkPlayer : NetworkBehaviour
 {
-    [Header("Ссылки (можно оставить пустыми — найдёт на этом объекте)")]
+    [Header("РЎСЃС‹Р»РєРё (РјРѕР¶РЅРѕ РѕСЃС‚Р°РІРёС‚СЊ РїСѓСЃС‚С‹РјРё вЂ” РЅР°Р№РґС‘С‚ РЅР° СЌС‚РѕРј РѕР±СЉРµРєС‚Рµ)")]
     public PlayerMovement3D movement;
     public CameraFollow cameraFollow;
 
-    [Tooltip("Искать CameraFollow на сцене, если не задан.")]
+    [Tooltip("РСЃРєР°С‚СЊ CameraFollow РЅР° СЃС†РµРЅРµ, РµСЃР»Рё РЅРµ Р·Р°РґР°РЅ.")]
     public bool autoFindCamera = true;
 
     public bool IsLocalControlled { get; private set; }
@@ -34,7 +35,7 @@ public class NetworkPlayer : NetworkBehaviour
 
         IsLocalControlled = IsOwner;
 
-        // Точку спавна применяем на сервере (Host), чтобы все видели одну позицию.
+        // РўРѕС‡РєСѓ СЃРїР°РІРЅР° РїСЂРёРјРµРЅСЏРµРј РЅР° СЃРµСЂРІРµСЂРµ (Host), С‡С‚РѕР±С‹ РІСЃРµ РІРёРґРµР»Рё РѕРґРЅСѓ РїРѕР·РёС†РёСЋ.
         if (IsServer)
             ApplySpawnPoint();
 
@@ -48,7 +49,15 @@ public class NetworkPlayer : NetworkBehaviour
 
     void ApplySpawnPoint()
     {
-        if (!PlayerSpawnPoint.TryGetSpawnPose(out Vector3 pos, out Quaternion rot))
+        Vector3 pos;
+        Quaternion rot = transform.rotation;
+        HexSpawnRequest.TryRestore();
+        if (HexSpawnRequest.HasRequest)
+        {
+            var center = HexSpawnRequest.WorldCenter();
+            pos = new Vector3(center.x, center.y + 1.5f, center.z);
+        }
+        else if (!PlayerSpawnPoint.TryGetSpawnPose(out pos, out rot))
             return;
 
         var cc = GetComponent<CharacterController>();
@@ -56,7 +65,7 @@ public class NetworkPlayer : NetworkBehaviour
         transform.SetPositionAndRotation(pos, rot);
         if (cc != null) cc.enabled = true;
 
-        // Если висит NetworkTransform — форсим синк после телепорта.
+        // Р•СЃР»Рё РІРёСЃРёС‚ NetworkTransform вЂ” С„РѕСЂСЃРёРј СЃРёРЅРє РїРѕСЃР»Рµ С‚РµР»РµРїРѕСЂС‚Р°.
         var nt = GetComponent<Unity.Netcode.Components.NetworkTransform>();
         if (nt != null)
             nt.Teleport(pos, rot, transform.localScale);
@@ -68,7 +77,7 @@ public class NetworkPlayer : NetworkBehaviour
             PlayerRegistry.Instance.Unregister(transform);
 
         base.OnNetworkDespawn();
-        // Камеру не обнуляем жёстко — сцена может перезагрузиться.
+        // РљР°РјРµСЂСѓ РЅРµ РѕР±РЅСѓР»СЏРµРј Р¶С‘СЃС‚РєРѕ вЂ” СЃС†РµРЅР° РјРѕР¶РµС‚ РїРµСЂРµР·Р°РіСЂСѓР·РёС‚СЊСЃСЏ.
     }
 
     static PlayerRegistry EnsureRegistry()
@@ -82,8 +91,8 @@ public class NetworkPlayer : NetworkBehaviour
 
     void ApplyControlState()
     {
-        // Пока нет отдельного флага в PlayerMovement3D — просто выключаем компонент у чужих.
-        // Владелец и одиночка (если когда-то заспавнят без owner-логики) ходят как обычно.
+        // РџРѕРєР° РЅРµС‚ РѕС‚РґРµР»СЊРЅРѕРіРѕ С„Р»Р°РіР° РІ PlayerMovement3D вЂ” РїСЂРѕСЃС‚Рѕ РІС‹РєР»СЋС‡Р°РµРј РєРѕРјРїРѕРЅРµРЅС‚ Сѓ С‡СѓР¶РёС….
+        // Р’Р»Р°РґРµР»РµС† Рё РѕРґРёРЅРѕС‡РєР° (РµСЃР»Рё РєРѕРіРґР°-С‚Рѕ Р·Р°СЃРїР°РІРЅСЏС‚ Р±РµР· owner-Р»РѕРіРёРєРё) С…РѕРґСЏС‚ РєР°Рє РѕР±С‹С‡РЅРѕ.
         if (movement != null)
             movement.enabled = IsOwner || !IsSpawned;
     }
@@ -96,7 +105,7 @@ public class NetworkPlayer : NetworkBehaviour
         if (cameraFollow != null)
             cameraFollow.target = transform;
         else
-            Debug.LogWarning("NetworkPlayer: CameraFollow не найден — камера не привязана.");
+            Debug.LogWarning("NetworkPlayer: CameraFollow РЅРµ РЅР°Р№РґРµРЅ вЂ” РєР°РјРµСЂР° РЅРµ РїСЂРёРІСЏР·Р°РЅР°.");
     }
 
 #if UNITY_EDITOR

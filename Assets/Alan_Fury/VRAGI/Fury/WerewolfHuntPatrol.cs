@@ -99,6 +99,7 @@ public class WerewolfHuntPatrol : MonoBehaviour
 
     void Update()
     {
+        if (WolfDuty.BlocksMove(this)) return;
         float dt = Time.deltaTime;
         TrySpread();
         IWerewolfRoute r = Route;

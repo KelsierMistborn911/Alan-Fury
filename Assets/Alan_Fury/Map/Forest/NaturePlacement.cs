@@ -5,13 +5,12 @@ using System.Text;
 /// <summary>
 /// Стриминг природы по слоям.
 /// Слои: Основной лес / Маленькие деревья / Кусты / Растения / Трава.
-/// Трава — тот же секторный проход, после деревьев. Не GrassField.
-/// В каждом слое — варианты с весом (%). Префаб или спрайт.
-/// Зоны: роща вдоль дороги, лес дальше, чаща по краю и островками, поляны в лесу.
+/// Настройки области (чаща, лес, роща, граница) и слоты — в Forest, создаёт Leshiy.
+/// Плейсер принимает слоты из файла и ставит в них префабы.
 /// </summary>
 public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
 {
-    public enum Zone : byte { None = 0, Grove = 1, Forest = 2, Thicket = 3, Clearing = 4 }
+    public enum Zone : byte { None = 0, Grove = 1, Forest = 2, Thicket = 3, Clearing = 4, ForestBorder = 5 }
     public enum LayerKind : byte { MainForest = 0, SmallTree = 1, Bush = 2, Plant = 3, Grass = 4 }
 
     [System.Serializable]
@@ -70,16 +69,6 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
         [Tooltip("Занятость клеток (только деревья). 3 = 3x3.")]
         public int footprint = 3;
 
-        [Header("Плотность по зонам")]
-        [Range(0f, 1f)] public float densityGrove = 0.14f;
-        [Range(0f, 1f)] public float densityForest = 0.52f;
-        [Range(0f, 1f)] public float densityThicket = 0.82f;
-
-        [Header("Зоны, где растёт")]
-        public bool growInGrove = true;
-        public bool growInForest = true;
-        public bool growInThicket = true;
-
         [Header("Варианты (вес = доля)")]
         public List<NatureVariant> variants = new List<NatureVariant>();
 
@@ -98,26 +87,20 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
     public ChunkedTerrainBuilder terrainBuilder;
     public MapGrid mapGrid;
 
-    [Header("Слои")]
-    public List<NatureLayer> layers = new List<NatureLayer>();
+    [Header("Лес")]
+    public Leshiy leshiy;
+    public Forest forest;
 
-    [Header("Зоны")]
-    public MapLayout layout;
-    [Header("Карта")]
-    public float waterLevel = 0f;
-    public int borderCells = 2;
-    public int sectorSize = 16;
-
-    [Header("Стриминг")]
-    public float streamRadius = 50f;
-    public float unloadExtra = 30f;
-
-    [Header("Трава")]
-    [Tooltip("Множитель плотности на клетке с деревом.")]
-    [Range(0f, 1f)] public float grassUnderTreeMult = 0.28f;
-    [Tooltip("Масштаб шума пятен травы внутри зоны.")]
-    public float grassClusterNoiseScale = 0.09f;
-    public Vector2 grassClusterOffset = new Vector2(41.2f, 8.7f);
+    [HideInInspector] public List<NatureLayer> layers = new List<NatureLayer>();
+    [HideInInspector] public MapLayout layout;
+    [HideInInspector] public float waterLevel = 0f;
+    [HideInInspector] public int borderCells = 2;
+    [HideInInspector] public int sectorSize = 16;
+    [HideInInspector] public float streamRadius = 50f;
+    [HideInInspector] public float unloadExtra = 30f;
+    [HideInInspector] public float grassUnderTreeMult = 0.28f;
+    [HideInInspector] public float grassClusterNoiseScale = 0.09f;
+    [HideInInspector] public Vector2 grassClusterOffset = new Vector2(41.2f, 8.7f);
 
     public bool IsReady => _ready;
     public ICellGround streamGround;
@@ -143,12 +126,6 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
                 kind = LayerKind.MainForest,
                 enabled = true,
                 footprint = 3,
-                densityGrove = 0.12f,
-                densityForest = 0.55f,
-                densityThicket = 0.85f,
-                growInGrove = true,
-                growInForest = true,
-                growInThicket = true,
                 sightCover = MapGrid.SightCoverMode.Full,
                 maxCoverHeight = 0f,
                 variants = new List<NatureVariant>
@@ -170,9 +147,6 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
                 kind = LayerKind.SmallTree,
                 enabled = false,
                 footprint = 2,
-                densityGrove = 0.08f,
-                densityForest = 0.2f,
-                densityThicket = 0.35f,
                 sightCover = MapGrid.SightCoverMode.MaxHeight,
                 maxCoverHeight = 2.4f,
                 variants = new List<NatureVariant>
@@ -186,9 +160,6 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
                 kind = LayerKind.Bush,
                 enabled = false,
                 footprint = 1,
-                densityGrove = 0.15f,
-                densityForest = 0.3f,
-                densityThicket = 0.5f,
                 sightCover = MapGrid.SightCoverMode.MaxHeight,
                 maxCoverHeight = 1.2f,
                 variants = new List<NatureVariant>
@@ -202,9 +173,6 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
                 kind = LayerKind.Plant,
                 enabled = false,
                 footprint = 1,
-                densityGrove = 0.2f,
-                densityForest = 0.25f,
-                densityThicket = 0.15f,
                 variants = new List<NatureVariant>
                 {
                     new NatureVariant { name = "Plant_Stub", weight = 100f, minScale = 0.6f, maxScale = 1.0f }
@@ -220,9 +188,11 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
     {
         if (!Validate()) return;
 
+        PullFromLeshiy();
         if (layers == null || layers.Count == 0)
             FillDefaultLayers();
         EnsureGrassLayer();
+        BindForest();
 
         allVariants.Clear();
         variantLayer.Clear();
@@ -273,14 +243,30 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
         {
             float tile = terrainBuilder != null ? terrainBuilder.TileSize : 4f;
             int cells = Mathf.Max(4, sectorSize);
-            int hx = Mathf.FloorToInt(playerPos.x / (tile * cells));
-            int hz = Mathf.FloorToInt(playerPos.z / (tile * cells));
-            int ring = 2;
-            for (int dx = -ring; dx <= ring; dx++)
-            for (int dz = -ring; dz <= ring; dz++)
+            float sw = tile * cells;
+            int hx = Mathf.FloorToInt(playerPos.x / sw);
+            int hz = Mathf.FloorToInt(playerPos.z / sw);
+            // только вокруг игрока по streamRadius (не фиксированное большое кольцо)
+            int lr = Mathf.Max(1, Mathf.CeilToInt(streamRadius / sw));
+            int ur = Mathf.Max(lr + 1, Mathf.CeilToInt((streamRadius + unloadExtra) / sw));
+
+            for (int dx = -lr; dx <= lr; dx++)
+            for (int dz = -lr; dz <= lr; dz++)
             {
-                if (dx * dx + dz * dz > ring * ring + ring) continue;
+                if (dx * dx + dz * dz > lr * lr + lr) continue;
                 PlaceStreamSector(hx + dx, hz + dz);
+            }
+
+            // выгрузить далёкие секторы
+            _toUnload.Clear();
+            foreach (var key in _loaded)
+            {
+                if (Mathf.Abs(key.x - hx) > ur || Mathf.Abs(key.y - hz) > ur)
+                    _toUnload.Add(key);
+            }
+            for (int i = 0; i < _toUnload.Count; i++)
+            {
+                ReleaseStreamSector(_toUnload[i].x, _toUnload[i].y);
             }
             return;
         }
@@ -297,7 +283,7 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
 
         int pcx = Mathf.FloorToInt((playerLocal.x - origin.x) / sectorWorld);
         int pcz = Mathf.FloorToInt((playerLocal.z - origin.z) / sectorWorld);
-        int loadR = Mathf.Max(2, Mathf.CeilToInt(streamRadius / sectorWorld));
+        int loadR = Mathf.Max(1, Mathf.CeilToInt(streamRadius / sectorWorld));
         int unloadR = Mathf.Max(loadR + 1, Mathf.CeilToInt((streamRadius + unloadExtra) / sectorWorld));
 
         for (int sx = pcx - loadR; sx <= pcx + loadR; sx++)
@@ -441,6 +427,7 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
                     if (h <= waterLevel) continue;
 
                     Zone zone = stream ? streamGround.ZoneAt(x, z) : GetZone(x, z);
+                    // слоты из файла Forest: плотность и что ставить
                     if (!CanGrow(layer, zone)) continue;
 
                     bool stable = true;
@@ -658,12 +645,6 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
             kind = LayerKind.Grass,
             enabled = true,
             footprint = 1,
-            densityGrove = 0.7f,
-            densityForest = 0.55f,
-            densityThicket = 0.12f,
-            growInGrove = true,
-            growInForest = true,
-            growInThicket = true,
             sightCover = MapGrid.SightCoverMode.None,
             maxCoverHeight = 0f,
             variants = new List<NatureVariant>()
@@ -690,17 +671,31 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
 
         grass.enabled = true;
         if (grass.name == "Трава (Unity later)") grass.name = "Трава";
-        float sum = grass.densityGrove + grass.densityForest + grass.densityThicket;
-        if (sum <= 0.0001f)
-        {
-            grass.densityGrove = 0.7f;
-            grass.densityForest = 0.55f;
-            grass.densityThicket = 0.12f;
-        }
-        grass.growInGrove = true;
-        grass.growInForest = true;
-        grass.growInThicket = true;
         if (grass.variants == null) grass.variants = new List<NatureVariant>();
+    }
+
+    void PullFromLeshiy()
+    {
+        if (leshiy == null) leshiy = GetComponent<Leshiy>();
+        if (leshiy == null) return;
+        leshiy.PushToPlacement(this);
+    }
+
+    void BindForest()
+    {
+        if (leshiy == null) leshiy = GetComponent<Leshiy>();
+        if (forest == null && leshiy != null) forest = leshiy.forest;
+        if (forest == null && leshiy != null)
+        {
+            if (leshiy.forest == null)
+                leshiy.forest = ScriptableObject.CreateInstance<Forest>();
+            if (string.IsNullOrEmpty(leshiy.forest.name))
+                leshiy.forest.name = "Forest";
+            leshiy.WriteAreas();
+            forest = leshiy.forest;
+        }
+        if (forest == null)
+            Debug.LogWarning("NaturePlacement: нет Forest. Назначь Leshiy или создай файл Forest.");
     }
 
     private float EffectiveDensity(NatureLayer layer, Zone zone, int x, int z)
@@ -736,7 +731,8 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
         sb.Append("  heightSource=").Append(heightSource != null ? heightSource.name : "null");
         sb.Append(" terrainBuilder=").Append(terrainBuilder != null ? terrainBuilder.name : "null");
         sb.Append(" mapGrid=").Append(mapGrid != null ? mapGrid.name : "null").Append('\n');
-        sb.Append("  layout=").Append(layout != null ? layout.name : "null").Append('\n');
+        sb.Append("  layout=").Append(layout != null ? layout.name : "null");
+        sb.Append(" forest=").Append(forest != null ? forest.name : "null").Append('\n');
         sb.Append("  waterLevel=").Append(waterLevel);
         sb.Append(" borderCells=").Append(borderCells);
         sb.Append(" sectorSize=").Append(sectorSize).Append('\n');
@@ -763,10 +759,13 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
             sb.Append(" kind=").Append(L.kind);
             sb.Append(" enabled=").Append(L.enabled);
             sb.Append(" footprint=").Append(L.footprint).Append('\n');
-            sb.Append("      dens G/F/T=").Append(L.densityGrove).Append('/')
-                .Append(L.densityForest).Append('/').Append(L.densityThicket);
-            sb.Append(" grow G/F/T=").Append(L.growInGrove).Append('/')
-                .Append(L.growInForest).Append('/').Append(L.growInThicket).Append('\n');
+            if (forest != null)
+            {
+                sb.Append("      dens T/F/G/B=").Append(forest.DensityFor(Zone.Thicket, L.kind)).Append('/')
+                    .Append(forest.DensityFor(Zone.Forest, L.kind)).Append('/')
+                    .Append(forest.DensityFor(Zone.Grove, L.kind)).Append('/')
+                    .Append(forest.DensityFor(Zone.ForestBorder, L.kind)).Append('\n');
+            }
             sb.Append("      cover=").Append(L.sightCover);
             sb.Append(" maxCoverH=").Append(L.maxCoverHeight);
             sb.Append(" variants=").Append(vc).Append('\n');
@@ -812,16 +811,23 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
         return layout != null ? layout.GetZone(x, z) : Zone.Forest;
     }
 
-    private static bool CanGrow(NatureLayer layer, Zone zone)
+    private bool CanGrow(NatureLayer layer, Zone zone)
     {
-        switch (zone)
-        {
-            case Zone.Grove: return layer.growInGrove;
-            case Zone.Forest: return layer.growInForest;
-            case Zone.Thicket: return layer.growInThicket;
-            case Zone.Clearing: return layer.kind == LayerKind.Grass;
-            default: return false;
-        }
+        if (layer == null) return false;
+        if (zone == Zone.Clearing) return layer.kind == LayerKind.Grass;
+        if (forest == null) return false;
+        return forest.Grows(zone, layer.kind);
+    }
+
+    private float GetDensity(NatureLayer layer, Zone zone)
+    {
+        if (layer == null) return 0f;
+        if (zone == Zone.Clearing)
+            return layer.kind == LayerKind.Grass && forest != null
+                ? forest.DensityFor(Zone.Grove, LayerKind.Grass)
+                : 0f;
+        if (forest == null) return 0f;
+        return forest.DensityFor(zone, layer.kind);
     }
 
     public static void ResolveCover(NatureLayer layer, NatureVariant v,
@@ -845,18 +851,6 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
 
         if (mode == MapGrid.SightCoverMode.MaxHeight && height <= 0f)
             mode = MapGrid.SightCoverMode.None;
-    }
-
-    private static float GetDensity(NatureLayer layer, Zone zone)
-    {
-        switch (zone)
-        {
-            case Zone.Grove: return layer.densityGrove;
-            case Zone.Forest: return layer.densityForest;
-            case Zone.Thicket: return layer.densityThicket;
-            case Zone.Clearing: return layer.kind == LayerKind.Grass ? layer.densityGrove : 0f;
-            default: return 0f;
-        }
     }
 
     private static float Hash01(int x, int z, int typeIndex, int salt)
@@ -904,11 +898,7 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
         {
             var p = v.parts[i];
             if (p.mesh == null || p.material == null)
-            {
                 v.parts.RemoveAt(i);
-                continue;
-            }
-            EnsureInstancing(p.material);
         }
 
         if (v.parts.Count == 0) return false;

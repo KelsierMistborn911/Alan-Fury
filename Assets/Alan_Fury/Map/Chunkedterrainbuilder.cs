@@ -13,6 +13,7 @@ public class ChunkedTerrainBuilder : MonoBehaviour
 {
     [Header("Источник высот")]
     public HeightMapGenerator heightSource;
+    public int minTerraceCells = 5;
 
     [Header("Размер тайла")]
     public float tileSize = 4f;
@@ -504,20 +505,24 @@ public class ChunkedTerrainBuilder : MonoBehaviour
         cells = Mathf.Max(2, cells);
         int x0 = chunkX * cells;
         int z0 = chunkZ * cells;
-        int n = cells + 2; // бордюр для сварки углов
-        var hLocal = new float[n, n];
+        const int border = 3;
+        int n = cells + border * 2;
+        var cellH = new float[n, n];
         for (int iz = 0; iz < n; iz++)
         for (int ix = 0; ix < n; ix++)
-            hLocal[ix, iz] = heightAt(x0 + ix - 1, z0 + iz - 1);
+            cellH[ix, iz] = heightAt(x0 + ix - border, z0 + iz - border);
 
-        // углы локальных клеток 1..cells (бордюр 0 и n-1 только для соседей)
-        var corner = new float[cells + 1, cells + 1, 4];
+        CleanSmallTerraces(cellH, n, Mathf.Max(1, minTerraceCells));
+
+        // все четыре угла клетки — одна высота, без сварки и склонов
+        var corner = new float[cells, cells, 4];
         for (int lx = 0; lx < cells; lx++)
         for (int lz = 0; lz < cells; lz++)
+        {
+            float h = cellH[lx + border, lz + border];
             for (int k = 0; k < 4; k++)
-                corner[lx, lz, k] = hLocal[lx + 1, lz + 1];
-
-        WeldLocal(hLocal, corner, cells);
+                corner[lx, lz, k] = h;
+        }
 
         var verts = new List<Vector3>();
         var tris = new List<int>();
@@ -541,27 +546,26 @@ public class ChunkedTerrainBuilder : MonoBehaviour
             tris.Add(v00); tris.Add(v01); tris.Add(v11);
             tris.Add(v00); tris.Add(v11); tris.Add(v10);
 
-            // стенка на восток, если сосед в чанке и высоты разъехались
             if (lx + 1 < cells)
             {
-                float myA = corner[lx, lz, 1], myB = corner[lx, lz, 2];
-                float nbA = corner[lx + 1, lz, 0], nbB = corner[lx + 1, lz, 3];
-                if (Mathf.Abs(myA - nbA) > Eps || Mathf.Abs(myB - nbB) > Eps)
+                float my = corner[lx, lz, 0];
+                float nb = corner[lx + 1, lz, 0];
+                if (Mathf.Abs(my - nb) > Eps)
                 {
-                    Color c = StreamColor(Mathf.Min(myA, myB, nbA, nbB));
-                    AddVQuad(new Vector3(px1, myA, pz0), new Vector3(px1, nbA, pz0),
-                             new Vector3(px1, myB, pz1), new Vector3(px1, nbB, pz1), c, verts, tris, colors);
+                    Color c = StreamColor(Mathf.Min(my, nb));
+                    AddVQuad(new Vector3(px1, my, pz0), new Vector3(px1, nb, pz0),
+                             new Vector3(px1, my, pz1), new Vector3(px1, nb, pz1), c, verts, tris, colors);
                 }
             }
             if (lz + 1 < cells)
             {
-                float myA = corner[lx, lz, 3], myB = corner[lx, lz, 2];
-                float nbA = corner[lx, lz + 1, 0], nbB = corner[lx, lz + 1, 1];
-                if (Mathf.Abs(myA - nbA) > Eps || Mathf.Abs(myB - nbB) > Eps)
+                float my = corner[lx, lz, 0];
+                float nb = corner[lx, lz + 1, 0];
+                if (Mathf.Abs(my - nb) > Eps)
                 {
-                    Color c = StreamColor(Mathf.Min(myA, myB, nbA, nbB));
-                    AddVQuad(new Vector3(px0, nbA, pz1), new Vector3(px0, myA, pz1),
-                             new Vector3(px1, nbB, pz1), new Vector3(px1, myB, pz1), c, verts, tris, colors);
+                    Color c = StreamColor(Mathf.Min(my, nb));
+                    AddVQuad(new Vector3(px0, nb, pz1), new Vector3(px0, my, pz1),
+                             new Vector3(px1, nb, pz1), new Vector3(px1, my, pz1), c, verts, tris, colors);
                 }
             }
         }
@@ -591,35 +595,81 @@ public class ChunkedTerrainBuilder : MonoBehaviour
         return go;
     }
 
+    void CleanSmallTerraces(float[,] h, int n, int minCells)
+    {
+        if (minCells <= 1) return;
+        var seen = new bool[n, n];
+        var region = new List<Vector2Int>(64);
+        var stack = new Stack<Vector2Int>(64);
+        int[] dx = { 1, -1, 0, 0 };
+        int[] dz = { 0, 0, 1, -1 };
+
+        for (int pass = 0; pass < 2; pass++)
+        {
+            for (int x = 0; x < n; x++)
+            for (int z = 0; z < n; z++)
+                seen[x, z] = false;
+
+            for (int sx = 0; sx < n; sx++)
+            for (int sz = 0; sz < n; sz++)
+            {
+                if (seen[sx, sz]) continue;
+                float val = h[sx, sz];
+                region.Clear();
+                stack.Clear();
+                stack.Push(new Vector2Int(sx, sz));
+                seen[sx, sz] = true;
+                bool touchesEdge = false;
+
+                while (stack.Count > 0)
+                {
+                    var c = stack.Pop();
+                    region.Add(c);
+                    if (c.x == 0 || c.y == 0 || c.x == n - 1 || c.y == n - 1)
+                        touchesEdge = true;
+                    for (int k = 0; k < 4; k++)
+                    {
+                        int nx = c.x + dx[k], nz = c.y + dz[k];
+                        if (nx < 0 || nx >= n || nz < 0 || nz >= n) continue;
+                        if (seen[nx, nz]) continue;
+                        if (Mathf.Abs(h[nx, nz] - val) > Eps) continue;
+                        seen[nx, nz] = true;
+                        stack.Push(new Vector2Int(nx, nz));
+                    }
+                }
+
+                if (region.Count >= minCells || touchesEdge) continue;
+
+                var freq = new Dictionary<float, int>();
+                for (int i = 0; i < region.Count; i++)
+                {
+                    var c = region[i];
+                    for (int k = 0; k < 4; k++)
+                    {
+                        int nx = c.x + dx[k], nz = c.y + dz[k];
+                        if (nx < 0 || nx >= n || nz < 0 || nz >= n) continue;
+                        float nv = h[nx, nz];
+                        if (Mathf.Abs(nv - val) < Eps) continue;
+                        freq.TryGetValue(nv, out int f);
+                        freq[nv] = f + 1;
+                    }
+                }
+                if (freq.Count == 0) continue;
+                float best = val; int bestF = 0;
+                foreach (var kv in freq)
+                    if (kv.Value > bestF) { bestF = kv.Value; best = kv.Key; }
+                for (int i = 0; i < region.Count; i++)
+                    h[region[i].x, region[i].y] = best;
+            }
+        }
+    }
+
     public void ReleaseStreamChunk(GameObject go)
     {
         if (go == null) return;
         chunks.Remove(go);
         if (Application.isPlaying) Destroy(go);
         else DestroyImmediate(go);
-    }
-
-    void WeldLocal(float[,] hLocal, float[,,] corner, int cells)
-    {
-        // упрощённая сварка: если соседняя клетка близка — общий угол усредняется
-        for (int lx = 0; lx < cells; lx++)
-        for (int lz = 0; lz < cells; lz++)
-        {
-            float h = hLocal[lx + 1, lz + 1];
-            // SW с левым и нижним
-            corner[lx, lz, 0] = AvgWeld(h, hLocal[lx, lz + 1], hLocal[lx + 1, lz]);
-            corner[lx, lz, 1] = AvgWeld(h, hLocal[lx + 2, lz + 1], hLocal[lx + 1, lz]);
-            corner[lx, lz, 2] = AvgWeld(h, hLocal[lx + 2, lz + 1], hLocal[lx + 1, lz + 2]);
-            corner[lx, lz, 3] = AvgWeld(h, hLocal[lx, lz + 1], hLocal[lx + 1, lz + 2]);
-        }
-    }
-
-    float AvgWeld(float h, float a, float b)
-    {
-        float s = h; int n = 1;
-        if (Welds(h, a)) { s += a; n++; }
-        if (Welds(h, b)) { s += b; n++; }
-        return s / n;
     }
 
     Color StreamColor(float h)

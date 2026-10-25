@@ -327,6 +327,7 @@ public class WerewolfAttackBrain : MonoBehaviour, WerewolfPackManager.IPackAgent
 
     void Update()
     {
+        if (WolfDuty.BlocksMove(this)) return;
         // Update идёт только в роли Attack (в Surround компонент выключен).
         float dt = Time.deltaTime;
         var cc = GetComponent<CrowdControl>();

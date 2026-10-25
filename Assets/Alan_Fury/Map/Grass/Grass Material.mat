@@ -16,7 +16,7 @@ Material:
   m_LightmapFlags: 4
   m_EnableInstancingVariants: 0
   m_DoubleSidedGI: 0
-  m_CustomRenderQueue: -1
+  m_CustomRenderQueue: 500
   stringTagMap: {}
   disabledShaderPasses: []
   m_LockedProperties: 
@@ -74,12 +74,13 @@ Material:
     - _BladeHeightRandom: 0.3
     - _BladeRandomAmount: 0.5
     - _BladeSegments: 3
-    - _BladeWidth: 0.05
-    - _BladeWidthRandom: 0.02
+    - _BladeWidth: 0.03
+    - _BladeWidthRandom: 0.01
     - _BladesPerMeter: 8
     - _Brightness: 1.15
     - _BumpScale: 1
     - _CenterDensity: 22
+    - _ColorLevels: 16
     - _Cutoff: 0.5
     - _DetailNormalMapScale: 1
     - _DrawRadius: 28
@@ -98,6 +99,7 @@ Material:
     - _Parallax: 0.02
     - _PatchKeep: 0.34
     - _PatchScale: 0.055
+    - _PixelSteps: 6
     - _PushRadius: 1.8
     - _PushStrength: 1.15
     - _Rotation: 0
@@ -120,6 +122,6 @@ Material:
     - _Color: {r: 0, g: 0.5754717, b: 0.06694827, a: 1}
     - _EmissionColor: {r: 0, g: 0, b: 0, a: 1}
     - _PlayerPos: {r: 0, g: 0, b: 0, a: 0}
-    - _TopColor: {r: 0.5792569, g: 0.84599996, b: 0.3297231, a: 1}
+    - _TopColor: {r: 0.39648128, g: 0.5943396, b: 0.21026166, a: 1}
     - _WindFrequency: {r: 0.05, g: 0.05, b: 0, a: 0}
   m_BuildTextureStacks: []

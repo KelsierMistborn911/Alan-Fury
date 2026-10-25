@@ -28,6 +28,10 @@ Shader "Nature/GrassField"
         _DrawRadius ("Draw Radius", Range(4, 120)) = 55
         _PushRadius ("Push Radius", Range(0.2, 6)) = 1.35
         _PushStrength ("Push Strength", Range(0, 3)) = 1.05
+
+        [Header(Pixel)]
+        _PixelSteps ("Pixel Height Steps", Range(2, 32)) = 6
+        _ColorLevels ("Color Levels", Range(2, 64)) = 16
     }
 
     SubShader
@@ -80,6 +84,8 @@ Shader "Nature/GrassField"
                 float _PushStrength;
                 float4 _PushStamps[STAMP_COUNT];
                 float4 _PushDirs[STAMP_COUNT];
+                float _PixelSteps;
+                float _ColorLevels;
             CBUFFER_END
 
             float4 _NatureLightPos;
@@ -233,7 +239,13 @@ Shader "Nature/GrassField"
 
             half4 Frag(g2f i) : SV_Target
             {
-                float3 col = lerp(_BottomColor.rgb, _TopColor.rgb, i.uv.y) * _Brightness;
+                // Пикселизация по высоте травинки
+                float steps = max(_PixelSteps, 2.0);
+                float q = floor(i.uv.y * steps) / steps + 0.5 / steps;
+                q = saturate(q);
+
+                float3 col = lerp(_BottomColor.rgb, _TopColor.rgb, q) * _Brightness;
+
                 if (_NatureLightParams.z > 0.5)
                 {
                     float range = max(_NatureLightParams.x, 0.05);
@@ -242,6 +254,11 @@ Shader "Nature/GrassField"
                     t = pow(t, max(_NatureLightParams.y, 0.5));
                     col += col * _NatureLightColor.rgb * t;
                 }
+
+                // Квантование итогового цвета
+                float levels = max(_ColorLevels, 2.0);
+                col = floor(col * levels + 0.5) / levels;
+
                 col = MixFog(col, i.fogCoord);
                 return half4(col, 1);
             }

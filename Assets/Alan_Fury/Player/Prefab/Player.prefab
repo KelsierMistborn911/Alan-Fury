@@ -245,7 +245,6 @@ GameObject:
   - component: {fileID: 4663724128358875171}
   - component: {fileID: 7603611836260673989}
   - component: {fileID: 7636345335867524187}
-  - component: {fileID: 8393142049698785970}
   - component: {fileID: 1266073194962340393}
   - component: {fileID: 4824334992243338443}
   - component: {fileID: 7904059381815620236}
@@ -263,6 +262,8 @@ GameObject:
   - component: {fileID: 3702021059671560228}
   - component: {fileID: -768134931306652445}
   - component: {fileID: 3971391403722877795}
+  - component: {fileID: 7356289692560819943}
+  - component: {fileID: 8926634951404438334}
   m_Layer: 6
   m_Name: Player
   m_TagString: Player
@@ -279,7 +280,7 @@ Transform:
   m_GameObject: {fileID: 6846430933918887357}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 173.20508, y: 2.0500002, z: 0}
+  m_LocalPosition: {x: -346.41016, y: 4.2, z: 300}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
@@ -416,8 +417,8 @@ MonoBehaviour:
   rollSpeed: 15
   rollDuration: 0.6
   rollCooldown: 1
-  witchLight: {fileID: 0}
   teleportDistance: 11
+  investiture: {fileID: 0}
   vaultLayers:
     serializedVersion: 2
     m_Bits: 128
@@ -853,37 +854,6 @@ MonoBehaviour:
   useManualBounds: 0
   manualHalfWidth: 100
   manualHalfDepth: 100
---- !u!114 &8393142049698785970
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 6846430933918887357}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 85219835ffc819e42becf3e63a3c6950, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  castKey: 101
-  resources: {fileID: 0}
-  castCost: 0
-  drainPerSecond: 0
-  attachTo: {fileID: 0}
-  localOffset: {x: 0, y: 1.5, z: 0}
-  lightColor: {r: 0.7, g: 0.85, b: 1, a: 1}
-  intensity: 10
-  range: 5
-  shadows: 2
-  natureStrength: 4.5
-  natureFalloff: 1.4
-  glowRenderer: {fileID: 4663724128358875171}
-  emissionColor: {r: 0.7, g: 0.85, b: 1, a: 1}
-  emissionIntensity: 15
-  fadeTime: 0.5
-  flicker: 1
-  flickerAmount: 0.12
-  flickerSpeed: 9
 --- !u!114 &1266073194962340393
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -1305,13 +1275,60 @@ MonoBehaviour:
   heightStep: 0.5
   forestBase: 2.5
   forestVariation: 1.5
-  detailNoise: 0.6
-  minorDelta: 0.5
-  slopeWidth: 15
+  terraceAmp: 2.2
+  hexBlend: 0.55
+  minTerraceCells: 10
+  roadMaxStep: 0.1
+  roadStepDist: 10
   nature: {fileID: 0}
   chunkBuilder: {fileID: 0}
   driveWorld: 1
   roadHalfWidth: 7
+--- !u!114 &7356289692560819943
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6846430933918887357}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a121f6295147f9a4980060166f5a5fae, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  levels: 7
+  currentFill: 0
+  fillPerSecond: 0.08
+  overflowMax: 2
+  absorbKey: 114
+  absorbRate: 1.2
+  ultMinLevels: 5
+  ultSecondsPerLevel: 7
+  speedBonusPerLevel: 0.1
+  faceRenderer: {fileID: 3060140897778545479}
+  faceEmission: {r: 1, g: 0.92, b: 0.7, a: 1}
+  maxFaceIntensity: 3.5
+  usePointLight: 1
+  lightColor: {r: 1, g: 0.9, b: 0.6, a: 1}
+  lightRange: 8
+--- !u!114 &8926634951404438334
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6846430933918887357}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9171664bfbc25764b95180ec8602da8a, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  light: {fileID: 7356289692560819943}
+  visible: 1
+  marginRight: 40
+  bottom: 80
+  cellH: 36
+  cellW: 48
 --- !u!1001 &169118963850245983
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -1611,6 +1628,12 @@ GameObject:
 --- !u!1 &2283465144723743067 stripped
 GameObject:
   m_CorrespondingSourceObject: {fileID: 2155161255792203268, guid: 644f99b0a88f593458f3948f1001ea7b,
+    type: 3}
+  m_PrefabInstance: {fileID: 169118963850245983}
+  m_PrefabAsset: {fileID: 0}
+--- !u!137 &3060140897778545479 stripped
+SkinnedMeshRenderer:
+  m_CorrespondingSourceObject: {fileID: 2895560727088546840, guid: 644f99b0a88f593458f3948f1001ea7b,
     type: 3}
   m_PrefabInstance: {fileID: 169118963850245983}
   m_PrefabAsset: {fileID: 0}
