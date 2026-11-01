@@ -18,3 +18,27 @@
 # Asset Store grass package (keep local)
 /Assets/Dynamic Grass FX/
 /Assets/Dynamic Grass FX.meta
+
+# Unity Asset Store packages (kept locally, not in repo)
+/Assets/BrokenVector/
+/Assets/BrokenVector.meta
+/Assets/Kevin Iglesias/
+/Assets/Kevin Iglesias.meta
+/Assets/ProPixelizer/
+/Assets/ProPixelizer.meta
+/Assets/Grass And Flowers Pack 1/
+/Assets/Grass And Flowers Pack 1.meta
+/Assets/PolyOne/
+/Assets/PolyOne.meta
+/Assets/PBR Texture Pack Vol 1/
+/Assets/PBR Texture Pack Vol 1.meta
+/Assets/Fog Particles/
+/Assets/Fog Particles.meta
+/Assets/ithappy/
+/Assets/ithappy.meta
+/Assets/Training_dummy/
+/Assets/Training_dummy.meta
+/Assets/TutorialInfo/
+/Assets/TutorialInfo.meta
+/Assets/Anime Trees/
+/Assets/Anime Trees.meta
