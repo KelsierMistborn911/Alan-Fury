@@ -185,7 +185,7 @@ MonoBehaviour:
     speed: 5
     acceleration: 80
     deceleration: 70
-    stepDistance: 3.74
+    stepDistance: 1.15
     stepDuration: 0.23
     stepFrequency: 4.3
     stepHop: 0
@@ -193,7 +193,7 @@ MonoBehaviour:
     speed: 8
     acceleration: 85
     deceleration: 70
-    stepDistance: 2.25
+    stepDistance: 1.45
     stepDuration: 0.18
     stepFrequency: 5.2
     stepHop: 0
@@ -201,7 +201,7 @@ MonoBehaviour:
     speed: 8
     acceleration: 95
     deceleration: 55
-    stepDistance: 2.05
+    stepDistance: 1.45
     stepDuration: 0.18
     stepFrequency: 3.7
     stepHop: 0

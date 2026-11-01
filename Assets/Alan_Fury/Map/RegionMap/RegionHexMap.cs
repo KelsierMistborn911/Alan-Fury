@@ -63,7 +63,7 @@ public class RegionHexMap : MonoBehaviour
     private bool _focused;
     private Vector3 _focusPoint;
 
-    private class HexCell
+    public class HexCell
     {
         public int q;
         public int r;
@@ -75,6 +75,10 @@ public class RegionHexMap : MonoBehaviour
         public string kind = "лес";
         public bool road;
         public Vector3 roadDir = Vector3.forward;
+        public List<GameObject> subs = new List<GameObject>();
+        public Material centerMat;
+        public int centerSmallQ;
+        public int centerSmallR;
     }
 
     HexCell _village;
@@ -158,7 +162,15 @@ public class RegionHexMap : MonoBehaviour
             if (_dist < minDist) _dist = minDist;
         }
 
-        if (Input.GetMouseButtonDown(0) && _cam != null)
+        if (_selected != null && Input.GetMouseButtonUp(0) && MouseOver(ButtonRect()))
+        {
+            _debug = "кнопка нажата";
+            Debug.Log("RegionHexMap: клик Переместиться");
+            MoveToSelected();
+            return;
+        }
+
+        if (Input.GetMouseButtonDown(0) && _cam != null && !MouseOverInfo())
         {
             var ray = _cam.ScreenPointToRay(Input.mousePosition);
             if (Physics.Raycast(ray, out var hit, 400f))
@@ -179,39 +191,75 @@ public class RegionHexMap : MonoBehaviour
 
     string _debug = "ожидание";
 
+    static Rect StatusRect() => new Rect(16, 16, 420, 28);
+    static Rect PanelRect() => new Rect(16, 52, 300, 220);
+    static Rect ButtonRect() => new Rect(28, 228, 276, 32);
+
+    bool MouseOver(Rect r)
+    {
+        Vector2 m = Input.mousePosition;
+        m.y = Screen.height - m.y;
+        return r.Contains(m);
+    }
+
+    bool MouseOverInfo()
+    {
+        return MouseOver(StatusRect()) || MouseOver(PanelRect()) || MouseOver(ButtonRect());
+    }
+
     void OnGUI()
     {
-        // статус всегда виден
-        GUI.Box(new Rect(16, 16, 420, 28), _debug);
+        GUI.Box(StatusRect(), _debug);
 
         if (_selected == null) return;
-        var r = new Rect(16, 52, 280, 180);
+        var r = PanelRect();
         GUI.Box(r, "");
-        GUILayout.BeginArea(r);
+
+        float y = r.y + 8;
         string name = _selected.kind;
-        GUILayout.Label($"Гекс   q = {_selected.q}    r = {_selected.r}");
-        GUILayout.Label($"Тип    {name}");
-        GUILayout.Label($"Высота {_selected.height:0.0}");
-        GUILayout.Label(_focused ? "фокус" : "орбита");
-        GUILayout.Label($"Сцена  {mainSceneName}");
-        GUILayout.Space(8);
-        if (GUILayout.Button("Переместиться", GUILayout.Height(28)))
+        GUI.Label(new Rect(r.x + 10, y, r.width - 20, 20), $"Гекс   q = {_selected.q}    r = {_selected.r}"); y += 20;
+        GUI.Label(new Rect(r.x + 10, y, r.width - 20, 20), $"Тип    {name}"); y += 20;
+        GUI.Label(new Rect(r.x + 10, y, r.width - 20, 20), $"Высота {_selected.height:0.0}"); y += 20;
+        GUI.Label(new Rect(r.x + 10, y, r.width - 20, 20), _focused ? "фокус" : "орбита"); y += 20;
+        GUI.Label(new Rect(r.x + 10, y, r.width - 20, 20), $"Сцена  {mainSceneName}"); y += 20;
+        string point = SpecificPointName(_selected);
+        GUI.Label(new Rect(r.x + 10, y, r.width - 20, 36), string.IsNullOrEmpty(point)
+            ? "Спавн  центр района"
+            : $"Спавн  {point}\n(или центр, если точки нет)");
+
+        var btn = ButtonRect();
+        bool over = MouseOver(btn);
+        var prev = GUI.color;
+        if (over) GUI.color = new Color(1f, 0.85f, 0.4f);
+        if (GUI.Button(btn, "Переместиться"))
         {
             _debug = "кнопка нажата";
-            Debug.Log("RegionHexMap: клик Переместиться");
+            Debug.Log("RegionHexMap: клик Переместиться (GUI)");
             MoveToSelected();
         }
-        GUILayout.EndArea();
+        GUI.color = prev;
     }
+
+    static string SpecificPointName(HexCell cell)
+    {
+        if (cell == null) return null;
+        string k = cell.kind;
+        if (k == "лес" || k == "дорога" || k == "роща" || k == "чаща" || k == "поляна") return null;
+        return k;
+    }
+
+    bool _moving;
 
     void MoveToSelected()
     {
-        if (_selected == null)
+        if (_moving || _selected == null)
         {
-            Debug.LogWarning("RegionHexMap: гекс не выбран");
+            if (_selected == null) Debug.LogWarning("RegionHexMap: гекс не выбран");
             return;
         }
-        HexSpawnRequest.Set(_selected.q, _selected.r, _selected.height, seed, hexWorldSize);
+        _moving = true;
+        string point = SpecificPointName(_selected);
+        HexSpawnRequest.Set(_selected.q * 3, _selected.r * 3, _selected.height, seed, hexWorldSize, point);
         string scene = mainSceneName;
         if (string.IsNullOrEmpty(scene) || !Application.CanStreamedLevelBeLoaded(scene))
         {
@@ -219,12 +267,13 @@ public class RegionHexMap : MonoBehaviour
                 scene = "DEMKA";
             else
             {
+                _moving = false;
                 Debug.LogError($"RegionHexMap: не могу загрузить «{mainSceneName}». " +
                                "В инспекторе Main Scene Name поставь DEMKA. Сцена уже есть в Build Settings.");
                 return;
             }
         }
-        Debug.Log($"RegionHexMap: переход в {scene}, гекс {_selected.q},{_selected.r} ({_selected.kind})");
+        Debug.Log($"RegionHexMap: переход в {scene}, гекс {_selected.q},{_selected.r} ({_selected.kind}), точка={(point ?? "центр")}");
         SceneManager.LoadScene(scene);
     }
 
@@ -232,13 +281,9 @@ public class RegionHexMap : MonoBehaviour
     {
         Clear();
         var rnd = new System.Random(seed);
-        for (int q = -radius; q <= radius; q++)
-        {
-            int r1 = Mathf.Max(-radius, -q - radius);
-            int r2 = Mathf.Min(radius, -q + radius);
-            for (int r = r1; r <= r2; r++)
-                CreateHex(q, r, rnd);
-        }
+
+        CreateSmallFieldAndGroup(rnd);
+
         if (_cells.Count > 0)
         {
             var c = _cells[_cells.Count / 2];
@@ -249,34 +294,134 @@ public class RegionHexMap : MonoBehaviour
         PlaceSitesAndRoad();
     }
 
-    void CreateHex(int q, int r, System.Random rnd)
+    void CreateSmallFieldAndGroup(System.Random rnd)
+    {
+        float small = hexSize / 3f;
+        int span = radius * 2 + 2;
+        var fieldObj = new GameObject("HexField");
+        fieldObj.transform.SetParent(transform, false);
+
+        var groups = new Dictionary<Vector2Int, HexCell>();
+
+        for (int sq = -span; sq <= span; sq++)
+        {
+            int r1 = Mathf.Max(-span, -sq - span);
+            int r2 = Mathf.Min(span, -sq + span);
+            for (int sr = r1; sr <= r2; sr++)
+            {
+                // Родитель по решётке плотности 1/7 (N=7, i=2, j=1)
+                float fQ = (3f * sq + sr) / 7f;
+                float fR = (-sq + 2f * sr) / 7f;
+                int Q = Mathf.RoundToInt(fQ);
+                int R = Mathf.RoundToInt(fR);
+
+                var key = new Vector2Int(Q, R);
+                if (!groups.TryGetValue(key, out var cell))
+                {
+                    cell = CreateHex(Q, R, rnd, small);
+                    groups[key] = cell;
+                    _cells.Add(cell);
+                }
+
+                float x = small * (Mathf.Sqrt(3f) * sq + Mathf.Sqrt(3f) * 0.5f * sr);
+                float z = small * (1.5f * sr);
+                float yJitter = ((sq * 13 + sr * 7) & 3) * 0.002f;
+
+                var child = new GameObject($"sub_{sq}_{sr}");
+                child.transform.SetParent(fieldObj.transform, false);
+                child.transform.position = new Vector3(x, cell.height * 0.5f + yJitter, z);
+
+                var mf = child.AddComponent<MeshFilter>();
+                var mr = child.AddComponent<MeshRenderer>();
+                var mc = child.AddComponent<MeshCollider>();
+                var mesh = HexMesh.Prism(small * 1.0f, cell.height);
+                mf.sharedMesh = mesh;
+                mc.sharedMesh = mesh;
+                mc.enabled = true;
+
+                // Центр группы — тот, чьи координаты совпадают с центром клетки
+                bool isCenter = (sq == cell.centerSmallQ && sr == cell.centerSmallR);
+                mr.sharedMaterial = cell.mat;
+
+                var tag = child.AddComponent<HexSubTag>();
+                tag.parentCell = cell;
+                tag.smallQ = sq;
+                tag.smallR = sr;
+                tag.isCenter = isCenter;
+                cell.subs.Add(child);
+            }
+        }
+
+        SmoothEdgeHeights(groups, small);
+    }
+
+    void SmoothEdgeHeights(Dictionary<Vector2Int, HexCell> groups, float small)
+    {
+        const float maxDelta = 0.35f;
+        foreach (var cell in _cells)
+        {
+            if (cell.subs == null) continue;
+            for (int i = 0; i < cell.subs.Count; i++)
+            {
+                var ch = cell.subs[i];
+                if (ch == null) continue;
+                var tag = ch.GetComponent<HexSubTag>();
+                if (tag == null || tag.isCenter) continue;
+
+                int dq = tag.smallQ - cell.centerSmallQ;
+                int dr = tag.smallR - cell.centerSmallR;
+                if (dq == 0 && dr == 0) continue;
+
+                // Ближайшая соседняя клетка в этом направлении
+                var neighKey = new Vector2Int(cell.q + dq, cell.r + dr);
+                if (!groups.TryGetValue(neighKey, out var neigh) || neigh == null) continue;
+
+                float ownH = cell.height;
+                float neighH = neigh.height;
+                float blended = Mathf.Lerp(ownH, neighH, 0.45f);
+                float limited = Mathf.Clamp(blended, ownH - maxDelta, ownH + maxDelta);
+
+                var pos = ch.transform.position;
+                pos.y = limited * 0.5f;
+                ch.transform.position = pos;
+
+                var mf = ch.GetComponent<MeshFilter>();
+                var mc = ch.GetComponent<MeshCollider>();
+                if (mf != null)
+                {
+                    var mesh = HexMesh.Prism(small * 1.0f, limited);
+                    mf.sharedMesh = mesh;
+                    if (mc != null) mc.sharedMesh = mesh;
+                }
+            }
+        }
+    }
+
+    HexCell CreateHex(int q, int r, System.Random rnd, float small)
     {
         float raw = forestBase + ((float)rnd.NextDouble() - 0.5f) * forestVariation;
         float h = Mathf.Max(heightStep, Mathf.Round(raw / heightStep) * heightStep);
 
-        var pos = AxialToWorld(q, r);
+        // Позиция клетки — в центре её семёрки
+        int cq = 2 * q - r;
+        int cr = q + 3 * r;
+        var pos = AxialToWorldScaled(cq, cr, small);
         pos.y = h * 0.5f;
 
         var go = new GameObject($"Hex_{q}_{r}");
         go.transform.SetParent(transform, false);
         go.transform.position = pos;
 
-        var mf = go.AddComponent<MeshFilter>();
-        var mr = go.AddComponent<MeshRenderer>();
-        var mc = go.AddComponent<MeshCollider>();
-
-        var mesh = HexMesh.Prism(hexSize * 1.005f, h);
-        mf.sharedMesh = mesh;
-        mc.sharedMesh = mesh;
-
         var mat = hexMaterial != null ? new Material(hexMaterial) : new Material(Shader.Find("Universal Render Pipeline/Lit"));
         if (mat.shader == null || mat.shader.name.Contains("Error"))
             mat = new Material(Shader.Find("Standard"));
 
         var col = Color.HSVToRGB(Mathf.Repeat(q * 0.04f + r * 0.06f + 0.35f, 1f), 0.28f, 0.55f);
-
         mat.color = col;
-        mr.sharedMaterial = mat;
+
+        var mc = go.AddComponent<MeshCollider>();
+        var mesh = HexMesh.Prism(small * 2.5f, h);
+        mc.sharedMesh = mesh;
 
         var cell = new HexCell
         {
@@ -286,9 +431,66 @@ public class RegionHexMap : MonoBehaviour
             go = go,
             mat = mat,
             baseColor = col,
-            sideNormals = BuildSideNormals(go.transform)
+            sideNormals = BuildSideNormals(go.transform),
+            centerSmallQ = cq,
+            centerSmallR = cr
         };
-        _cells.Add(cell);
+        return cell;
+    }
+
+    static Vector3 AxialToWorldScaled(int q, int r, float size)
+    {
+        float x = size * (Mathf.Sqrt(3f) * q + Mathf.Sqrt(3f) * 0.5f * r);
+        float z = size * (1.5f * r);
+        return new Vector3(x, 0f, z);
+    }
+
+    void BlendBorders()
+    {
+        float ideal = hexSize / 3f;
+        float smallSize = ideal * 1.06f;
+        float maxShift = ideal * 0.06f;
+        int[] dq = { 0, 1, 1, 0, -1, -1, 0 };
+        int[] dr = { 0, 0, -1, -1, 0, 1, 1 };
+
+        for (int ci = 0; ci < _cells.Count; ci++)
+        {
+            var cell = _cells[ci];
+            if (cell.go == null) continue;
+            for (int dir = 1; dir < 7; dir++)
+            {
+                int nq = cell.q + dq[dir];
+                int nr = cell.r + dr[dir];
+                var neigh = FindCell(nq, nr);
+                if (neigh == null) continue;
+                float dh = neigh.height - cell.height;
+                if (Mathf.Abs(dh) < 0.02f) continue;
+
+                string name = $"sub_{dq[dir]}_{dr[dir]}";
+                var child = cell.go.transform.Find(name);
+                if (child == null) continue;
+
+                var dirOff = AxialToWorld(dq[dir], dr[dir]);
+                dirOff *= (ideal / hexSize);
+                if (dirOff.sqrMagnitude < 0.0001f) continue;
+                var dirN = dirOff.normalized;
+
+                float shift = Mathf.Clamp(Mathf.Abs(dh) * 0.15f, 0f, maxShift);
+                var lp = child.localPosition;
+                lp.x += dirN.x * shift;
+                lp.z += dirN.z * shift;
+
+                float blendH = Mathf.Lerp(cell.height, neigh.height, 0.5f);
+                var mesh = HexMesh.Prism(smallSize, blendH);
+                var mf = child.GetComponent<MeshFilter>();
+                var mc = child.GetComponent<MeshCollider>();
+                if (mf != null) mf.sharedMesh = mesh;
+                if (mc != null) mc.sharedMesh = mesh;
+
+                lp.y = (blendH - cell.height) * 0.5f;
+                child.localPosition = lp;
+            }
+        }
     }
 
     void PlaceSitesAndRoad()
@@ -330,6 +532,7 @@ public class RegionHexMap : MonoBehaviour
             }
             c.baseColor = col;
             if (c.mat != null) c.mat.color = col;
+            if (c.centerMat != null) c.centerMat.color = Color.Lerp(col, Color.white, 0.35f);
         }
     }
 
@@ -339,6 +542,7 @@ public class RegionHexMap : MonoBehaviour
         cell.kind = kind;
         cell.baseColor = color;
         if (cell.mat != null) cell.mat.color = color;
+        if (cell.centerMat != null) cell.centerMat.color = Color.Lerp(color, Color.white, 0.35f);
         var m = GameObject.CreatePrimitive(marker);
         m.name = kind;
         m.transform.SetParent(cell.go.transform, false);
@@ -356,29 +560,54 @@ public class RegionHexMap : MonoBehaviour
     {
         _road.Clear();
         if (_village == null || _temple == null) return;
-        var path = HexLine(_village.q, _village.r, _temple.q, _temple.r);
+
+        int vq = _village.centerSmallQ;
+        int vr = _village.centerSmallR;
+        int tq = _temple.centerSmallQ;
+        int tr = _temple.centerSmallR;
+        var path = HexLine(vq, vr, tq, tr);
+
         float sum = 0f;
         int n = 0;
         for (int i = 0; i < path.Count; i++)
         {
-            var cell = FindCell(path[i].x, path[i].y);
+            var cell = FindCellBySmall(path[i].x, path[i].y);
             if (cell == null) continue;
             sum += cell.height;
             n++;
         }
         if (n == 0) return;
         float roadH = Mathf.Max(heightStep, Mathf.Round((sum / n) / heightStep) * heightStep);
+
         for (int i = 0; i < path.Count; i++)
         {
-            var cell = FindCell(path[i].x, path[i].y);
+            var cell = FindCellBySmall(path[i].x, path[i].y);
             if (cell == null) continue;
-            SetHexHeight(cell, roadH);
-            cell.road = true;
-            cell.kind = "дорога";
-            cell.baseColor = new Color(0.45f, 0.36f, 0.22f);
-            if (cell.mat != null) cell.mat.color = cell.baseColor;
-            _road.Add(cell);
+            if (!_road.Contains(cell))
+            {
+                SetHexHeight(cell, roadH);
+                cell.road = true;
+                cell.kind = "дорога";
+                cell.baseColor = new Color(0.45f, 0.36f, 0.22f);
+                if (cell.mat != null) cell.mat.color = cell.baseColor;
+                _road.Add(cell);
+            }
         }
+    }
+
+    HexCell FindCellBySmall(int sq, int sr)
+    {
+        for (int i = 0; i < _cells.Count; i++)
+        {
+            var c = _cells[i];
+            if (c.subs == null) continue;
+            for (int k = 0; k < c.subs.Count; k++)
+            {
+                var tag = c.subs[k] != null ? c.subs[k].GetComponent<HexSubTag>() : null;
+                if (tag != null && tag.smallQ == sq && tag.smallR == sr) return c;
+            }
+        }
+        return null;
     }
 
     void SetHexHeight(HexCell cell, float h)
@@ -387,55 +616,57 @@ public class RegionHexMap : MonoBehaviour
         var p = cell.go.transform.position;
         p.y = h * 0.5f;
         cell.go.transform.position = p;
-        var mesh = HexMesh.Prism(hexSize * 1.005f, h);
-        var mf = cell.go.GetComponent<MeshFilter>();
-        var mc = cell.go.GetComponent<MeshCollider>();
-        if (mf != null) mf.sharedMesh = mesh;
-        if (mc != null) mc.sharedMesh = mesh;
+        float small = hexSize / 3f;
+        foreach (Transform child in cell.go.transform)
+        {
+            var mf = child.GetComponent<MeshFilter>();
+            var mc = child.GetComponent<MeshCollider>();
+            if (mf == null) continue;
+            var mesh = HexMesh.Prism(small * 1.008f, h);
+            mf.sharedMesh = mesh;
+            if (mc != null) mc.sharedMesh = mesh;
+            var lp = child.localPosition;
+            lp.y = 0f;
+            child.localPosition = lp;
+        }
         cell.sideNormals = BuildSideNormals(cell.go.transform);
     }
 
     void DrawRoadRibbon()
     {
-        if (_road.Count < 2) return;
-        float top = _road[0].go.transform.position.y + _road[0].height * 0.5f + 0.05f;
-        var line = RegionLayout.RoadLine(hexSize);
-        if (line == null || line.Count < 2) return;
-        var local = new List<Vector3>(line.Count);
-        for (int i = 0; i < line.Count; i++)
+        if (_village == null || _temple == null) return;
+        int vq = _village.centerSmallQ;
+        int vr = _village.centerSmallR;
+        int tq = _temple.centerSmallQ;
+        int tr = _temple.centerSmallR;
+        var path = HexLine(vq, vr, tq, tr);
+        if (path.Count < 2) return;
+
+        float small = hexSize / 3f;
+        var points = new List<Vector3>();
+        for (int i = 0; i < path.Count; i++)
         {
-            var w = new Vector3(line[i].x, top, line[i].z);
-            local.Add(transform.InverseTransformPoint(w));
+            int sq = path[i].x;
+            int sr = path[i].y;
+            var cell = FindCellBySmall(sq, sr);
+            if (cell == null) continue;
+            float x = small * (Mathf.Sqrt(3f) * sq + Mathf.Sqrt(3f) * 0.5f * sr);
+            float z = small * (1.5f * sr);
+            float y = cell.height * 0.5f + 0.06f;
+            points.Add(transform.InverseTransformPoint(new Vector3(x, y, z)));
         }
+        if (points.Count < 2) return;
 
         var go = new GameObject("Road");
         go.transform.SetParent(transform, false);
         var mf = go.AddComponent<MeshFilter>();
         var mr = go.AddComponent<MeshRenderer>();
-        mf.sharedMesh = RibbonMesh(local, hexSize * 0.28f);
+        mf.sharedMesh = RibbonMesh(points, small * 0.85f);
         var mat = hexMaterial != null ? new Material(hexMaterial) : new Material(Shader.Find("Universal Render Pipeline/Lit"));
         if (mat.shader == null || mat.shader.name.Contains("Error"))
             mat = new Material(Shader.Find("Standard"));
         mat.color = new Color(0.45f, 0.36f, 0.22f);
         mr.sharedMaterial = mat;
-
-        for (int i = 0; i < _road.Count; i++)
-        {
-            var cell = _road[i];
-            var wp = cell.go.transform.position;
-            int best = 0;
-            float bestD = float.MaxValue;
-            for (int k = 0; k < line.Count; k++)
-            {
-                float d = (line[k].x - wp.x) * (line[k].x - wp.x) + (line[k].z - wp.z) * (line[k].z - wp.z);
-                if (d < bestD) { bestD = d; best = k; }
-            }
-            int a = Mathf.Max(0, best - 1);
-            int b = Mathf.Min(line.Count - 1, best + 1);
-            var tan = line[b] - line[a];
-            tan.y = 0f;
-            cell.roadDir = tan.sqrMagnitude > 0.0001f ? tan.normalized : Vector3.forward;
-        }
     }
 
     static Mesh RibbonMesh(List<Vector3> line, float width)
@@ -510,6 +741,7 @@ public class RegionHexMap : MonoBehaviour
         pick.kind = "Воющая пуща";
         pick.baseColor = howlingColor;
         if (pick.mat != null) pick.mat.color = howlingColor;
+        if (pick.centerMat != null) pick.centerMat.color = Color.Lerp(howlingColor, Color.white, 0.35f);
         _howling = pick;
         CreateHowlingMarker(pick.go.transform, pick.height);
         HowlingQ = pick.q;
@@ -526,8 +758,30 @@ public class RegionHexMap : MonoBehaviour
         return null;
     }
 
+    void AddCenterLabel(Transform parent, int q, int r, float height)
+    {
+        var go = new GameObject("label");
+        go.transform.SetParent(parent, false);
+        go.transform.localPosition = new Vector3(0f, height * 0.5f + 0.15f, 0f);
+        var tm = go.AddComponent<TextMesh>();
+        tm.text = $"({q},{r})";
+        tm.fontSize = 24;
+        tm.characterSize = 0.08f;
+        tm.anchor = TextAnchor.MiddleCenter;
+        tm.alignment = TextAlignment.Center;
+        tm.color = new Color(0.15f, 0.15f, 0.2f, 1f);
+        tm.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        if (tm.font == null) tm.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
+        var mr = go.GetComponent<MeshRenderer>();
+        if (mr != null) mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+    }
+
     HexCell FindCellFromHit(GameObject hitGo)
     {
+        if (hitGo == null) return null;
+        var tag = hitGo.GetComponent<HexSubTag>();
+        if (tag != null && tag.parentCell != null) return tag.parentCell;
+
         var go = hitGo;
         while (go != null)
         {
@@ -628,22 +882,52 @@ public class RegionHexMap : MonoBehaviour
     {
         if (_selected != null && _selected.mat != null)
             _selected.mat.color = _selected.baseColor;
+        if (_selected != null && _selected.centerMat != null)
+            _selected.centerMat.color = Color.Lerp(_selected.baseColor, Color.white, 0.35f);
+
         _selected = cell;
         if (cell.mat != null)
             cell.mat.color = selectedColor;
+        if (cell.centerMat != null)
+            cell.centerMat.color = selectedColor;
         _focused = true;
         _focusPoint = cell.go.transform.position;
         _focusPoint.y += 1.2f;
         _dist = Mathf.Lerp(_dist, focusDistance, 0.35f);
+        RefreshSubHexes(cell);
     }
 
     void Deselect()
     {
         if (_selected != null && _selected.mat != null)
             _selected.mat.color = _selected.baseColor;
+        if (_selected != null && _selected.centerMat != null)
+            _selected.centerMat.color = Color.Lerp(_selected.baseColor, Color.white, 0.35f);
+        var prev = _selected;
         _selected = null;
         _focused = false;
         _dist = orbitDistance;
+        if (prev != null) RefreshSubHexes(prev);
+    }
+
+    void RefreshSubHexes(HexCell cell)
+    {
+        if (cell == null) return;
+        bool sel = (cell == _selected);
+        Color ring = sel ? selectedColor : cell.baseColor;
+        Color center = sel ? selectedColor : Color.Lerp(cell.baseColor, Color.white, 0.35f);
+        if (cell.mat != null) cell.mat.color = ring;
+        if (cell.centerMat != null) cell.centerMat.color = center;
+
+        for (int i = 0; i < cell.subs.Count; i++)
+        {
+            var ch = cell.subs[i];
+            if (ch == null) continue;
+            var mr = ch.GetComponent<MeshRenderer>();
+            if (mr == null) continue;
+            bool isCenter = ch.name.Contains($"_{cell.q * 3}_{cell.r * 3}");
+            mr.sharedMaterial = isCenter && cell.centerMat != null ? cell.centerMat : cell.mat;
+        }
     }
 
     void UpdateCamera()
@@ -680,8 +964,11 @@ public class RegionHexMap : MonoBehaviour
                 if (d > best) best = d;
             }
             var tint = Color.Lerp(Color.white, nearFaceTint, Mathf.Clamp01(best * 1.4f));
-            var baseCol = (cell == _selected) ? selectedColor : cell.baseColor;
-            cell.mat.color = baseCol * tint;
+            bool sel = (cell == _selected);
+            var ringBase = sel ? selectedColor : cell.baseColor;
+            var centerBase = sel ? selectedColor : Color.Lerp(cell.baseColor, Color.white, 0.35f);
+            cell.mat.color = ringBase * tint;
+            if (cell.centerMat != null) cell.centerMat.color = centerBase * tint;
         }
     }
 
@@ -719,6 +1006,12 @@ public class RegionHexMap : MonoBehaviour
         {
             if (Application.isPlaying) Destroy(old.gameObject);
             else DestroyImmediate(old.gameObject);
+        }
+        var oldField = transform.Find("HexField");
+        if (oldField != null)
+        {
+            if (Application.isPlaying) Destroy(oldField.gameObject);
+            else DestroyImmediate(oldField.gameObject);
         }
         foreach (var c in _cells)
             if (c.go != null) Destroy(c.go);
@@ -760,6 +1053,8 @@ public class RegionHexMap : MonoBehaviour
     void OnDrawGizmos()
     {
         if (_cells == null || _cells.Count == 0) return;
+        float smallR = hexSize / 3f;
+        var wire = new Color(1f, 1f, 1f, 0.55f);
         for (int i = 0; i < _cells.Count; i++)
         {
             var c = _cells[i];
@@ -767,11 +1062,41 @@ public class RegionHexMap : MonoBehaviour
             var p = c.go.transform.position;
             p.y += c.height * 0.5f + 0.4f;
             UnityEditor.Handles.Label(p, $"{c.q},{c.r}");
+
+            // обводка всех маленьких гексов, из которых собран регион
+            var t = c.go.transform;
+            for (int k = 0; k < t.childCount; k++)
+            {
+                var ch = t.GetChild(k);
+                if (ch == null || !ch.name.StartsWith("sub_")) continue;
+                DrawHexWire(ch.position, smallR, wire);
+            }
+        }
+    }
+
+    void DrawHexWire(Vector3 center, float radius, Color color)
+    {
+        UnityEditor.Handles.color = color;
+        Vector3 prev = center;
+        for (int i = 0; i <= 6; i++)
+        {
+            float a = i * Mathf.PI * 2f / 6f + Mathf.PI / 6f;
+            var pt = center + new Vector3(Mathf.Cos(a) * radius, 0f, Mathf.Sin(a) * radius);
+            if (i > 0) UnityEditor.Handles.DrawLine(prev, pt);
+            prev = pt;
         }
     }
 #endif
 
     void OnDestroy() => Clear();
+}
+
+public class HexSubTag : MonoBehaviour
+{
+    public RegionHexMap.HexCell parentCell;
+    public int smallQ;
+    public int smallR;
+    public bool isCenter;
 }
 
 /// <summary>
@@ -832,19 +1157,21 @@ public static class RegionLayout
     }
 
     /// <summary>Извилистая лента деревня→храм в мировых (или визуальных) координатах. Один и тот же путь на карте региона и на местности.</summary>
-    public static List<Vector3> RoadLine(float hexSize)
+    public static List<Vector3> RoadLine(float hexSize, bool scaled = false)
     {
         if (Seed == 0 || hexSize < 1f) return _roadLine ?? new List<Vector3>();
-        if (_roadLine != null && Mathf.Approximately(_roadLineSize, hexSize))
+        float keySize = scaled ? -hexSize : hexSize;
+        if (_roadLine != null && Mathf.Approximately(_roadLineSize, keySize))
             return _roadLine;
-        _roadLine = BuildRoadLine(hexSize);
-        _roadLineSize = hexSize;
+        _roadLine = BuildRoadLine(hexSize, scaled);
+        _roadLineSize = keySize;
         return _roadLine;
     }
 
-    static List<Vector3> BuildRoadLine(float hexSize)
+    static List<Vector3> BuildRoadLine(float hexSize, bool scaled = false)
     {
-        var path = HexLine(Village.x, Village.y, Temple.x, Temple.y);
+        int scale = scaled ? SuperScale : 1;
+        var path = HexLine(Village.x * scale, Village.y * scale, Temple.x * scale, Temple.y * scale);
         var knots = new List<Vector3>(path.Count);
         for (int i = 0; i < path.Count; i++)
         {
@@ -914,6 +1241,54 @@ public static class RegionLayout
         if (p == Howling) return "Воющая пуща";
         if (Road.Contains(p)) return "дорога";
         return "лес";
+    }
+
+    public const int SuperScale = 3;
+
+    public static Vector2Int SuperOf(int q, int r)
+    {
+        int q0 = q / SuperScale;
+        int r0 = r / SuperScale;
+        int bestQ = q0, bestR = r0;
+        int bestD = HexDist(q, r, q0 * SuperScale, r0 * SuperScale);
+        for (int dq = -1; dq <= 1; dq++)
+            for (int dr = -1; dr <= 1; dr++)
+            {
+                if (dq == 0 && dr == 0) continue;
+                int Q = q0 + dq;
+                int R = r0 + dr;
+                int d = HexDist(q, r, Q * SuperScale, R * SuperScale);
+                if (d < bestD)
+                {
+                    bestD = d;
+                    bestQ = Q;
+                    bestR = R;
+                }
+            }
+        return new Vector2Int(bestQ, bestR);
+    }
+
+    public static NaturePlacement.Zone ZoneForTerrain(int q, int r)
+    {
+        var s = SuperOf(q, r);
+        return ZoneForHex(s.x, s.y);
+    }
+
+    public static float DensityScaleTerrain(int q, int r)
+    {
+        var s = SuperOf(q, r);
+        return DensityScale(s.x, s.y);
+    }
+
+    public static string KindAtTerrain(int q, int r)
+    {
+        var s = SuperOf(q, r);
+        return KindAt(s.x, s.y);
+    }
+
+    public static bool IsHowlingArea(int q, int r)
+    {
+        return HexDist(q, r, Howling.x * SuperScale, Howling.y * SuperScale) <= 1;
     }
 
     /// <summary>Зона растительности всего гекса. Один гекс = одна территория.</summary>
@@ -986,14 +1361,16 @@ public static class HexSpawnRequest
     public static float Height { get; private set; }
     public static int Seed { get; private set; }
     public static float HexWorldSize { get; private set; }
+    public static string PointName { get; private set; }
 
-    public static void Set(int q, int r, float height, int seed, float hexWorldSize)
+    public static void Set(int q, int r, float height, int seed, float hexWorldSize, string pointName = null)
     {
         Q = q;
         R = r;
         Height = height;
         Seed = seed;
         HexWorldSize = hexWorldSize;
+        PointName = pointName;
         HasRequest = true;
         // переживает смену сцены даже если домен перезагрузится
         PlayerPrefs.SetInt("HexSpawn_Q", q);
@@ -1001,6 +1378,7 @@ public static class HexSpawnRequest
         PlayerPrefs.SetFloat("HexSpawn_H", height);
         PlayerPrefs.SetInt("HexSpawn_Seed", seed);
         PlayerPrefs.SetFloat("HexSpawn_Size", hexWorldSize);
+        PlayerPrefs.SetString("HexSpawn_Point", pointName ?? "");
         PlayerPrefs.SetInt("HexSpawn_Has", 1);
         PlayerPrefs.Save();
     }
@@ -1014,6 +1392,8 @@ public static class HexSpawnRequest
         Height = PlayerPrefs.GetFloat("HexSpawn_H");
         Seed = PlayerPrefs.GetInt("HexSpawn_Seed");
         HexWorldSize = PlayerPrefs.GetFloat("HexSpawn_Size", 200f);
+        PointName = PlayerPrefs.GetString("HexSpawn_Point", "");
+        if (string.IsNullOrEmpty(PointName)) PointName = null;
         HasRequest = true;
         return true;
     }
@@ -1030,7 +1410,9 @@ public static class HexSpawnRequest
     public static void Clear()
     {
         HasRequest = false;
+        PointName = null;
         PlayerPrefs.DeleteKey("HexSpawn_Has");
+        PlayerPrefs.DeleteKey("HexSpawn_Point");
         PlayerPrefs.Save();
     }
 }

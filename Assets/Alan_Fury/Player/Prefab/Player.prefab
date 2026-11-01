@@ -261,7 +261,6 @@ GameObject:
   - component: {fileID: 513820049935331392}
   - component: {fileID: 3702021059671560228}
   - component: {fileID: -768134931306652445}
-  - component: {fileID: 3971391403722877795}
   - component: {fileID: 7356289692560819943}
   - component: {fileID: 8926634951404438334}
   m_Layer: 6
@@ -280,7 +279,7 @@ Transform:
   m_GameObject: {fileID: 6846430933918887357}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: -346.41016, y: 4.2, z: 300}
+  m_LocalPosition: {x: -1039.2305, y: 4.2, z: 900}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
@@ -407,7 +406,7 @@ MonoBehaviour:
   combatBackMultiplier: 0.95
   dodgeSpeed: 9
   dodgeDuration: 0.4
-  dodgeCooldown: 0.1
+  dodgeCooldown: 0.6
   dodgeSteerDegrees: 180
   dodgeExitCarry: 0.35
   dodgeInvuln: 0.1
@@ -575,7 +574,6 @@ MonoBehaviour:
   thrustKey: 113
   swordToggleKey: 49
   shieldToggleKey: 50
-  sheathKey: 114
 --- !u!136 &2234283485029094733
 CapsuleCollider:
   m_ObjectHideFlags: 0
@@ -1048,10 +1046,6 @@ MonoBehaviour:
   eyeHeight: 1.4
   peekHeight: 5
   drawGizmos: 1
-  drawRuntime: 1
-  drawOverlay: 1
-  overlayWidth: 0.05
-  overlayColor: {r: 0.8, g: 0.66, b: 0.3, a: 0.32}
   showVisibleCells: 1
   maxCellsToDraw: 600
   arcSegments: 64
@@ -1252,38 +1246,6 @@ MonoBehaviour:
   m_LightCookieSize: {x: 1, y: 1}
   m_LightCookieOffset: {x: 0, y: 0}
   m_SoftShadowQuality: 0
---- !u!114 &3971391403722877795
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 6846430933918887357}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 63a76262ae063aa4986c83e7e805d555, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  player: {fileID: 3200823202175224380}
-  seed: 24011
-  tileSize: 4
-  hexSize: 100
-  chunkCells: 16
-  loadRadiusChunks: 3
-  unloadRadiusChunks: 5
-  chunksPerFrame: 2
-  heightStep: 0.5
-  forestBase: 2.5
-  forestVariation: 1.5
-  terraceAmp: 2.2
-  hexBlend: 0.55
-  minTerraceCells: 10
-  roadMaxStep: 0.1
-  roadStepDist: 10
-  nature: {fileID: 0}
-  chunkBuilder: {fileID: 0}
-  driveWorld: 1
-  roadHalfWidth: 7
 --- !u!114 &7356289692560819943
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -1304,6 +1266,10 @@ MonoBehaviour:
   absorbRate: 1.2
   ultMinLevels: 5
   ultSecondsPerLevel: 7
+  teleportCost: 0.5
+  attackCost: 0.35
+  blockCost: 0.4
+  healCost: 0.6
   speedBonusPerLevel: 0.1
   faceRenderer: {fileID: 3060140897778545479}
   faceEmission: {r: 1, g: 0.92, b: 0.7, a: 1}

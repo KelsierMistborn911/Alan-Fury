@@ -93,27 +93,50 @@ public class WolfDuty : MonoBehaviour
                 if (cc != null) cc.enabled = false;
                 transform.position = p;
             }
+            SnapCapsuleAboveGround(cc);
         }
         if (cc != null) cc.enabled = on;
         SetSenses(on);
         ApplyLook(on);
     }
 
+    void SnapCapsuleAboveGround(CharacterController cc)
+    {
+        if (cc == null) return;
+        float probe = locomotion != null ? locomotion.groundProbeHeight : 50f;
+        int layers = locomotion != null ? locomotion.groundLayers.value : ~0;
+        Vector3 origin = transform.position + Vector3.up * probe;
+        if (!Physics.Raycast(origin, Vector3.down, out RaycastHit hit,
+                             probe * 2f, layers, QueryTriggerInteraction.Ignore))
+            return;
+        Vector3 p = transform.position;
+        p.y = hit.point.y + cc.skinWidth + cc.height * 0.5f - cc.center.y + 0.02f;
+        cc.enabled = false;
+        transform.position = p;
+    }
+
     void SetSenses(bool on)
     {
-        if (perception != null) perception.enabled = on;
+        if (perception != null)
+        {
+            perception.enabled = true;
+            perception.simpleVision = !on;
+        }
         var notice = GetComponent<WerewolfNoticeIndicator>();
         if (notice != null) notice.enabled = on;
     }
 
     int _patrolIndex;
     bool _onPatrol;
+    float _nextReport;
 
-    public void BeginPatrol(int slot)
+    public void BeginPatrol(int hex)
     {
-        _patrolIndex = slot;
+        _patrolHex = hex;
+        _patrolIndex = 0;
         _onPatrol = true;
         _goal = Vector3.zero;
+        _nextReport = Time.time + Random.Range(80f, 110f);
     }
 
     /// <summary>Далеко: рывок координат. Патруль — по кольцу точек.</summary>
@@ -128,13 +151,14 @@ public class WolfDuty : MonoBehaviour
         {
             if (!_onPatrol)
             {
-                _patrolIndex = _patrolHex;
+                _patrolIndex = 0;
                 _onPatrol = true;
-                var start = pack.PatrolPoint(_patrolIndex);
+                var start = pack.PatrolPoint(_patrolHex, 0);
                 start.y = transform.position.y;
                 transform.position = start;
             }
-            _goal = pack.PatrolPoint(_patrolIndex);
+            _goal = pack.PatrolPoint(_patrolHex, _patrolIndex);
+            TryReport(pack);
         }
         else if (_goal == Vector3.zero || Time.time >= _nextGoal)
             PickGoal(pack);
@@ -145,7 +169,7 @@ public class WolfDuty : MonoBehaviour
         if (dist < 6f)
         {
             if (_job == WerewolfPackManager.Occupation.Patrol)
-                _patrolIndex = pack.NextPatrol(_patrolIndex);
+                _patrolIndex = pack.NextPatrolPoint(_patrolIndex);
             else
                 PickGoal(pack);
             return;
@@ -177,6 +201,9 @@ public class WolfDuty : MonoBehaviour
         if (Time.time >= _nextGoal)
             PickGoal(pack);
 
+        if (_job == WerewolfPackManager.Occupation.Patrol)
+            TryReport(pack);
+
         float speed = _job == WerewolfPackManager.Occupation.Patrol ? 2.2f : 3.1f;
         if (patrol != null && patrol.enabled && _job == WerewolfPackManager.Occupation.Patrol)
             return;
@@ -205,8 +232,8 @@ public class WolfDuty : MonoBehaviour
         switch (_job)
         {
             case WerewolfPackManager.Occupation.Patrol:
-                if (!_onPatrol) _patrolIndex = _patrolHex;
-                _goal = pack.PatrolPoint(_patrolIndex);
+                if (!_onPatrol) { _patrolIndex = 0; _onPatrol = true; }
+                _goal = pack.PatrolPoint(_patrolHex, _patrolIndex);
                 break;
             case WerewolfPackManager.Occupation.Hunter:
                 _goal = pack.HunterPoint(transform.position);
@@ -217,6 +244,35 @@ public class WolfDuty : MonoBehaviour
             default:
                 PickFree(pack);
                 break;
+        }
+    }
+
+    void TryReport(WerewolfPackManager pack)
+    {
+        if (Time.time < _nextReport) return;
+        _nextReport = Time.time + Random.Range(80f, 110f);
+        if (_job != WerewolfPackManager.Occupation.Patrol) return;
+
+        int status = 0;
+        Vector3 pos = transform.position;
+        if (perception != null && (perception.IsLocked || perception.HasCue))
+        {
+            status = 2;
+            pos = perception.HasCue ? perception.CuePos : perception.PlayerPos;
+        }
+        pack.ReportHex(_patrolHex, status, pos);
+
+        // запрос у соседей: если у них свежий контакт — сдвинуть цель к границе
+        for (int d = -1; d <= 1; d += 2)
+        {
+            int neigh = pack.NeighborHex(_patrolHex, d);
+            var intel = pack.GetIntel(neigh);
+            if (intel.time > Time.time - 180f && intel.status >= 2)
+            {
+                var border = Vector3.Lerp(pack.PatrolPoint(_patrolHex, 0), pack.PatrolPoint(neigh, 0), 0.5f);
+                _goal = border;
+                break;
+            }
         }
     }
 

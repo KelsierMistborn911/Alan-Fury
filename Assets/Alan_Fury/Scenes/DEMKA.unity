@@ -763,9 +763,11 @@ MonoBehaviour:
   heightStep: 0.5
   forestBase: 2.5
   forestVariation: 1.5
-  detailNoise: 0.6
-  minorDelta: 0.5
-  slopeWidth: 15
+  terraceAmp: 2.2
+  hexBlend: 0.55
+  minTerraceCells: 10
+  roadMaxStep: 0.1
+  roadStepDist: 10
   nature: {fileID: 519772227}
   chunkBuilder: {fileID: 519772225}
   driveWorld: 1
@@ -783,6 +785,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   heightSource: {fileID: 519772229}
+  minTerraceCells: 5
   tileSize: 4
   slopeThreshold: 0.2
   chunkSize: 10
@@ -833,17 +836,13 @@ MonoBehaviour:
   heightSource: {fileID: 519772229}
   terrainBuilder: {fileID: 519772225}
   mapGrid: {fileID: 519772226}
+  leshiy: {fileID: 0}
+  forest: {fileID: 0}
   layers:
   - name: "\u041E\u0441\u043D\u043E\u0432\u043D\u043E\u0439 \u043B\u0435\u0441"
     kind: 0
     enabled: 1
     footprint: 3
-    densityGrove: 0.1
-    densityForest: 0.1
-    densityThicket: 0.1
-    growInGrove: 1
-    growInForest: 1
-    growInThicket: 1
     variants:
     - name: Tree_Main
       prefab: {fileID: 8432258960026481866, guid: 3c4a2284cf2d72447bdfe2b8724dc70e,
@@ -869,12 +868,6 @@ MonoBehaviour:
     kind: 1
     enabled: 1
     footprint: 1
-    densityGrove: 0.05
-    densityForest: 0.05
-    densityThicket: 0.05
-    growInGrove: 1
-    growInForest: 1
-    growInThicket: 1
     variants:
     - name: SmallTree_Stub
       prefab: {fileID: 8432258960026481866, guid: 3c4a2284cf2d72447bdfe2b8724dc70e,
@@ -918,12 +911,6 @@ MonoBehaviour:
     kind: 2
     enabled: 1
     footprint: 1
-    densityGrove: 0.06
-    densityForest: 0.12
-    densityThicket: 0.2
-    growInGrove: 1
-    growInForest: 1
-    growInThicket: 1
     variants:
     - name: Bush_Stub
       prefab: {fileID: 213899067198857939, guid: fbd37a08d1a089840b0e9ce1e199395a,
@@ -965,12 +952,6 @@ MonoBehaviour:
     kind: 3
     enabled: 0
     footprint: 1
-    densityGrove: 0.2
-    densityForest: 0.25
-    densityThicket: 0.15
-    growInGrove: 1
-    growInForest: 1
-    growInThicket: 1
     variants:
     - name: Plant_Stub
       prefab: {fileID: 0}
@@ -994,12 +975,6 @@ MonoBehaviour:
     kind: 4
     enabled: 0
     footprint: 1
-    densityGrove: 0
-    densityForest: 0
-    densityThicket: 0
-    growInGrove: 1
-    growInForest: 1
-    growInThicket: 1
     variants: []
     sightCover: 0
     maxCoverHeight: 2.5
@@ -1035,6 +1010,12 @@ MonoBehaviour:
   liveRadius: 15
   liveExitExtra: 10
   todTint: {r: 0.34, g: 0.4, b: 0.52, a: 1}
+  fadeTreesInVision: 1
+  darkenSeconds: 0.3
+  fadeSeconds: 0.35
+  seeThroughAlpha: 0.72
+  silhouetteColor: {r: 0.06, g: 0.06, b: 0.07, a: 1}
+  coverRadius: 3.2
   liveCheckEveryNFrames: 4
   liveRoot: {fileID: 0}
   streamCheckEveryNFrames: 8
@@ -1717,6 +1698,74 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1001 &879707897
+PrefabInstance:
+  m_ObjectHideFlags: 0
+  serializedVersion: 2
+  m_Modification:
+    serializedVersion: 3
+    m_TransformParent: {fileID: 0}
+    m_Modifications:
+    - target: {fileID: 8432258960026481866, guid: 3c4a2284cf2d72447bdfe2b8724dc70e,
+        type: 3}
+      propertyPath: m_Name
+      value: DARKWOOD (1)
+      objectReference: {fileID: 0}
+    - target: {fileID: 9101412512817737328, guid: 3c4a2284cf2d72447bdfe2b8724dc70e,
+        type: 3}
+      propertyPath: m_LocalPosition.x
+      value: -329.35074
+      objectReference: {fileID: 0}
+    - target: {fileID: 9101412512817737328, guid: 3c4a2284cf2d72447bdfe2b8724dc70e,
+        type: 3}
+      propertyPath: m_LocalPosition.y
+      value: 0.8993938
+      objectReference: {fileID: 0}
+    - target: {fileID: 9101412512817737328, guid: 3c4a2284cf2d72447bdfe2b8724dc70e,
+        type: 3}
+      propertyPath: m_LocalPosition.z
+      value: 299.24014
+      objectReference: {fileID: 0}
+    - target: {fileID: 9101412512817737328, guid: 3c4a2284cf2d72447bdfe2b8724dc70e,
+        type: 3}
+      propertyPath: m_LocalRotation.w
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 9101412512817737328, guid: 3c4a2284cf2d72447bdfe2b8724dc70e,
+        type: 3}
+      propertyPath: m_LocalRotation.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 9101412512817737328, guid: 3c4a2284cf2d72447bdfe2b8724dc70e,
+        type: 3}
+      propertyPath: m_LocalRotation.y
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 9101412512817737328, guid: 3c4a2284cf2d72447bdfe2b8724dc70e,
+        type: 3}
+      propertyPath: m_LocalRotation.z
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 9101412512817737328, guid: 3c4a2284cf2d72447bdfe2b8724dc70e,
+        type: 3}
+      propertyPath: m_LocalEulerAnglesHint.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 9101412512817737328, guid: 3c4a2284cf2d72447bdfe2b8724dc70e,
+        type: 3}
+      propertyPath: m_LocalEulerAnglesHint.y
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 9101412512817737328, guid: 3c4a2284cf2d72447bdfe2b8724dc70e,
+        type: 3}
+      propertyPath: m_LocalEulerAnglesHint.z
+      value: 0
+      objectReference: {fileID: 0}
+    m_RemovedComponents: []
+    m_RemovedGameObjects: []
+    m_AddedGameObjects: []
+    m_AddedComponents: []
+  m_SourcePrefab: {fileID: 100100000, guid: 3c4a2284cf2d72447bdfe2b8724dc70e, type: 3}
 --- !u!1 &948584312
 GameObject:
   m_ObjectHideFlags: 0
@@ -2535,6 +2584,13 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 14561d8bf4f52914ca4b7ad0315f71b4, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  den: {fileID: 0}
+  patrolSlots: 6
+  retinuePeace: 2
+  rollCallInterval: 300
+  occupationInterval: 4
+  presenceRadius: 100
+  presenceInterval: 6
   player: {fileID: 0}
   pathfinder: {fileID: 0}
   wolfPrefab: {fileID: 4950279192017619235, guid: 7b2931f4ea9cc004886b33bd49d434ad,
@@ -2542,6 +2598,7 @@ MonoBehaviour:
   spawnCount: 12
   spawnRadius: 12
   spawnCenter: {fileID: 1224455447}
+  alphaPrefab: {fileID: 0}
   heraldTransform: {fileID: 0}
   squadMergeMeters: 8
   alphaBurnDistance: 25
@@ -2889,3 +2946,4 @@ SceneRoots:
   - {fileID: 2625953028841872646}
   - {fileID: 2061846022}
   - {fileID: 3676932112117410630}
+  - {fileID: 879707897}

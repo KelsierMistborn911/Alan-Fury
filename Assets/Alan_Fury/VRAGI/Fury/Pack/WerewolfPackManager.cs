@@ -800,12 +800,14 @@ public class WerewolfPackManager : MonoBehaviour
         _sectors.Clear();
         if (player == null) return;
 
-        // 1. Кто сейчас в окружении.
+        // 1. Кто сейчас в окружении — только те, кто реально в контакте (локи и CombatRequested).
+        // Остальные в Patrol/Idle. Иначе весь патруль считался кольцом и SwapGroups писал «обмен в окружении».
         _surrounders.Clear();
         for (int i = 0; i < _wolves.Count; i++)
         {
             var w = _wolves[i];
             if (w == null || !w.IsAlive || _attackSlots.Contains(w)) continue;
+            if (!InContactFight(w)) continue;
             _surrounders.Add(w);
         }
         int n = _surrounders.Count;
@@ -1415,10 +1417,10 @@ public class WerewolfPackManager : MonoBehaviour
         style.normal.textColor = new Color(0.75f, 0.95f, 0.7f);
         style.fontSize = 11;
         style.alignment = TextAnchor.MiddleCenter;
-        int n = PatrolPointCount;
+        int n = OuterHexCount;
         for (int i = 0; i < n; i++)
         {
-            var p = PatrolPoint(i);
+            var p = PatrolPoint(i, 0);
             p.y += 2.5f;
             UnityEditor.Handles.Label(p, "П" + (i + 1), style);
         }
@@ -1550,9 +1552,9 @@ public class WerewolfPackManager : MonoBehaviour
         {
             var t = alive[i].Transform;
             if (IsAlphaTransform(t) || _job.ContainsKey(t)) continue;
+            if (!PlaceOnPatrol(t, patrolHave)) continue;
             _job[t] = Occupation.Patrol;
             _patrolHex[t] = patrolHave;
-            PlaceOnPatrol(t, patrolHave);
             patrolHave++;
         }
 
@@ -1595,47 +1597,119 @@ public class WerewolfPackManager : MonoBehaviour
     static readonly int[] _dq = { 1, 1, 0, -1, -1, 0 };
     static readonly int[] _dr = { 0, -1, -1, 0, 1, 1 };
 
-    public int PatrolPointCount => 8;
+    public const int OuterHexCount = 6;
+    public const int PointsPerHex = 8; // 6 по краю + 2 возврат со смещением
 
-    public Vector3 PatrolPoint(int slot)
-    {
-        var c = HowlingCenter();
-        int n = PatrolPointCount;
-        int i = Mathf.Abs(slot) % n;
-        float ang = i * (Mathf.PI * 2f / n);
-        float rad = 96f;
-        return c + new Vector3(Mathf.Cos(ang) * rad, 0f, Mathf.Sin(ang) * rad);
-    }
+    public int PatrolPointCount => OuterHexCount * PointsPerHex;
 
-    Vector3 HowlingCenter()
+    /// <summary>Точка маршрута: hexIndex 0..5 — внешний гекс, pointIndex 0..7 — по краю потом возврат.</summary>
+    public Vector3 PatrolPoint(int hexIndex, int pointIndex = 0)
     {
-        int q = RegionLayout.Howling.x;
-        int r = RegionLayout.Howling.y;
-        if (q == 0 && r == 0)
+        hexIndex = Mathf.Abs(hexIndex) % OuterHexCount;
+        pointIndex = Mathf.Abs(pointIndex) % PointsPerHex;
+        var c = OuterHexCenter(hexIndex);
+        float size = CurrentHexSize();
+        float edgeR = size * 0.72f;
+
+        if (pointIndex < 6)
         {
-            q = RegionHexMap.HowlingQ;
-            r = RegionHexMap.HowlingR;
+            float ang = pointIndex * (Mathf.PI * 2f / 6f);
+            return c + new Vector3(Mathf.Cos(ang) * edgeR, 0f, Mathf.Sin(ang) * edgeR);
         }
-        return HexCenter(q, r);
+
+        // возврат к старту не строго через середину: два смещённых шага
+        var start = c + new Vector3(edgeR, 0f, 0f); // точка 0
+        var last = c + new Vector3(Mathf.Cos(5f * Mathf.PI / 3f) * edgeR, 0f, Mathf.Sin(5f * Mathf.PI / 3f) * edgeR);
+        Vector3 midDir = (start - last).normalized;
+        Vector3 side = new Vector3(-midDir.z, 0f, midDir.x);
+        float off = size * 0.28f;
+        if (pointIndex == 6)
+            return Vector3.Lerp(last, start, 0.35f) + side * off;
+        return Vector3.Lerp(last, start, 0.7f) - side * (off * 0.6f);
     }
 
-    public int NextPatrol(int slot) => (Mathf.Abs(slot) + 1) % PatrolPointCount;
+    public int NextPatrolPoint(int pointIndex) => (Mathf.Abs(pointIndex) + 1) % PointsPerHex;
 
-    void PlaceOnPatrol(Transform t, int slot)
+    Vector3 OuterHexCenter(int hexIndex)
     {
-        if (t == null) return;
-        var p = PatrolPoint(slot);
+        int cq, cr;
+        HowlingCenterSmall(out cq, out cr);
+        int i = Mathf.Abs(hexIndex) % 6;
+        return HexCenter(cq + _dq[i], cr + _dr[i]);
+    }
+
+    void HowlingCenterSmall(out int q, out int r)
+    {
+        int hq = RegionLayout.Howling.x;
+        int hr = RegionLayout.Howling.y;
+        if (hq == 0 && hr == 0)
+        {
+            hq = RegionHexMap.HowlingQ;
+            hr = RegionHexMap.HowlingR;
+        }
+        // центр семёрки по решётке 1/7 (как в RegionHexMap.CreateHex)
+        q = 2 * hq - hr;
+        r = hq + 3 * hr;
+    }
+
+    float CurrentHexSize()
+    {
+        var stream = FindObjectOfType<LocationStream>();
+        if (stream != null && stream.hexSize > 10f) return stream.hexSize;
+        return 100f;
+    }
+
+    public struct HexIntel
+    {
+        public int status; // 0 чисто, 1 след, 2 контакт
+        public Vector3 pos;
+        public float time;
+    }
+    HexIntel[] _intel = new HexIntel[OuterHexCount];
+
+    public void ReportHex(int hexIndex, int status, Vector3 pos)
+    {
+        if (hexIndex < 0 || hexIndex >= OuterHexCount) return;
+        _intel[hexIndex].status = status;
+        _intel[hexIndex].pos = pos;
+        _intel[hexIndex].time = Time.time;
+    }
+
+    public HexIntel GetIntel(int hexIndex)
+    {
+        if (hexIndex < 0 || hexIndex >= OuterHexCount) return default;
+        return _intel[hexIndex];
+    }
+
+    public int NeighborHex(int hexIndex, int dir)
+    {
+        // dir = -1 или +1 по кольцу внешних
+        return (hexIndex + dir + OuterHexCount) % OuterHexCount;
+    }
+
+    bool PlaceOnPatrol(Transform t, int slot)
+    {
+        if (t == null) return false;
+        int hex = slot % OuterHexCount;
+        var p = PatrolPoint(hex, 0);
         var stream = FindObjectOfType<LocationStream>();
         if (stream != null)
+        {
+            if (!stream.HasBuiltChunk(p))
+                return false;
             p.y = stream.HeightAtWorld(p.x, p.z) + 1.2f;
+        }
         else
         {
             Debug.LogWarning("WerewolfPackManager: нет LocationStream, патрульная точка без высоты земли.");
             p.y = t.position.y;
         }
+        var cc = t.GetComponent<CharacterController>();
+        if (cc != null) cc.enabled = false;
         t.position = p;
         var duty = t.GetComponent<WolfDuty>();
-        if (duty != null) duty.BeginPatrol(slot);
+        if (duty != null) duty.BeginPatrol(hex);
+        return true;
     }
 
     public Vector3 HunterPoint(Vector3 from)
@@ -1663,6 +1737,6 @@ public class WerewolfPackManager : MonoBehaviour
 
     public Vector3 BorderPoint()
     {
-        return PatrolPoint(Random.Range(0, 6));
+        return PatrolPoint(Random.Range(0, OuterHexCount), 0);
     }
 }

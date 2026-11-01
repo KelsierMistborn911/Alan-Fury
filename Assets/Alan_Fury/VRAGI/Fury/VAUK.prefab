@@ -316,7 +316,7 @@ MonoBehaviour:
     recover: 0.1
     cooldown: 2.5
     staminaCost: 35
-    range: 5
+    range: 2.5
     radius: 1.2
     height: 2
     offset: {x: 0, y: 1, z: 0}
@@ -328,10 +328,10 @@ MonoBehaviour:
   swipe:
     windup: 0.5
     active: 0.1
-    recover: 0.1
-    cooldown: 0.1
+    recover: 0.3
+    cooldown: 0.4
     staminaCost: 12
-    range: 5
+    range: 3.5
     radius: 2
     height: 2
     offset: {x: 0, y: 1, z: 0}
@@ -345,7 +345,7 @@ MonoBehaviour:
     recover: 0.7
     cooldown: 4
     staminaCost: 45
-    range: 3.5
+    range: 3
     radius: 3
     height: 2
     offset: {x: 0, y: 1, z: 0}
@@ -425,9 +425,9 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   perception: {fileID: 0}
   locomotion: {fileID: 5952714522296563151}
-  preferredDistance: 30
-  minDistance: 25
-  noticeRange: 35
+  preferredDistance: 22
+  minDistance: 16
+  noticeRange: 22
   circleSpeed: 4
   fleeSpeed: 10
   retreatDistanceFactor: 1.3
@@ -481,7 +481,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   maxHealth: 60
-  healthRegenPerSecond: 7
+  healthRegenPerSecond: 3
   maxStamina: 60
   staminaRegenPerSecond: 12
   staminaRegenDelay: 1

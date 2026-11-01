@@ -44,6 +44,20 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
         [Tooltip("Если MaxHeight — высота укрытия над землёй (м).")]
         public float maxCoverHeight = 2.5f;
 
+        [Header("Зоны укрытия вокруг ствола (радиусы в клетках, только деревья)")]
+        [Tooltip("Торчащие корни: вокруг ствола зоны укрытия. Внутренняя зона сильнее и не перезаписывается внешней.")]
+        public bool hasProtrudingRoots = false;
+        [Tooltip("Радиус полного укрытия (клетки). 0 = нет.")]
+        public int fullCoverRadiusCells = 1;
+        [Tooltip("Радиус высокого укрытия (клетки). 0 = нет.")]
+        public int highCoverRadiusCells = 2;
+        [Tooltip("Высота высокого укрытия над землёй клетки (м).")]
+        public float highCoverHeight = 2f;
+        [Tooltip("Радиус укрытия от корней (клетки). 0 = нет.")]
+        public int rootCoverRadiusCells = 4;
+        [Tooltip("Высота укрытия от корней над землёй клетки (м).")]
+        public float rootCoverHeight = 1f;
+
         [HideInInspector] public Mesh resolvedMesh;
         [HideInInspector] public List<MeshPart> parts;
         [HideInInspector] public MaterialPropertyBlock propertyBlock;
@@ -239,37 +253,8 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
     {
         if (!_ready) return;
 
-        if (streamGround != null)
-        {
-            float tile = terrainBuilder != null ? terrainBuilder.TileSize : 4f;
-            int cells = Mathf.Max(4, sectorSize);
-            float sw = tile * cells;
-            int hx = Mathf.FloorToInt(playerPos.x / sw);
-            int hz = Mathf.FloorToInt(playerPos.z / sw);
-            // только вокруг игрока по streamRadius (не фиксированное большое кольцо)
-            int lr = Mathf.Max(1, Mathf.CeilToInt(streamRadius / sw));
-            int ur = Mathf.Max(lr + 1, Mathf.CeilToInt((streamRadius + unloadExtra) / sw));
-
-            for (int dx = -lr; dx <= lr; dx++)
-            for (int dz = -lr; dz <= lr; dz++)
-            {
-                if (dx * dx + dz * dz > lr * lr + lr) continue;
-                PlaceStreamSector(hx + dx, hz + dz);
-            }
-
-            // выгрузить далёкие секторы
-            _toUnload.Clear();
-            foreach (var key in _loaded)
-            {
-                if (Mathf.Abs(key.x - hx) > ur || Mathf.Abs(key.y - hz) > ur)
-                    _toUnload.Add(key);
-            }
-            for (int i = 0; i < _toUnload.Count; i++)
-            {
-                ReleaseStreamSector(_toUnload[i].x, _toUnload[i].y);
-            }
-            return;
-        }
+        // Hex: хозяин стрима — LocationStream. Здесь не грузим и не выгружаем.
+        if (streamGround != null) return;
 
         if (heightSource == null || !heightSource.isGenerated || terrainBuilder == null)
             return;
@@ -369,6 +354,20 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
         StreamStamp++;
     }
 
+    float GroundY(float wx, float wz, float fallback)
+    {
+        var origin = new Vector3(wx, 800f, wz);
+        if (Physics.Raycast(origin, Vector3.down, out RaycastHit hit, 1600f, TerrainMask()))
+            return hit.point.y;
+        return fallback;
+    }
+
+    int TerrainMask()
+    {
+        int m = LayerMask.GetMask("Terrain");
+        return m != 0 ? m : ~0;
+    }
+
     private void GenerateSector(int sx, int sz)
     {
         float t0 = Time.realtimeSinceStartup;
@@ -388,140 +387,141 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
         var key = new Vector2Int(sx, sz);
 
         for (int pass = 0; pass < 2; pass++)
-        for (int vi = 0; vi < allVariants.Count; vi++)
-        {
-            var v = allVariants[vi];
-            var layer = variantLayer[vi];
-            if (v.parts == null || v.parts.Count == 0) continue;
-            if (layer.IsTree != (pass == 0)) continue;
-
-            if (!v.sectorLists.TryGetValue(key, out var list))
+            for (int vi = 0; vi < allVariants.Count; vi++)
             {
-                list = new List<Matrix4x4>();
-                v.sectorLists[key] = list;
-            }
-            else list.Clear();
+                var v = allVariants[vi];
+                var layer = variantLayer[vi];
+                if (v.parts == null || v.parts.Count == 0) continue;
+                if (layer.IsTree != (pass == 0)) continue;
 
-            int fp = layer.IsTree ? Mathf.Max(1, layer.footprint) : 1;
-            int half = fp / 2;
-            bool useGrid = mapGrid != null && mapGrid.IsReady && layer.IsTree;
-            // в stream абсолютные клетки → локальные индекса окна MapGrid
-            int cellOx = (stream && mapGrid != null && mapGrid.Streaming) ? mapGrid.StreamOriginX : 0;
-            int cellOz = (stream && mapGrid != null && mapGrid.Streaming) ? mapGrid.StreamOriginZ : 0;
-            int step = layer.IsTree ? Mathf.Max(1, fp) : 1;
-            Quaternion spriteRot = Quaternion.Euler(v.spriteEuler);
-
-            float layerWeightSum = 0f;
-            foreach (var ov in layer.variants) if (ov != null) layerWeightSum += Mathf.Max(0f, ov.weight);
-            float myChance = layerWeightSum > 0f ? Mathf.Max(0f, v.weight) / layerWeightSum : 1f;
-
-            int xLo = stream ? x0 : Mathf.Max(x0, border + half);
-            int zLo = stream ? z0 : Mathf.Max(z0, border + half);
-            int xHi = stream ? x1 : Mathf.Min(w - border - half, x1);
-            int zHi = stream ? z1 : Mathf.Min(d - border - half, z1);
-            for (int x = xLo; x < xHi; x += step)
-            {
-                for (int z = zLo; z < zHi; z += step)
+                if (!v.sectorLists.TryGetValue(key, out var list))
                 {
-                    float h = stream ? streamGround.Height(x, z) : heightSource.GetHeight(x, z);
-                    if (h <= waterLevel) continue;
+                    list = new List<Matrix4x4>();
+                    v.sectorLists[key] = list;
+                }
+                else list.Clear();
 
-                    Zone zone = stream ? streamGround.ZoneAt(x, z) : GetZone(x, z);
-                    // слоты из файла Forest: плотность и что ставить
-                    if (!CanGrow(layer, zone)) continue;
+                int fp = layer.IsTree ? Mathf.Max(1, layer.footprint) : 1;
+                int half = fp / 2;
+                bool useGrid = mapGrid != null && mapGrid.IsReady && layer.IsTree;
+                // в stream абсолютные клетки → локальные индекса окна MapGrid
+                int cellOx = (stream && mapGrid != null && mapGrid.Streaming) ? mapGrid.StreamOriginX : 0;
+                int cellOz = (stream && mapGrid != null && mapGrid.Streaming) ? mapGrid.StreamOriginZ : 0;
+                int step = layer.IsTree ? Mathf.Max(1, fp) : 1;
+                Quaternion spriteRot = Quaternion.Euler(v.spriteEuler);
 
-                    bool stable = true;
-                    float dens = EffectiveDensity(layer, zone, x, z);
-                    if (Hash01(x, z, vi, 0) > dens) continue;
-                    if (Hash01(x, z, vi, 1) > myChance) continue;
+                float layerWeightSum = 0f;
+                foreach (var ov in layer.variants) if (ov != null) layerWeightSum += Mathf.Max(0f, ov.weight);
+                float myChance = layerWeightSum > 0f ? Mathf.Max(0f, v.weight) / layerWeightSum : 1f;
 
-                    bool road = stream
-                        ? streamGround.IsRoad(x, z)
-                        : mapGrid != null && mapGrid.IsReady && mapGrid.HasFlag(x, z, MapGrid.OccupancyFlags.Road);
-                    if (road) continue;
-
-                    if (useGrid)
+                int xLo = stream ? x0 : Mathf.Max(x0, border + half);
+                int zLo = stream ? z0 : Mathf.Max(z0, border + half);
+                int xHi = stream ? x1 : Mathf.Min(w - border - half, x1);
+                int zHi = stream ? z1 : Mathf.Min(d - border - half, z1);
+                for (int x = xLo; x < xHi; x += step)
+                {
+                    for (int z = zLo; z < zHi; z += step)
                     {
-                        int lx = x - cellOx;
-                        int lz = z - cellOz;
-                        if (!mapGrid.CanPlace(lx, lz, fp, fp, anchorCenter: true)) continue;
-                        if (!stream && FootprintHitsRoad(x, z, fp)) continue;
-                    }
+                        float h = stream ? streamGround.Height(x, z) : heightSource.GetHeight(x, z);
+                        if (h <= waterLevel) continue;
 
-                    Vector3 pos;
-                    if (stream)
-                    {
-                        // в hex-режиме клетки уже в мировых координатах, origin = CellOrigin (обычно 0)
-                        if (layer.IsTree)
+                        Zone zone = stream ? streamGround.ZoneAt(x, z) : GetZone(x, z);
+                        // слоты из файла Forest: плотность и что ставить
+                        if (!CanGrow(layer, zone)) continue;
+
+                        bool stable = true;
+                        float dens = EffectiveDensity(layer, zone, x, z);
+                        if (Hash01(x, z, vi, 0) > dens) continue;
+                        if (Hash01(x, z, vi, 1) > myChance) continue;
+
+                        bool road = stream
+                            ? streamGround.IsRoad(x, z)
+                            : mapGrid != null && mapGrid.IsReady && mapGrid.HasFlag(x, z, MapGrid.OccupancyFlags.Road);
+                        if (road) continue;
+
+                        if (useGrid)
                         {
-                            pos = new Vector3(
+                            int lx = x - cellOx;
+                            int lz = z - cellOz;
+                            if (!mapGrid.CanPlace(lx, lz, fp, fp, anchorCenter: true)) continue;
+                            if (!stream && FootprintHitsRoad(x, z, fp)) continue;
+                        }
+
+                        Vector3 pos;
+                        if (stream)
+                        {
+                            // в hex-режиме клетки уже в мировых координатах, origin = CellOrigin (обычно 0)
+                            float px, pz;
+                            if (layer.IsTree)
+                            {
+                                px = origin.x + (x + 0.5f) * ts;
+                                pz = origin.z + (z + 0.5f) * ts;
+                            }
+                            else
+                            {
+                                float m = ts * 0.15f;
+                                float rx = stable ? Hash01(x, z, vi, 10) : Random.value;
+                                float rz = stable ? Hash01(x, z, vi, 20) : Random.value;
+                                px = origin.x + x * ts + Mathf.Lerp(m, ts - m, rx);
+                                pz = origin.z + z * ts + Mathf.Lerp(m, ts - m, rz);
+                            }
+                            float gy = GroundY(px, pz, h);
+                            pos = new Vector3(px, gy + v.heightOffset, pz);
+                        }
+                        else if (layer.IsTree)
+                        {
+                            pos = terrainBuilder.MapLocalToWorld(new Vector3(
                                 origin.x + (x + 0.5f) * ts,
                                 h + v.heightOffset,
-                                origin.z + (z + 0.5f) * ts);
+                                origin.z + (z + 0.5f) * ts));
                         }
                         else
                         {
                             float m = ts * 0.15f;
                             float rx = stable ? Hash01(x, z, vi, 10) : Random.value;
                             float rz = stable ? Hash01(x, z, vi, 20) : Random.value;
-                            pos = new Vector3(
+                            pos = terrainBuilder.MapLocalToWorld(new Vector3(
                                 origin.x + x * ts + Mathf.Lerp(m, ts - m, rx),
                                 h + v.heightOffset,
-                                origin.z + z * ts + Mathf.Lerp(m, ts - m, rz));
+                                origin.z + z * ts + Mathf.Lerp(m, ts - m, rz)));
+                        }
+
+                        float scale = stable
+                            ? Mathf.Lerp(v.minScale, v.maxScale, Hash01(x, z, vi, 30))
+                            : Random.Range(v.minScale, v.maxScale);
+                        Quaternion rot;
+                        if (v.randomYRotation)
+                        {
+                            float yaw = stable ? Hash01(x, z, vi, 40) * 360f : Random.Range(0f, 360f);
+                            rot = Quaternion.Euler(0f, yaw, 0f);
+                        }
+                        else
+                            rot = v.sprite != null ? spriteRot : Quaternion.identity;
+
+                        list.Add(Matrix4x4.TRS(pos, rot, Vector3.one * scale));
+
+                        if (useGrid)
+                        {
+                            int lx = x - cellOx;
+                            int lz = z - cellOz;
+                            mapGrid.Occupy(lx, lz, fp, fp, MapGrid.OccupancyFlags.Tree, anchorCenter: true);
+                            ResolveCover(layer, v, out var coverMode, out var coverH);
+                            mapGrid.SetSightCover(lx, lz, fp, fp, coverMode, coverH, anchorCenter: true);
+                            if (v.hasProtrudingRoots)
+                                StampZoneCover(lx, lz, v);
+                        }
+                        else if (layer.kind == LayerKind.Bush && mapGrid != null && mapGrid.IsReady)
+                        {
+                            int lx = x - cellOx;
+                            int lz = z - cellOz;
+                            ResolveCover(layer, v, out var coverMode, out var coverH);
+                            mapGrid.SetSightCover(lx, lz, 1, 1, coverMode, coverH, anchorCenter: true);
                         }
                     }
-                    else if (layer.IsTree)
-                    {
-                        pos = terrainBuilder.MapLocalToWorld(new Vector3(
-                            origin.x + (x + 0.5f) * ts,
-                            h + v.heightOffset,
-                            origin.z + (z + 0.5f) * ts));
-                    }
-                    else
-                    {
-                        float m = ts * 0.15f;
-                        float rx = stable ? Hash01(x, z, vi, 10) : Random.value;
-                        float rz = stable ? Hash01(x, z, vi, 20) : Random.value;
-                        pos = terrainBuilder.MapLocalToWorld(new Vector3(
-                            origin.x + x * ts + Mathf.Lerp(m, ts - m, rx),
-                            h + v.heightOffset,
-                            origin.z + z * ts + Mathf.Lerp(m, ts - m, rz)));
-                    }
-
-                    float scale = stable
-                        ? Mathf.Lerp(v.minScale, v.maxScale, Hash01(x, z, vi, 30))
-                        : Random.Range(v.minScale, v.maxScale);
-                    Quaternion rot;
-                    if (v.randomYRotation)
-                    {
-                        float yaw = stable ? Hash01(x, z, vi, 40) * 360f : Random.Range(0f, 360f);
-                        rot = Quaternion.Euler(0f, yaw, 0f);
-                    }
-                    else
-                        rot = v.sprite != null ? spriteRot : Quaternion.identity;
-
-                    list.Add(Matrix4x4.TRS(pos, rot, Vector3.one * scale));
-
-                    if (useGrid)
-                    {
-                        int lx = x - cellOx;
-                        int lz = z - cellOz;
-                        mapGrid.Occupy(lx, lz, fp, fp, MapGrid.OccupancyFlags.Tree, anchorCenter: true);
-                        ResolveCover(layer, v, out var coverMode, out var coverH);
-                        mapGrid.SetSightCover(lx, lz, fp, fp, coverMode, coverH, anchorCenter: true);
-                    }
-                    else if (layer.kind == LayerKind.Bush && mapGrid != null && mapGrid.IsReady)
-                    {
-                        int lx = x - cellOx;
-                        int lz = z - cellOz;
-                        ResolveCover(layer, v, out var coverMode, out var coverH);
-                        mapGrid.SetSightCover(lx, lz, 1, 1, coverMode, coverH, anchorCenter: true);
-                    }
                 }
-            }
 
-            v.sectors[key] = SplitToBatches(list);
-        }
+                v.sectors[key] = SplitToBatches(list);
+            }
         float ms = (Time.realtimeSinceStartup - t0) * 1000f;
         int inst = 0;
         for (int i = 0; i < allVariants.Count; i++)
@@ -536,6 +536,7 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
         bool gridOk = mapGrid != null && mapGrid.IsReady;
         int bx0 = int.MaxValue, bz0 = int.MaxValue, bx1 = int.MinValue, bz1 = int.MinValue;
         bool any = false;
+        _zoneDirty = false;
 
         for (int vi = 0; vi < allVariants.Count; vi++)
         {
@@ -547,7 +548,7 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
                 if (v.sectorLists != null && v.sectorLists.TryGetValue(key, out var list) && list != null)
                 {
                     for (int i = 0; i < list.Count; i++)
-                        ClearTreeFootprint(list[i], fp, ref any, ref bx0, ref bz0, ref bx1, ref bz1);
+                        ClearTreeFootprint(list[i], fp, v, ref any, ref bx0, ref bz0, ref bx1, ref bz1);
                 }
                 else if (v.sectors != null && v.sectors.TryGetValue(key, out var batches) && batches != null)
                 {
@@ -556,7 +557,7 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
                         var batch = batches[b];
                         if (batch == null) continue;
                         for (int i = 0; i < batch.Length; i++)
-                            ClearTreeFootprint(batch[i], fp, ref any, ref bx0, ref bz0, ref bx1, ref bz1);
+                            ClearTreeFootprint(batch[i], fp, v, ref any, ref bx0, ref bz0, ref bx1, ref bz1);
                     }
                 }
             }
@@ -585,15 +586,145 @@ public class NaturePlacement : MonoBehaviour, CollectablePlant.IInstanceRemover
 
         if (gridOk && any)
             mapGrid.RebuildAggregatesInBounds(bx0, bz0, bx1, bz1);
+        // Снятые зоны могли перекрывать укрытия соседних (ещё загруженных) деревьев и кустов — восстановить.
+        if (gridOk && _zoneDirty)
+            RestampCoverInBounds(_zx0, _zz0, _zx1, _zz1);
     }
 
-    private void ClearTreeFootprint(Matrix4x4 m, int fp,
+    // ===== Зоны укрытия вокруг ствола (полное / высокое / корни) =====
+    private bool _zoneDirty;
+    private int _zx0, _zz0, _zx1, _zz1;
+    private readonly List<Vector3> _coverTmp = new List<Vector3>();
+
+    // Круг радиуса r в клетках: dx²+dz² <= r²+r (как кольца чанков). r<=0 — зоны нет.
+    private static int ZoneR2(int r) => r <= 0 ? -1 : r * r + r;
+
+    private static int MaxZoneRadius(NatureVariant v)
+        => Mathf.Max(0, Mathf.Max(v.fullCoverRadiusCells, Mathf.Max(v.highCoverRadiusCells, v.rootCoverRadiusCells)));
+
+    // Слияние в MapGrid: Full побеждает, иначе max высоты — внутренняя зона не понижается внешней.
+    private void StampZoneCover(int cx, int cz, NatureVariant v)
+    {
+        int R = MaxZoneRadius(v);
+        if (R == 0) return;
+        int f2 = ZoneR2(v.fullCoverRadiusCells);
+        int h2 = v.highCoverHeight > 0f ? ZoneR2(v.highCoverRadiusCells) : -1;
+        int r2 = v.rootCoverHeight > 0f ? ZoneR2(v.rootCoverRadiusCells) : -1;
+        for (int dx = -R; dx <= R; dx++)
+        {
+            for (int dz = -R; dz <= R; dz++)
+            {
+                int d2 = dx * dx + dz * dz;
+                if (d2 <= f2)
+                    mapGrid.SetSightCover(cx + dx, cz + dz, 1, 1, MapGrid.SightCoverMode.Full, 0f, anchorCenter: true);
+                else if (d2 <= h2)
+                    mapGrid.SetSightCover(cx + dx, cz + dz, 1, 1, MapGrid.SightCoverMode.MaxHeight, v.highCoverHeight, anchorCenter: true);
+                else if (d2 <= r2)
+                    mapGrid.SetSightCover(cx + dx, cz + dz, 1, 1, MapGrid.SightCoverMode.MaxHeight, v.rootCoverHeight, anchorCenter: true);
+            }
+        }
+    }
+
+    // Снять укрытие в зоне дерева (кроме клеток, занятых деревьями). Перекрытия потом восстанавливает RestampCoverInBounds.
+    private void ClearZoneCover(int cx, int cz, NatureVariant v)
+    {
+        int R = MaxZoneRadius(v);
+        if (R == 0) return;
+        int R2 = ZoneR2(R);
+        for (int dx = -R; dx <= R; dx++)
+        {
+            for (int dz = -R; dz <= R; dz++)
+            {
+                if (dx * dx + dz * dz > R2) continue;
+                int x = cx + dx;
+                int z = cz + dz;
+                if (mapGrid.HasFlag(x, z, MapGrid.OccupancyFlags.Tree)) continue;
+                mapGrid.ClearSightCover(x, z, 1, 1, anchorCenter: true);
+            }
+        }
+        if (!_zoneDirty)
+        {
+            _zoneDirty = true;
+            _zx0 = cx - R; _zz0 = cz - R; _zx1 = cx + R; _zz1 = cz + R;
+        }
+        else
+        {
+            if (cx - R < _zx0) _zx0 = cx - R;
+            if (cz - R < _zz0) _zz0 = cz - R;
+            if (cx + R > _zx1) _zx1 = cx + R;
+            if (cz + R > _zz1) _zz1 = cz + R;
+        }
+    }
+
+    private static void CollectInstancePositions(NatureVariant v, List<Vector3> dst)
+    {
+        dst.Clear();
+        if (v.sectorLists != null)
+        {
+            foreach (var kv in v.sectorLists)
+            {
+                var list = kv.Value;
+                if (list == null) continue;
+                for (int i = 0; i < list.Count; i++) dst.Add(list[i].GetColumn(3));
+            }
+        }
+        if (v.sectors != null)
+        {
+            foreach (var kv in v.sectors)
+            {
+                if (v.sectorLists != null && v.sectorLists.ContainsKey(kv.Key)) continue;
+                var batches = kv.Value;
+                if (batches == null) continue;
+                for (int b = 0; b < batches.Length; b++)
+                {
+                    var batch = batches[b];
+                    if (batch == null) continue;
+                    for (int i = 0; i < batch.Length; i++) dst.Add(batch[i].GetColumn(3));
+                }
+            }
+        }
+    }
+
+    // Переналожить укрытия оставшихся деревьев (зоны) и кустов, задевающих прямоугольник клеток.
+    private void RestampCoverInBounds(int x0, int z0, int x1, int z1)
+    {
+        for (int vi = 0; vi < allVariants.Count; vi++)
+        {
+            var v = allVariants[vi];
+            var layer = variantLayer[vi];
+            if (v == null || layer == null) continue;
+            bool zones = layer.IsTree && v.hasProtrudingRoots;
+            bool bush = layer.kind == LayerKind.Bush;
+            if (!zones && !bush) continue;
+            var bm = MapGrid.SightCoverMode.None;
+            float bh = 0f;
+            if (bush)
+            {
+                ResolveCover(layer, v, out bm, out bh);
+                if (bm == MapGrid.SightCoverMode.None) continue;
+            }
+            int reach = zones ? MaxZoneRadius(v) : 0;
+            CollectInstancePositions(v, _coverTmp);
+            for (int i = 0; i < _coverTmp.Count; i++)
+            {
+                mapGrid.WorldToCell(_coverTmp[i], out int cx, out int cz);
+                if (cx + reach < x0 || cx - reach > x1 || cz + reach < z0 || cz - reach > z1) continue;
+                if (zones) StampZoneCover(cx, cz, v);
+                else mapGrid.SetSightCover(cx, cz, 1, 1, bm, bh, anchorCenter: true);
+            }
+        }
+        _coverTmp.Clear();
+    }
+
+    private void ClearTreeFootprint(Matrix4x4 m, int fp, NatureVariant v,
         ref bool any, ref int bx0, ref int bz0, ref int bx1, ref int bz1)
     {
         Vector3 p = m.GetColumn(3);
         mapGrid.WorldToCell(p, out int cx, out int cz);
         mapGrid.ClearOccupancy(cx, cz, fp, fp, MapGrid.OccupancyFlags.Tree, anchorCenter: true, rebuild: false);
         mapGrid.ClearSightCover(cx, cz, fp, fp, anchorCenter: true);
+        if (v != null && v.hasProtrudingRoots)
+            ClearZoneCover(cx, cz, v);
 
         int hx = fp / 2;
         int hz = fp / 2;

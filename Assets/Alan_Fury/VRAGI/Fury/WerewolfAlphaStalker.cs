@@ -64,6 +64,21 @@ public class WerewolfAlphaStalker : MonoBehaviour
     [Header("Поиск пути")]
     public float pathRepathInterval = 0.4f;
 
+    [Header("При 0 HP: сбежать и исчезнуть")]
+    [Tooltip("Статы альфы. Пусто — найдётся на объекте.")]
+    public WerewolfStats stats;
+    [Tooltip("Скорость бегства при 0 HP (м/с). 0 = fleeSpeed.")]
+    public float vanishFleeSpeed = 0f;
+    [Tooltip("Исчезает, когда дальше от игрока, чем это (м).")]
+    public float vanishDistance = 30f;
+    [Tooltip("Исчезает, если игрок её не видит, но не раньше чем через столько секунд бегства.")]
+    public float vanishMinSeconds = 1.5f;
+    [Tooltip("Исчезает в любом случае через столько секунд бегства.")]
+    public float vanishMaxSeconds = 6f;
+    [Tooltip("Длительность сжатия перед исчезновением (сек).")]
+    public float vanishShrinkSeconds = 0.5f;
+    public bool IsVanishing => _vanishing;
+
     [Header("Давление сталкинга (задел под вой/призыв)")]
     public float pressurePerSecond = 0.15f;
     public bool autoCallWhenPressured = false;
@@ -90,6 +105,19 @@ public class WerewolfAlphaStalker : MonoBehaviour
 
     private BTNode _root;
 
+    private bool _vanishing;
+    private float _vanishT;
+    private float _shrinkT = -1f;
+    private Vector3 _baseScale;
+    private PlayerVision _vision;
+
+    // Awake, а не Start: WerewolfBrain может выключить этот скрипт до его Start (вне режима Stalk).
+    void Awake()
+    {
+        if (stats == null) stats = GetComponent<WerewolfStats>();
+        if (stats != null) stats.OnDeath += BeginVanish;
+    }
+
     void Start()
     {
         if (perception == null) perception = GetComponent<NpcPerception>();
@@ -111,9 +139,79 @@ public class WerewolfAlphaStalker : MonoBehaviour
         );
     }
 
+    void OnDestroy()
+    {
+        if (stats != null) stats.OnDeath -= BeginVanish;
+    }
+
+    // ============ 0 HP: альфа не умирает как волк — сбегает и исчезает ============
+    private void BeginVanish()
+    {
+        if (_vanishing) return;
+        _vanishing = true;
+        if (perception == null) perception = GetComponent<NpcPerception>();
+        if (locomotion == null) locomotion = GetComponent<WerewolfLocomotion>();
+        if (pathfinder == null && WerewolfPackManager.Instance != null)
+            pathfinder = WerewolfPackManager.Instance.pathfinder;
+        _vanishT = 0f;
+        _fleeing = true;
+        _currentCover = null;
+        ClearPath();
+        // Глушим мозги/режимы, чтобы никто не переключал и не перебивал бегство.
+        var behaviours = GetComponents<MonoBehaviour>();
+        for (int i = 0; i < behaviours.Length; i++)
+        {
+            var b = behaviours[i];
+            if (b == null || b == this) continue;
+            if (b is WerewolfLocomotion || b is NpcPerception || b is WerewolfStats || b is MapBoundary) continue;
+            b.enabled = false;
+        }
+        enabled = true;
+        Debug.Log($"AlphaStalker: {name} 0 HP — сбегает и исчезнет.");
+    }
+
+    private bool PlayerSeesMe()
+    {
+        if (_vision == null) _vision = FindObjectOfType<PlayerVision>();
+        if (_vision == null) return true; // не знаем — считаем, что видит (исчезнет по дистанции/таймеру)
+        return _vision.IsPointVisible(transform.position);
+    }
+
+    private void TickVanish()
+    {
+        _vanishT += _dt;
+        if (_shrinkT >= 0f)
+        {
+            _shrinkT += _dt;
+            float k = vanishShrinkSeconds > 0.01f ? Mathf.Clamp01(_shrinkT / vanishShrinkSeconds) : 1f;
+            transform.localScale = Vector3.Lerp(_baseScale, Vector3.zero, k);
+            if (k >= 1f) Destroy(gameObject);
+            return;
+        }
+
+        bool hasPlayer = perception != null && perception.HasPlayer;
+        if (hasPlayer && locomotion != null)
+        {
+            _dist = perception.DistanceToPlayer;
+            float speed = vanishFleeSpeed > 0f ? vanishFleeSpeed : fleeSpeed;
+            Vector3 goal = ChooseAwayGoal(Mathf.Max(stalkMax * 1.3f, vanishDistance));
+            MoveAlongPath(goal, speed, _dt);
+            locomotion.FaceTowards(goal, _dt);
+        }
+
+        bool far = !hasPlayer || _dist >= vanishDistance;
+        bool unseen = _vanishT >= vanishMinSeconds && !PlayerSeesMe();
+        if (far || unseen || _vanishT >= vanishMaxSeconds)
+        {
+            _shrinkT = 0f;
+            _baseScale = transform.localScale;
+        }
+    }
+
     void Update()
     {
         _dt = Time.deltaTime;
+        if (_vanishing) { TickVanish(); return; }
         if (perception == null || !perception.HasPlayer) return; // поиск/обнаружение — позже
         if (locomotion == null) return;
         if (_root == null)

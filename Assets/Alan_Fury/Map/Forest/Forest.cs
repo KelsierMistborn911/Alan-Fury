@@ -26,16 +26,16 @@ public class Forest : ScriptableObject
     }
 
     [Header("Чаща")]
-    public Area thicket = MakeArea("Чаща", 0.85f, 0.35f, 0.5f, 0.15f, 0.12f);
+    public Area thicket = MakeArea("Чаща", 0.85f, 0.35f, 0.5f, 0.15f, 0.65f);
 
     [Header("Лес")]
-    public Area forest = MakeArea("Лес", 0.55f, 0.2f, 0.3f, 0.25f, 0.55f);
+    public Area forest = MakeArea("Лес", 0.55f, 0.2f, 0.3f, 0.25f, 0.85f);
 
     [Header("Роща")]
-    public Area grove = MakeArea("Роща", 0.12f, 0.08f, 0.15f, 0.2f, 0.7f);
+    public Area grove = MakeArea("Роща", 0.12f, 0.08f, 0.15f, 0.2f, 0.95f);
 
     [Header("Граница леса")]
-    public Area border = MakeArea("Граница леса", 0.28f, 0.12f, 0.22f, 0.18f, 0.4f);
+    public Area border = MakeArea("Граница леса", 0.28f, 0.12f, 0.22f, 0.18f, 0.75f);
 
     static readonly List<PlacementSlot> Empty = new List<PlacementSlot>();
 

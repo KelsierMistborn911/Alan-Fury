@@ -2,7 +2,7 @@ Shader "Nature/GrassStrip"
 {
     Properties
     {
-        _Color ("Color", Color) = (0.16, 0.34, 0.12, 1)
+        _Color ("Color", Color) = (0.28, 0.42, 0.18, 1)
         _TipColor ("Tip Color", Color) = (0.22, 0.42, 0.16, 1)
         _Brightness ("Brightness", Range(0.2, 2.5)) = 0.62
         _WindStrength ("Wind Strength", Range(0, 1)) = 0.12

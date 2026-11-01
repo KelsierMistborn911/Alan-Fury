@@ -42,8 +42,10 @@ public class HexRegionEntry : MonoBehaviour
 
         // Позицию и origin ставит LocationStream.EnterFromHex.
         // Здесь только отмечаем зону волков.
-        bool neighbor = IsNeighbor(CurrentQ, CurrentR, RegionHexMap.HowlingQ, RegionHexMap.HowlingR);
-        if (neighbor || (CurrentQ == RegionHexMap.HowlingQ && CurrentR == RegionHexMap.HowlingR))
+        var super = RegionLayout.SuperOf(CurrentQ, CurrentR);
+        bool inOrNear = super.x == RegionLayout.Howling.x && super.y == RegionLayout.Howling.y
+            || IsNeighbor(super.x, super.y, RegionLayout.Howling.x, RegionLayout.Howling.y);
+        if (inOrNear)
             OnEnterWolfTerritory();
 
         // Clear делает LocationStream после входа

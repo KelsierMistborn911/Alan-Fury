@@ -11,7 +11,12 @@ using UnityEngine;
 public class LocationStream : MonoBehaviour, ICellGround
 {
     [Header("Игрок")]
+    [Tooltip("Цель стрима. Игрок спавнится в рантайме (сеть), поэтому пусто — найдётся сам " +
+             "(локальный NetworkPlayer → PlayerRegistry → PlayerMovement3D). Ссылка на ассет префаба игнорируется.")]
     public Transform player;
+    [Tooltip("Когда игрок найден впервые — поставить его в центр текущего гекса (как делал старый стрим на Player).")]
+    public bool snapPlayerToHexOnAcquire = true;
+    private float _nextPlayerSearch;
 
     [Header("Сетка")]
     public int seed = 42;
@@ -22,7 +27,13 @@ public class LocationStream : MonoBehaviour, ICellGround
     [Header("Окно стрима")]
     public int loadRadiusChunks = 3;
     public int unloadRadiusChunks = 5;
-    public int chunksPerFrame = 2;
+    public int chunksPerFrame = 1;
+
+    [Header("Деревья")]
+    [Tooltip("Кольцо чанков, в котором живут деревья. 1 = свой чанк и соседи, ~64 м. Террейн грузится дальше.")]
+    public int treeRadiusChunks = 1;
+    [Tooltip("Метры за краем дороги, где зона становится границей леса (реже деревья).")]
+    public float roadVerge = 12f;
 
     [Header("Рельеф")]
     public float heightStep = 0.25f;
@@ -45,9 +56,11 @@ public class LocationStream : MonoBehaviour, ICellGround
     public int CurrentHexR { get; private set; }
 
     private readonly Dictionary<Vector2Int, Chunk> _chunks = new Dictionary<Vector2Int, Chunk>(64);
+    private readonly HashSet<Vector2Int> _treeChunks = new HashSet<Vector2Int>();
     private readonly List<Vector2Int> _drop = new List<Vector2Int>(32);
     private readonly Queue<Vector2Int> _queue = new Queue<Vector2Int>(32);
     private readonly HashSet<Vector2Int> _queued = new HashSet<Vector2Int>();
+    private readonly HashSet<Vector2Int> _roadCells = new HashSet<Vector2Int>();
     private Transform _root;
     private MapGrid _grid;
     private int _pcx = int.MinValue;
@@ -69,11 +82,7 @@ public class LocationStream : MonoBehaviour, ICellGround
         if (_begun) return;
         _begun = true;
 
-        if (player == null)
-        {
-            var move = FindObjectOfType<PlayerMovement3D>();
-            if (move != null) player = move.transform;
-        }
+        if (!IsLivePlayer(player)) player = FindLocalPlayer();
         if (nature == null)
         {
             var leshiy = FindObjectOfType<Leshiy>();
@@ -92,6 +101,8 @@ public class LocationStream : MonoBehaviour, ICellGround
         {
             nature.streamGround = this;
             if (!nature.IsReady) nature.Init();
+            if (nature.sectorSize != chunkCells)
+                Debug.LogWarning($"LocationStream: chunkCells={chunkCells} != NaturePlacement.sectorSize={nature.sectorSize}. Деревья поедут в чужие секторы.");
         }
 
         Debug.Log($"LocationStream.Begin request={HexSpawnRequest.HasRequest} q={CurrentHexQ} r={CurrentHexR}");
@@ -106,18 +117,22 @@ public class LocationStream : MonoBehaviour, ICellGround
             CurrentHexR = HexSpawnRequest.R;
             RegionLayout.Build(seed);
             Debug.Log($"LocationStream: с карты региона → гекс {CurrentHexQ},{CurrentHexR}");
+            BuildRoadCache();
         }
         else
         {
             RegionLayout.Build(seed);
-            CurrentHexQ = RegionLayout.Village.x;
-            CurrentHexR = RegionLayout.Village.y;
+            CurrentHexQ = RegionLayout.Village.x * 3;
+            CurrentHexR = RegionLayout.Village.y * 3;
+            BuildRoadCache();
         }
 
-        // сначала земля под ногами, потом игрок
+        // сначала сетка (флаги), потом земля, потом деревья только рядом
         var center = HexToWorld(CurrentHexQ, CurrentHexR);
-        BuildChunksAround(center);
         EnsureGrid(center);
+        BuildChunksAround(center);
+        SyncTrees(_pcx, _pcz);
+        StampRoadsInWindow();
         Debug.Log($"LocationStream: чанков {_chunks.Count}, старт {CurrentHexQ},{CurrentHexR}, builder={(chunkBuilder != null)}");
         SnapToHex(CurrentHexQ, CurrentHexR);
         if (HexSpawnRequest.HasRequest)
@@ -216,9 +231,73 @@ public class LocationStream : MonoBehaviour, ICellGround
             HexSpawnRequest.Clear();
     }
 
+    // Ссылка на ассет префаба (не объект сцены) — не игрок.
+    static bool IsLivePlayer(Transform t) => t != null && t.gameObject.scene.IsValid();
+
+    static Transform FindLocalPlayer()
+    {
+        var nps = FindObjectsOfType<NetworkPlayer>();
+        for (int i = 0; i < nps.Length; i++)
+            if (nps[i] != null && nps[i].IsLocalControlled) return nps[i].transform;
+        if (nps.Length > 0) return null; // сетевые игроки есть, но свой ещё не готов — ждём, чужого не берём
+        var reg = PlayerRegistry.Instance;
+        if (reg != null)
+        {
+            var list = reg.Players;
+            for (int i = 0; i < list.Count; i++)
+                if (list[i] != null) return list[i];
+        }
+        var moves = FindObjectsOfType<PlayerMovement3D>();
+        for (int i = 0; i < moves.Length; i++)
+            if (moves[i] != null && moves[i].enabled) return moves[i].transform;
+        return moves.Length > 0 && moves[0] != null ? moves[0].transform : null;
+    }
+
+    /// <summary>Игрок спавнится после Begin() — ищем его, пока не найдём (раз в 0.25 с).</summary>
+    bool EnsurePlayer()
+    {
+        if (IsLivePlayer(player)) return true;
+        player = null;
+        if (Time.unscaledTime < _nextPlayerSearch) return false;
+        _nextPlayerSearch = Time.unscaledTime + 0.25f;
+        var found = FindLocalPlayer();
+        if (found == null) return false;
+        player = found;
+        OnPlayerAcquired();
+        return true;
+    }
+
+    void OnPlayerAcquired()
+    {
+        if (snapPlayerToHexOnAcquire)
+        {
+            SnapToHex(CurrentHexQ, CurrentHexR);
+            if (HexSpawnRequest.HasRequest) _holdHexUntil = Time.time + 2f;
+        }
+        Vector3 p = player.position;
+        EnsureGrid(p);
+        if (_grid != null && _grid.Streaming)
+        {
+            int ox = _grid.StreamOriginX;
+            int oz = _grid.StreamOriginZ;
+            _grid.UpdateStream(p);
+            if (_grid.StreamOriginX != ox || _grid.StreamOriginZ != oz)
+                RestampOccupancy();
+        }
+        BuildChunksAround(p);          // синхронно: земля под игроком сразу
+        DropFar(_pcx, _pcz);
+        SyncTrees(_pcx, _pcz);
+        var hex = WorldToHex(p);
+        CurrentHexQ = hex.x;
+        CurrentHexR = hex.y;
+        UpdatePoi();
+        Debug.Log($"LocationStream: игрок найден ({player.name}) → стрим вокруг {p}, гекс {CurrentHexQ},{CurrentHexR}");
+    }
+
     void Update()
     {
-        if (!_begun || player == null) return;
+        if (!_begun) return;
+        if (!EnsurePlayer()) return;
 
         // в каком гексе сейчас
         var hex = WorldToHex(player.position);
@@ -230,13 +309,14 @@ public class LocationStream : MonoBehaviour, ICellGround
         }
 
         // сдвиг окна MapGrid при необходимости
-        if (_grid == null)
-        {
-            _grid = FindObjectOfType<MapGrid>();
-            if (_grid == null) _grid = GetComponent<MapGrid>();
-        }
         if (_grid != null && _grid.Streaming)
+        {
+            int ox = _grid.StreamOriginX;
+            int oz = _grid.StreamOriginZ;
             _grid.UpdateStream(player.position);
+            if (_grid.StreamOriginX != ox || _grid.StreamOriginZ != oz)
+                RestampOccupancy();
+        }
 
         // чанки вокруг игрока (в клетках)
         int cx = Mathf.FloorToInt(player.position.x / tileSize);
@@ -251,6 +331,7 @@ public class LocationStream : MonoBehaviour, ICellGround
             _pcz = pcz;
             EnqueueRing(pcx, pcz);
             DropFar(pcx, pcz);
+            SyncTrees(_pcx, _pcz);
         }
 
         int budget = Mathf.Max(1, chunksPerFrame);
@@ -324,7 +405,7 @@ public class LocationStream : MonoBehaviour, ICellGround
         _roadSamplesReady = true;
         _roadSamples = new List<RoadSample>();
 
-        var line = RegionLayout.RoadLine(hexSize);
+        var line = RegionLayout.RoadLine(hexSize, true);
         if (line == null || line.Count < 2) return;
 
         float step = Mathf.Max(1f, roadStepDist);
@@ -470,10 +551,17 @@ public class LocationStream : MonoBehaviour, ICellGround
 
     public NaturePlacement.Zone ZoneAt(int x, int z)
     {
-        float wx = x * tileSize;
-        float wz = z * tileSize;
+        if (IsRoad(x, z)) return NaturePlacement.Zone.None;
+
+        float wx = (x + 0.5f) * tileSize;
+        float wz = (z + 0.5f) * tileSize;
+        var line = RegionLayout.RoadLine(hexSize, true);
+        if (line != null && line.Count >= 2
+            && DistToPolyline(wx, wz, line) < roadHalfWidth + roadVerge)
+            return NaturePlacement.Zone.ForestBorder;
+
         var hex = WorldToHex(new Vector3(wx, 0f, wz));
-        var zone = RegionLayout.ZoneForHex(hex.x, hex.y);
+        var zone = RegionLayout.ZoneForTerrain(hex.x, hex.y);
         // лес: вкрапления чащи
         if (zone == NaturePlacement.Zone.Forest)
         {
@@ -488,16 +576,51 @@ public class LocationStream : MonoBehaviour, ICellGround
         float wx = x * tileSize;
         float wz = z * tileSize;
         var hex = WorldToHex(new Vector3(wx, 0f, wz));
-        return RegionLayout.DensityScale(hex.x, hex.y);
+        return RegionLayout.DensityScaleTerrain(hex.x, hex.y);
     }
 
     public bool IsRoad(int x, int z)
     {
-        float wx = (x + 0.5f) * tileSize;
-        float wz = (z + 0.5f) * tileSize;
-        var line = RegionLayout.RoadLine(hexSize);
-        if (line == null || line.Count < 2) return false;
-        return DistToPolyline(wx, wz, line) < roadHalfWidth;
+        return _roadCells.Contains(new Vector2Int(x, z));
+    }
+
+    void BuildRoadCache()
+    {
+        _roadCells.Clear();
+        var line = RegionLayout.RoadLine(hexSize, true);
+        if (line == null || line.Count < 2)
+        {
+            Debug.LogWarning("[AF.Load] LocationStream.BuildRoadCache: нет линии дороги");
+            return;
+        }
+        float minX = float.MaxValue, maxX = float.MinValue;
+        float minZ = float.MaxValue, maxZ = float.MinValue;
+        for (int i = 0; i < line.Count; i++)
+        {
+            var p = line[i];
+            if (p.x < minX) minX = p.x;
+            if (p.x > maxX) maxX = p.x;
+            if (p.z < minZ) minZ = p.z;
+            if (p.z > maxZ) maxZ = p.z;
+        }
+        int margin = Mathf.CeilToInt(roadHalfWidth / tileSize) + 2;
+        int x0 = Mathf.FloorToInt(minX / tileSize) - margin;
+        int x1 = Mathf.CeilToInt(maxX / tileSize) + margin;
+        int z0 = Mathf.FloorToInt(minZ / tileSize) - margin;
+        int z1 = Mathf.CeilToInt(maxZ / tileSize) + margin;
+        int count = 0;
+        for (int z = z0; z <= z1; z++)
+            for (int x = x0; x <= x1; x++)
+            {
+                float wx = (x + 0.5f) * tileSize;
+                float wz = (z + 0.5f) * tileSize;
+                if (DistToPolyline(wx, wz, line) < roadHalfWidth)
+                {
+                    _roadCells.Add(new Vector2Int(x, z));
+                    count++;
+                }
+            }
+        Debug.Log($"[AF.Load] LocationStream.BuildRoadCache {count} клеток, окно {x1 - x0 + 1}×{z1 - z0 + 1}");
     }
 
     public float roadHalfWidth = 18f;
@@ -581,8 +704,6 @@ public class LocationStream : MonoBehaviour, ICellGround
         }
         _chunks[new Vector2Int(sx, sz)] = new Chunk { go = go, sx = sx, sz = sz };
         StampRoad(sx, sz, go.transform);
-        if (nature != null && nature.IsReady)
-            nature.PlaceStreamSector(sx, sz);
         float ms = (Time.realtimeSinceStartup - t0) * 1000f;
         Debug.Log($"[AF.Load] LocationStream.BuildChunk {sx},{sz} {ms:0.0}ms chunks={_chunks.Count}");
     }
@@ -635,10 +756,84 @@ public class LocationStream : MonoBehaviour, ICellGround
         return _roadMat;
     }
 
+    void SyncTrees(int pcx, int pcz)
+    {
+        if (nature == null || !nature.IsReady) return;
+        int r = Mathf.Max(0, treeRadiusChunks);
+        int r2 = r * r + r;
+
+        for (int dz = -r; dz <= r; dz++)
+            for (int dx = -r; dx <= r; dx++)
+            {
+                if (dx * dx + dz * dz > r2) continue;
+                var key = new Vector2Int(pcx + dx, pcz + dz);
+                if (!_chunks.ContainsKey(key) || _treeChunks.Contains(key)) continue;
+                nature.PlaceStreamSector(key.x, key.y);
+                _treeChunks.Add(key);
+            }
+
+        _drop.Clear();
+        foreach (var key in _treeChunks)
+        {
+            int dx = key.x - pcx;
+            int dz = key.y - pcz;
+            if (dx * dx + dz * dz <= r2) continue;
+            _drop.Add(key);
+        }
+        for (int i = 0; i < _drop.Count; i++)
+        {
+            var key = _drop[i];
+            nature.ReleaseStreamSector(key.x, key.y);
+            _treeChunks.Remove(key);
+        }
+    }
+
+    void RestampOccupancy()
+    {
+        if (nature != null && nature.IsReady)
+        {
+            var keys = new List<Vector2Int>(_treeChunks);
+            for (int i = 0; i < keys.Count; i++)
+            {
+                nature.ReleaseStreamSector(keys[i].x, keys[i].y);
+                nature.PlaceStreamSector(keys[i].x, keys[i].y);
+            }
+        }
+        StampRoadsInWindow();
+    }
+
+    void StampRoadsInWindow()
+    {
+        if (_grid == null || !_grid.IsReady || !_grid.Streaming) return;
+        int cs = Mathf.Max(4, chunkCells);
+        int ox = _grid.StreamOriginX;
+        int oz = _grid.StreamOriginZ;
+        int w = _grid.Width;
+        int d = _grid.Depth;
+        foreach (var kv in _chunks)
+        {
+            int x0 = kv.Key.x * cs;
+            int z0 = kv.Key.y * cs;
+            for (int z = z0; z < z0 + cs; z++)
+                for (int x = x0; x < x0 + cs; x++)
+                {
+                    if (!IsRoad(x, z)) continue;
+                    int lx = x - ox;
+                    int lz = z - oz;
+                    if (lx < 0 || lz < 0 || lx >= w || lz >= d) continue;
+                    _grid.Occupy(lx, lz, 1, 1, MapGrid.OccupancyFlags.Road, anchorCenter: false);
+                }
+        }
+    }
+
     void DestroyChunk(Vector2Int key)
     {
         if (!_chunks.TryGetValue(key, out var chunk)) return;
-        if (nature != null) nature.ReleaseStreamSector(chunk.sx, chunk.sz);
+        if (_treeChunks.Contains(key) && nature != null)
+        {
+            nature.ReleaseStreamSector(chunk.sx, chunk.sz);
+            _treeChunks.Remove(key);
+        }
         if (chunkBuilder != null) chunkBuilder.ReleaseStreamChunk(chunk.go);
         else if (chunk.go != null) Destroy(chunk.go);
         _chunks.Remove(key);
@@ -652,6 +847,7 @@ public class LocationStream : MonoBehaviour, ICellGround
         _queue.Clear();
         _queued.Clear();
         _chunks.Clear();
+        _treeChunks.Clear();
     }
 
     // ---------- спавн и утилиты ----------
@@ -671,7 +867,7 @@ public class LocationStream : MonoBehaviour, ICellGround
 
     void UpdatePoi()
     {
-        CurrentPoi = RegionLayout.KindAt(CurrentHexQ, CurrentHexR);
+        CurrentPoi = RegionLayout.KindAtTerrain(CurrentHexQ, CurrentHexR);
     }
 
     Vector2Int WorldToHex(Vector3 world)
@@ -733,10 +929,8 @@ public class LocationStream : MonoBehaviour, ICellGround
         var hex = WorldToHex(new Vector3(wx, 0f, wz));
         if (IsRoadWorld(wx, wz))
             return new Color(0.42f, 0.34f, 0.2f);
-        if (hex.x == RegionHexMap.HowlingQ && hex.y == RegionHexMap.HowlingR)
+        if (RegionLayout.IsHowlingArea(hex.x, hex.y))
             return new Color(0.16f, 0.22f, 0.14f);
-        if (HexRegionEntry.IsNeighbor(hex.x, hex.y, RegionHexMap.HowlingQ, RegionHexMap.HowlingR))
-            return new Color(0.18f, 0.26f, 0.15f);
         float n = Noise(wx, wz, 0.01f, 5f);
         if (n > 0.65f) return new Color(0.12f, 0.20f, 0.11f);
         if (n < 0.35f) return new Color(0.28f, 0.38f, 0.18f);
@@ -803,9 +997,9 @@ public class LocationStream : MonoBehaviour, ICellGround
             UnityEditor.Handles.Label(c, $"{q},{rr}");
         }
 
-        DrawSiteLabel(RegionLayout.Village, "деревня", nameStyle);
-        DrawSiteLabel(RegionLayout.Temple, "храм", nameStyle);
-        DrawSiteLabel(RegionLayout.Howling, "Воющая пуща", nameStyle);
+        DrawSiteLabel(new Vector2Int(RegionLayout.Village.x * 3, RegionLayout.Village.y * 3), "деревня", nameStyle);
+        DrawSiteLabel(new Vector2Int(RegionLayout.Temple.x * 3, RegionLayout.Temple.y * 3), "храм", nameStyle);
+        DrawSiteLabel(new Vector2Int(RegionLayout.Howling.x * 3, RegionLayout.Howling.y * 3), "Воющая пуща", nameStyle);
     }
 
     void DrawSiteLabel(Vector2Int hex, string title, GUIStyle style)
@@ -845,7 +1039,7 @@ public class LocationStream : MonoBehaviour, ICellGround
                 int q = CurrentHexQ + dq;
                 int rr = CurrentHexR + dr;
                 if ((Mathf.Abs(dq) + Mathf.Abs(dr) + Mathf.Abs(dq + dr)) / 2 > r) continue;
-                var zone = RegionLayout.ZoneForHex(q, rr);
+                var zone = RegionLayout.ZoneForTerrain(q, rr);
                 Gizmos.color = ZoneColor(zone, RegionLayout.IsRoadHex(q, rr));
                 var c = HexToWorld(q, rr);
                 c.y = HeightAtWorld(c.x, c.z) + 0.4f;

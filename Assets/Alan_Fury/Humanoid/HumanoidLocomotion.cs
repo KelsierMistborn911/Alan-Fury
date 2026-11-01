@@ -538,22 +538,15 @@ public class HumanoidLocomotion : MonoBehaviour
         _lastRollTime = Time.time;
         _step.Cancel();
         if (Combat != null) Combat.ClearTarget();
-        MoveHorizontal(_maneuverDir * teleportDistance);
+        float dist = teleportDistance;
+        if (investiture != null && investiture.IsEmpowered)
+            dist *= investiture.TeleportDistanceMult;
+        MoveHorizontal(_maneuverDir * dist);
     }
 
     protected virtual void Start()
     {
         Controller = GetComponent<CharacterController>();
-        if (Mathf.Abs(combatWalk.stepDuration - 0.23f) < 0.02f
-            && combatWalk.stepFrequency <= 4.6f)
-        {
-            combatWalk.speed = 15.5f;
-            combatWalk.acceleration = 90f;
-            combatWalk.deceleration = 80f;
-            combatWalk.stepDistance = 2.15f;
-            combatWalk.stepDuration = 0.14f;
-            combatWalk.stepFrequency = 6.8f;
-        }
         _currentGait = run;
         Combat = GetComponent<HumanoidCombat>();
         Ranged = GetComponent<RangedController>();
@@ -846,7 +839,8 @@ public class HumanoidLocomotion : MonoBehaviour
         }
 
         intent = bestDir;
-        speed = Mathf.Clamp(bestTravel / (dodgeDuration * DodgeTravelFactor), 14f, dodgeSpeed);
+        float minAssist = Mathf.Min(14f, dodgeSpeed);   // нижняя граница не выше dodgeSpeed
+        speed = Mathf.Clamp(bestTravel / (dodgeDuration * DodgeTravelFactor), minAssist, dodgeSpeed);
         return true;
     }
 

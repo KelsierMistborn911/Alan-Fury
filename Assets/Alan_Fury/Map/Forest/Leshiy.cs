@@ -34,6 +34,10 @@ public class Leshiy : MonoBehaviour
     public float streamRadius = 50f;
     public float unloadExtra = 30f;
 
+    [Tooltip("Вкл — Леший перезаписывает слои и настройки плейсера при старте (старое поведение). " +
+             "Выкл — заполняет только пустые поля (слои, forest, layout), скаляры плейсера не трогает.")]
+    public bool overridePlacement = false;
+
     [Header("Трава")]
     [Range(0f, 1f)] public float grassUnderTreeMult = 0.28f;
     public float grassClusterNoiseScale = 0.09f;
@@ -219,9 +223,11 @@ public class Leshiy : MonoBehaviour
     {
         if (dst == null) return;
         dst.leshiy = this;
-        if (forest != null) dst.forest = forest;
-        if (layers != null && layers.Count > 0) dst.layers = layers;
-        if (layout != null) dst.layout = layout;
+        bool dstLayersEmpty = dst.layers == null || dst.layers.Count == 0;
+        if (forest != null && (overridePlacement || dst.forest == null)) dst.forest = forest;
+        if (layers != null && layers.Count > 0 && (overridePlacement || dstLayersEmpty)) dst.layers = layers;
+        if (layout != null && (overridePlacement || dst.layout == null)) dst.layout = layout;
+        if (!overridePlacement) return;
         dst.waterLevel = waterLevel;
         dst.borderCells = borderCells;
         dst.sectorSize = sectorSize;

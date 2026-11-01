@@ -51,9 +51,9 @@ public class LocalMapOverlay : MonoBehaviour
         float x = Screen.width - 250f;
         float y = Screen.height - 140f;
 
-        DrawLine(x, y, player.position, RegionLayout.Howling, "пуща");
-        DrawLine(x, y + 26f, player.position, RegionLayout.Village, "деревня");
-        DrawLine(x, y + 52f, player.position, RegionLayout.Temple, "храм");
+        DrawLine(x, y, player.position, new Vector2Int(RegionLayout.Howling.x * 3, RegionLayout.Howling.y * 3), "пуща");
+        DrawLine(x, y + 26f, player.position, new Vector2Int(RegionLayout.Village.x * 3, RegionLayout.Village.y * 3), "деревня");
+        DrawLine(x, y + 52f, player.position, new Vector2Int(RegionLayout.Temple.x * 3, RegionLayout.Temple.y * 3), "храм");
 
         var p = player.position;
         GUI.Label(new Rect(x, y + 82f, 230f, 18f),

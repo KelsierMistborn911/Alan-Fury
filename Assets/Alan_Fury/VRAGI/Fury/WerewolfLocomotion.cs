@@ -604,6 +604,14 @@ public class WerewolfLocomotion : MonoBehaviour
 
     private bool TryPlaceOnGround()
     {
+        // Вне зоны физики нет: контроллер не включаем, иначе волк падает в пустоту.
+        var duty = GetComponent<WolfDuty>();
+        if (duty != null && !duty.live)
+        {
+            if (_cc != null) _cc.enabled = false;
+            return false;
+        }
+
         _cc.enabled = false;
         Vector3 origin = transform.position + Vector3.up * groundProbeHeight;
         bool found = Physics.Raycast(origin, Vector3.down, out RaycastHit hit,

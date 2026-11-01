@@ -68,6 +68,8 @@ public class MapGrid : MonoBehaviour
     public Color sectorColor = new Color(0.3f, 0.6f, 1f, 0.15f);
     public Color regionColor = new Color(1f, 0.5f, 0.1f, 0.1f);
     public float gizmoYOffset = 0.08f;
+    [Tooltip("Буква T только в этом радиусе от игрока (м). Дальше не рисуем.")]
+    public float gizmoTreeRadius = 80f;
 
     // --- runtime ---
     public bool IsReady => _ready;
@@ -597,30 +599,30 @@ public class MapGrid : MonoBehaviour
         int rx0 = x0 / rs, rz0 = z0 / rs, rx1 = x1 / rs, rz1 = z1 / rs;
 
         for (int sx = sx0; sx <= sx1; sx++)
-        for (int sz = sz0; sz <= sz1; sz++)
-        {
-            if (sx < 0 || sz < 0 || sx >= _sw || sz >= _sd) continue;
-            bool blocked = false;
-            int bx0 = sx * ss, bz0 = sz * ss;
-            int bx1 = Mathf.Min(_w, bx0 + ss), bz1 = Mathf.Min(_d, bz0 + ss);
-            for (int x = bx0; x < bx1 && !blocked; x++)
-                for (int z = bz0; z < bz1 && !blocked; z++)
-                    if (IsBlocked(x, z)) blocked = true;
-            _sectorBlocked[sx * _sd + sz] = blocked;
-        }
+            for (int sz = sz0; sz <= sz1; sz++)
+            {
+                if (sx < 0 || sz < 0 || sx >= _sw || sz >= _sd) continue;
+                bool blocked = false;
+                int bx0 = sx * ss, bz0 = sz * ss;
+                int bx1 = Mathf.Min(_w, bx0 + ss), bz1 = Mathf.Min(_d, bz0 + ss);
+                for (int x = bx0; x < bx1 && !blocked; x++)
+                    for (int z = bz0; z < bz1 && !blocked; z++)
+                        if (IsBlocked(x, z)) blocked = true;
+                _sectorBlocked[sx * _sd + sz] = blocked;
+            }
 
         for (int rx = rx0; rx <= rx1; rx++)
-        for (int rz = rz0; rz <= rz1; rz++)
-        {
-            if (rx < 0 || rz < 0 || rx >= _rw || rz >= _rd) continue;
-            bool blocked = false;
-            int bx0 = rx * rs, bz0 = rz * rs;
-            int bx1 = Mathf.Min(_w, bx0 + rs), bz1 = Mathf.Min(_d, bz0 + rs);
-            for (int x = bx0; x < bx1 && !blocked; x++)
-                for (int z = bz0; z < bz1 && !blocked; z++)
-                    if (IsBlocked(x, z)) blocked = true;
-            _regionBlocked[rx * _rd + rz] = blocked;
-        }
+            for (int rz = rz0; rz <= rz1; rz++)
+            {
+                if (rx < 0 || rz < 0 || rx >= _rw || rz >= _rd) continue;
+                bool blocked = false;
+                int bx0 = rx * rs, bz0 = rz * rs;
+                int bx1 = Mathf.Min(_w, bx0 + rs), bz1 = Mathf.Min(_d, bz0 + rs);
+                for (int x = bx0; x < bx1 && !blocked; x++)
+                    for (int z = bz0; z < bz1 && !blocked; z++)
+                        if (IsBlocked(x, z)) blocked = true;
+                _regionBlocked[rx * _rd + rz] = blocked;
+            }
     }
 
     // ============ Gizmos ============
@@ -647,7 +649,19 @@ public class MapGrid : MonoBehaviour
 
     private void DrawOccupancyGizmos()
     {
-        float half = _ts * 0.5f;
+        int tx0 = 0, tx1 = _w - 1, tz0 = 0, tz1 = _d - 1;
+        bool limitTrees = false;
+        var player = PlayerRegistry.ResolvePrimary();
+        if (player != null)
+        {
+            WorldToCell(player.position, out int pcx, out int pcz);
+            int span = Mathf.CeilToInt(gizmoTreeRadius / Mathf.Max(0.01f, _ts));
+            tx0 = Mathf.Max(0, pcx - span);
+            tx1 = Mathf.Min(_w - 1, pcx + span);
+            tz0 = Mathf.Max(0, pcz - span);
+            tz1 = Mathf.Min(_d - 1, pcz + span);
+            limitTrees = true;
+        }
 
         for (int x = 0; x < _w; x++)
         {
@@ -667,6 +681,7 @@ public class MapGrid : MonoBehaviour
 
                 if ((f & OccupancyFlags.Tree) != 0)
                 {
+                    if (limitTrees && (x < tx0 || x > tx1 || z < tz0 || z > tz1)) continue;
 #if UNITY_EDITOR
                     bool faded = NatureRenderer.Active != null
                         && NatureRenderer.Active.IsCellFading(x, z);

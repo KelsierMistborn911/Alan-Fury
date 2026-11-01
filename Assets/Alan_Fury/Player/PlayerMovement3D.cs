@@ -65,6 +65,14 @@ public class PlayerMovement3D : HumanoidLocomotion
         if (Input.GetKeyDown(KeyCode.Space))
         {
             Vector3 dir = move.sqrMagnitude > 0.01f ? move : ComputeLookDirection();
+            if (investiture != null && (investiture.IsEmpowered || investiture.IsUltActive))
+            {
+                if (investiture.TrySpendForTeleport())
+                {
+                    Teleport(dir);
+                    return;
+                }
+            }
             TryRoll(dir);
         }
     }

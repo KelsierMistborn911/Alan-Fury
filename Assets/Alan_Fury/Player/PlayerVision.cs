@@ -1,38 +1,21 @@
 using UnityEngine;
 using System.Collections.Generic;
 
-/// <summary>
-/// Зрение игрока: смещённый эллипс на плоскости карты + LOS по клеткам.
-/// Клетка в форме, если центр внутри эллипса. Лучи на край. Tree без маркера = Full.
-/// </summary>
 public class PlayerVision : MonoBehaviour
 {
     [Header("Источник")]
-    [Tooltip("Откуда смотрим. Пусто = этот Transform (ставь на игрока).")]
     public Transform origin;
-    [Tooltip("Опционально — для клеток, высоты и укрытия.")]
     public MapGrid mapGrid;
 
     [Header("Форма (клетки)")]
-    [Tooltip("Сколько клеток вперёд от игрока.")]
     public int forwardCells = 22;
-    [Tooltip("Сколько клеток назад от игрока.")]
     public int backCells = 2;
-    [Tooltip("Полуширина эллипса в клетках (в самой широкой точке).")]
     public int sideCells = 10;
-    [Tooltip("Высота «глаз» относительно origin (м).")]
     public float eyeHeight = 1.4f;
-    [Tooltip("Высота пробы для жёлтых клеток (м над землёй). Цель выше укрытия.")]
     public float peekHeight = 5f;
 
-    [Header("Визуализация")]
+    [Header("Визуализация (Gizmo, Scene View)")]
     public bool drawGizmos = true;
-    public bool drawRuntime = true;
-    [Tooltip("Контур видимых клеток. Прячется за объектами.")]
-    public bool drawOverlay = true;
-    [Tooltip("Толщина золотого контура, м.")]
-    public float overlayWidth = 0.05f;
-    public Color overlayColor = new Color(0.80f, 0.66f, 0.30f, 0.32f);
     public bool showVisibleCells = true;
     public int maxCellsToDraw = 600;
     public int arcSegments = 64;
@@ -108,7 +91,6 @@ public class PlayerVision : MonoBehaviour
         }
     }
 
-    /// <summary>Точка внутри смещённого круга и с LOS до её клетки.</summary>
     public bool IsPointVisible(Vector3 worldPos)
     {
         if (!InShape(worldPos)) return false;
@@ -120,17 +102,12 @@ public class PlayerVision : MonoBehaviour
         return mapGrid.HasSightLos(EyePosition, worldPos);
     }
 
-    /// <summary>
-    /// Кромка: расширенная форма на extraCells, но точка не видна.
-    /// Без LOS — контур на границе зрения, не за укрытием глубже формы.
-    /// </summary>
     public bool InFringe(Vector3 worldPos, int extraCells)
     {
         if (IsPointVisible(worldPos)) return false;
         return InShapeExpanded(worldPos, Mathf.Max(0, extraCells));
     }
 
-    /// <summary>Клетка видна: центр в круге + LOS. Требует MapGrid.</summary>
     public bool IsCellVisible(int cx, int cz)
     {
         if (mapGrid == null || !mapGrid.IsReady) return false;
@@ -142,10 +119,6 @@ public class PlayerVision : MonoBehaviour
         return mapGrid.HasSightLos(EyePosition, center);
     }
 
-    /// <summary>
-    /// Внешние рёбра золотого контура (те же, что overlay).
-    /// Точки — концы рёбер клеток без видимого соседа. dst очищается.
-    /// </summary>
     public void CollectOuterContourPoints(List<Vector3> dst)
     {
         dst.Clear();
@@ -188,7 +161,6 @@ public class PlayerVision : MonoBehaviour
         }
     }
 
-    /// <summary>Видимые клетки: лучи на край формы, тень от укрытия. outList очищается.</summary>
     public void CollectVisibleCells(List<Vector2Int> outList)
     {
         outList.Clear();
@@ -216,7 +188,6 @@ public class PlayerVision : MonoBehaviour
             }
         }
 
-        // редкие дыры после толщины
         for (int i = 0; i < _shapeBuffer.Count; i++)
         {
             var c = _shapeBuffer[i];
@@ -270,6 +241,10 @@ public class PlayerVision : MonoBehaviour
     private readonly List<int> _overlayTris = new List<int>(1536);
     private Mesh _overlayMesh;
     private Material _overlayMat;
+    private Mesh _fillVisibleMesh;
+    private Mesh _fillBlockedMesh;
+    private Material _fillVisibleMat;
+    private Material _fillBlockedMat;
 
     void Awake()
     {
@@ -296,42 +271,39 @@ public class PlayerVision : MonoBehaviour
         if (found != null) mapGrid = found;
     }
 
+    // ТОЛЬКО GIZMO: рисуем контур и кубики в Scene View
     void OnDrawGizmos()
     {
         if (!drawGizmos) return;
         DrawVisionShape(gizmo: true);
         if (showVisibleCells) DrawVisibleCells(gizmo: true);
-    }
-
-    void Update()
-    {
-        if (!drawRuntime || !Application.isPlaying) return;
-        DrawVisionShape(gizmo: false);
-        if (showVisibleCells) DrawVisibleCells(gizmo: false);
-    }
-
-    void LateUpdate()
-    {
-        if (!drawOverlay || !Application.isPlaying) return;
-        if (mapGrid == null || !mapGrid.IsReady) return;
-        CollectVisibleCells(_cellBuffer);
-        DrawOverlayOuterContour(_cellBuffer);
+        DrawOverlayGizmo();
     }
 
     void OnDisable()
     {
-        if (_overlayMesh != null)
-        {
-            if (Application.isPlaying) Destroy(_overlayMesh);
-            else DestroyImmediate(_overlayMesh);
-            _overlayMesh = null;
-        }
-        if (_overlayMat != null)
-        {
-            if (Application.isPlaying) Destroy(_overlayMat);
-            else DestroyImmediate(_overlayMat);
-            _overlayMat = null;
-        }
+        DestroyMesh(ref _overlayMesh);
+        DestroyMesh(ref _fillVisibleMesh);
+        DestroyMesh(ref _fillBlockedMesh);
+        DestroyMat(ref _overlayMat);
+        DestroyMat(ref _fillVisibleMat);
+        DestroyMat(ref _fillBlockedMat);
+    }
+
+    private void DestroyMesh(ref Mesh m)
+    {
+        if (m == null) return;
+        if (Application.isPlaying) Destroy(m);
+        else DestroyImmediate(m);
+        m = null;
+    }
+
+    private void DestroyMat(ref Material m)
+    {
+        if (m == null) return;
+        if (Application.isPlaying) Destroy(m);
+        else DestroyImmediate(m);
+        m = null;
     }
 
     private void CollectShapeCells(List<Vector2Int> dst)
@@ -400,10 +372,6 @@ public class PlayerVision : MonoBehaviour
         return mapGrid.HasSightLos(EyePosition, end);
     }
 
-    /// <summary>
-    /// Суперкавер-луч + толщина (крест). Клетка-укрытие видна, дальше режется высотой.
-    /// Сосед с укрытием глушит весь луч. mark пишет visited/visible.
-    /// </summary>
     private bool WalkRay(int x0, int z0, int x1, int z1, float targetWorldY, bool mark)
     {
         Supercover(x0, z0, x1, z1, _rayBuffer);
@@ -544,8 +512,6 @@ public class PlayerVision : MonoBehaviour
                 Gizmos.color = shapeEdgeColor;
                 Gizmos.DrawLine(prev, next);
             }
-            else
-                Debug.DrawLine(prev, next, shapeEdgeColor);
             prev = next;
         }
 
@@ -558,8 +524,6 @@ public class PlayerVision : MonoBehaviour
             Gizmos.DrawLine(originFlat, fwdEnd);
             Gizmos.DrawSphere(originFlat, 0.18f);
         }
-        else
-            Debug.DrawLine(originFlat, fwdEnd, shapeEdgeColor);
 
         int fillRays = Mathf.Max(10, arcSegments / 4);
         for (int i = 0; i < fillRays; i++)
@@ -571,8 +535,6 @@ public class PlayerVision : MonoBehaviour
                 Gizmos.color = shapeFillColor;
                 Gizmos.DrawLine(center, end);
             }
-            else
-                Debug.DrawLine(center, end, shapeFillColor);
         }
     }
 
@@ -604,70 +566,31 @@ public class PlayerVision : MonoBehaviour
         DrawCellList(_blockedBuffer, cellBlockedColor, gizmo, budget);
     }
 
-    private void DrawOverlayOuterContour(List<Vector2Int> cells)
+    // Вспомогательный метод для Gizmo-контура (рисует только в Scene View)
+    private void DrawOverlayGizmo()
     {
-        EnsureOverlay();
-        if (_overlayMesh == null || _overlayMat == null) return;
-        if (cells == null || cells.Count == 0) return;
-
-        _overlayMat.SetColor("_Color", overlayColor);
-        _overlayVerts.Clear();
-        _overlayTris.Clear();
-
+        if (mapGrid == null || !mapGrid.IsReady) return;
+        CollectVisibleCells(_cellBuffer);
         float half = mapGrid.TileSize * 0.5f;
-        float w = Mathf.Clamp(overlayWidth, 0.01f, half * 0.35f);
-        int n = Mathf.Min(cells.Count, Mathf.Max(0, maxCellsToDraw));
-        for (int i = 0; i < n; i++)
+        float w = Mathf.Clamp(0.05f, 0.01f, half * 0.35f);
+        Gizmos.color = new Color(0.80f, 0.66f, 0.30f, 0.32f);
+        for (int i = 0; i < _cellBuffer.Count; i++)
         {
-            var cell = cells[i];
+            var cell = _cellBuffer[i];
             Vector3 p = mapGrid.CellCenterWorld(cell.x, cell.y);
             float y = p.y + yOffset;
             float x0 = p.x - half, x1 = p.x + half;
             float z0 = p.z - half, z1 = p.z + half;
-            if (!IsOverlayVisible(cell.x, cell.y - 1)) AddOverlayQuad(x0, z0, x1, z0 + w, y);
-            if (!IsOverlayVisible(cell.x, cell.y + 1)) AddOverlayQuad(x0, z1 - w, x1, z1, y);
-            if (!IsOverlayVisible(cell.x - 1, cell.y)) AddOverlayQuad(x0, z0 + w, x0 + w, z1 - w, y);
-            if (!IsOverlayVisible(cell.x + 1, cell.y)) AddOverlayQuad(x1 - w, z0 + w, x1, z1 - w, y);
+            if (!IsOverlayVisible(cell.x, cell.y - 1)) Gizmos.DrawCube(new Vector3((x0 + x1) * 0.5f, y, z0 + w * 0.5f), new Vector3(x1 - x0, 0.02f, w));
+            if (!IsOverlayVisible(cell.x, cell.y + 1)) Gizmos.DrawCube(new Vector3((x0 + x1) * 0.5f, y, z1 - w * 0.5f), new Vector3(x1 - x0, 0.02f, w));
+            if (!IsOverlayVisible(cell.x - 1, cell.y)) Gizmos.DrawCube(new Vector3(x0 + w * 0.5f, y, (z0 + z1) * 0.5f), new Vector3(w, 0.02f, z1 - z0));
+            if (!IsOverlayVisible(cell.x + 1, cell.y)) Gizmos.DrawCube(new Vector3(x1 - w * 0.5f, y, (z0 + z1) * 0.5f), new Vector3(w, 0.02f, z1 - z0));
         }
-
-        _overlayMesh.Clear();
-        if (_overlayVerts.Count < 3) return;
-        _overlayMesh.SetVertices(_overlayVerts);
-        _overlayMesh.SetTriangles(_overlayTris, 0, false);
-        _overlayMesh.RecalculateBounds();
-        Graphics.DrawMesh(_overlayMesh, Matrix4x4.identity, _overlayMat, 0);
     }
 
     private bool IsOverlayVisible(int cx, int cz)
     {
         return _visibleSet.Contains(new Vector2Int(cx, cz));
-    }
-
-    private void AddOverlayQuad(float x0, float z0, float x1, float z1, float y)
-    {
-        int b = _overlayVerts.Count;
-        _overlayVerts.Add(new Vector3(x0, y, z0));
-        _overlayVerts.Add(new Vector3(x1, y, z0));
-        _overlayVerts.Add(new Vector3(x1, y, z1));
-        _overlayVerts.Add(new Vector3(x0, y, z1));
-        _overlayTris.Add(b + 0); _overlayTris.Add(b + 2); _overlayTris.Add(b + 1);
-        _overlayTris.Add(b + 0); _overlayTris.Add(b + 3); _overlayTris.Add(b + 2);
-    }
-
-    private void EnsureOverlay()
-    {
-        if (_overlayMesh == null)
-        {
-            _overlayMesh = new Mesh { name = "VisionCellOverlay" };
-            _overlayMesh.MarkDynamic();
-        }
-        if (_overlayMat == null)
-        {
-            var sh = Shader.Find("Hidden/VisionCellOverlay");
-            if (sh == null) return;
-            _overlayMat = new Material(sh);
-            _overlayMat.renderQueue = 3000;
-        }
     }
 
     private int DrawCellList(List<Vector2Int> cells, Color col, bool gizmo, int budget)
@@ -684,14 +607,6 @@ public class PlayerVision : MonoBehaviour
             {
                 Gizmos.color = col;
                 Gizmos.DrawCube(p, new Vector3(half * 2f, 0.05f, half * 2f));
-            }
-            else
-            {
-                float h = half;
-                Debug.DrawLine(p + new Vector3(-h, 0, -h), p + new Vector3(h, 0, -h), col);
-                Debug.DrawLine(p + new Vector3(h, 0, -h), p + new Vector3(h, 0, h), col);
-                Debug.DrawLine(p + new Vector3(h, 0, h), p + new Vector3(-h, 0, h), col);
-                Debug.DrawLine(p + new Vector3(-h, 0, h), p + new Vector3(-h, 0, -h), col);
             }
         }
         return n;

@@ -45,12 +45,14 @@ public class CombatController3D : HumanoidCombat
     public KeyCode thrustKey = KeyCode.Q;
     public KeyCode swordToggleKey = KeyCode.Alpha1;
     public KeyCode shieldToggleKey = KeyCode.Alpha2;
-    public KeyCode sheathKey = KeyCode.R;
+    // sheathKey больше не используется — ForcePeace на зажатый Tab
 
     private Camera _mainCamera;
     private SpellComposer _composer;
     private SpellSlots _spellSlots;
     private SpellController _spells;
+    private float _tabHoldStart = -1f;
+    private const float TabHoldTime = 0.35f;
 
     public override void ClearTarget()
     {
@@ -88,7 +90,22 @@ public class CombatController3D : HumanoidCombat
             targeting.UpdateMarker();
 
             if (Input.GetKeyDown(KeyCode.Tab))
+            {
+                _tabHoldStart = Time.time;
                 targeting.ToggleOrAcquireByTab();
+            }
+            if (Input.GetKey(KeyCode.Tab))
+            {
+                if (_tabHoldStart > 0f && Time.time - _tabHoldStart >= TabHoldTime)
+                {
+                    EnterForcePeace();
+                    _tabHoldStart = -1f;
+                }
+            }
+            else
+            {
+                _tabHoldStart = -1f;
+            }
 
             CommandTarget = targeting.CurrentTarget;
             if (AutoTarget == null)
@@ -219,8 +236,7 @@ public class CombatController3D : HumanoidCombat
             if (IsComposing()) return;
             HandleHandToggle(SpellChannel.Hand2, false);
         }
-        if (Input.GetKeyDown(sheathKey))
-            EnterForcePeace();
+        // ForcePeace теперь на зажатый Tab, не на R
     }
 
     void HandleHandToggle(SpellChannel ch, bool sword)

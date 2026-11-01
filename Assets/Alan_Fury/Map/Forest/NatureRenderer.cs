@@ -1,6 +1,5 @@
 using UnityEngine;
 using System.Collections.Generic;
-
 /// <summary>
 /// Отрисовка + hybrid live + стриминг.
 /// Обычное дерево — родной материал префаба (ProPixelizer), без подмены.
@@ -12,23 +11,19 @@ public class NatureRenderer : MonoBehaviour
 {
     [Header("Источник данных")]
     public NaturePlacement placement;
-
     [Header("Игрок / камера")]
     public Transform player;
     public Camera cam;
     public PlayerVision playerVision;
-
     [Header("Радиусы")]
     public float drawRadius = 55f;
     [Tooltip("Начать live при входе в этот радиус")]
     public float liveRadius = 16f;
     [Tooltip("Снять live только когда дальше (гистерезис)")]
     public float liveExitExtra = 10f;
-
     [Header("Время суток")]
     [Tooltip("Множитель альбедо инстансов. Ставит TimeOfDayController.")]
     public Color todTint = Color.white;
-
     [Header("Прозрачность")]
     [Tooltip("Дерево между камерой и клеткой видимости: темнеет, потом тёмно-прозрачное.")]
     public bool fadeTreesInVision = true;
@@ -36,37 +31,36 @@ public class NatureRenderer : MonoBehaviour
     public float fadeSeconds = 0.35f;
     [Range(0.15f, 0.9f)]
     public float seeThroughAlpha = 0.72f;
-    public Color silhouetteColor = new Color(0.06f, 0.06f, 0.07f, 1f);
+    public Color silhouetteColor = new Color(0.015f, 0.015f, 0.02f, 1f);
     [Tooltip("Насколько близко дерево к лучу камера→клетка, чтобы считаться заслоном.")]
     public float coverRadius = 3.2f;
-
+    [Tooltip("Луч проверки идёт не в камеру, а на столько метров за неё.")]
+    public float coverBehindCamera = 1.5f;
+    [Header("Оптимизация (Троттлинг)")]
+    [Tooltip("Как часто проверять, закрывает ли дерево клетку зрения. Секунды, не меньше 0.5.")]
+    public float fadeCheckInterval = 0.5f;
     [Header("Live")]
     public int liveCheckEveryNFrames = 12;
     public Transform liveRoot;
-
-    [Header("Стриминг")]
-    public int streamCheckEveryNFrames = 20;
-
     [Header("Gizmo")]
     [Tooltip("Буква T на клетках с деревом. Жёлтая — клетка в поле зрения.")]
     public bool drawTreeLetters = false;
     public Color treeLetterColor = new Color(0.2f, 0.85f, 0.25f, 1f);
-
     public static NatureRenderer Active { get; private set; }
-
     private readonly Dictionary<long, LiveEntry> _live = new Dictionary<long, LiveEntry>();
     private readonly HashSet<long> _liveKeys = new HashSet<long>();
     private readonly List<long> _toRemove = new List<long>();
-
     private readonly List<Matrix4x4> _partBatch = new List<Matrix4x4>(256);
     private readonly List<Matrix4x4> _solidRoots = new List<Matrix4x4>(256);
     private readonly List<Matrix4x4> _fadeRoots = new List<Matrix4x4>(64);
     private readonly List<float> _fadeLevel = new List<float>(64);
     private readonly List<Vector3> _visCenters = new List<Vector3>(256);
     private readonly List<Vector2Int> _visCells = new List<Vector2Int>(256);
+    private readonly HashSet<Vector2Int> _visSet = new HashSet<Vector2Int>(256);
     private readonly Dictionary<long, float> _fade = new Dictionary<long, float>();
     private readonly List<long> _fadeDrop = new List<long>();
     private readonly HashSet<long> _fadeSeen = new HashSet<long>();
+    private readonly Dictionary<long, float> _fadeTargets = new Dictionary<long, float>();
     private readonly Dictionary<Material, Material> _seeThroughMats = new Dictionary<Material, Material>();
     private Shader _seeThroughShader;
     private MaterialPropertyBlock _oneBlock;
@@ -78,10 +72,10 @@ public class NatureRenderer : MonoBehaviour
     private float _lastRebuildMs;
     private int _lastRebuildMatrices;
     private float _nextSummary;
+    private float _nextFadeCheck;
     private static readonly int ColorId = Shader.PropertyToID("_Color");
     private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
     private static readonly int TodTintId = Shader.PropertyToID("_TodTint");
-
     private class LiveEntry
     {
         public GameObject go;
@@ -90,12 +84,10 @@ public class NatureRenderer : MonoBehaviour
         public Vector3 pos;
         public Renderer[] renderers;
     }
-
     void OnEnable()
     {
         Active = this;
     }
-
     void Start()
     {
         if (placement == null)
@@ -107,12 +99,10 @@ public class NatureRenderer : MonoBehaviour
             playerVision = FindObjectOfType<PlayerVision>();
         if (playerVision != null)
             playerVision.EnsureMapGrid();
-
         if (placement != null && !placement.IsReady
             && placement.heightSource != null && placement.heightSource.isGenerated)
             placement.Init();
     }
-
     void LateUpdate()
     {
         ResolveRefs();
@@ -122,28 +112,20 @@ public class NatureRenderer : MonoBehaviour
             placement.Init();
             if (!placement.IsReady) return;
         }
-
-        if (Time.frameCount % Mathf.Max(1, streamCheckEveryNFrames) == 0)
-            placement.UpdateStreaming(player.position);
-
         DrawInstanced();
-
         if (Time.frameCount % Mathf.Max(1, liveCheckEveryNFrames) == 0)
             UpdateLive();
     }
-
     private void ResolveRefs()
     {
         if (placement == null)
             placement = GetComponent<NaturePlacement>();
-
         if (cam == null)
         {
             var cf = FindObjectOfType<CameraFollow>();
             if (cf != null) cam = cf.GetComponent<Camera>();
             if (cam == null) cam = Camera.main;
         }
-
         if (player == null)
         {
             var cf = cam != null ? cam.GetComponent<CameraFollow>() : FindObjectOfType<CameraFollow>();
@@ -167,20 +149,17 @@ public class NatureRenderer : MonoBehaviour
                 if (playerVision != null) playerVision.EnsureMapGrid();
             }
         }
-
         if (playerVision == null && player != null)
         {
             playerVision = player.GetComponentInChildren<PlayerVision>();
             if (playerVision != null) playerVision.EnsureMapGrid();
         }
     }
-
     private void DrawInstanced()
     {
         if (placement.streamGround == null && placement.terrainBuilder == null) return;
         if (placement.heightSource == null && placement.streamGround == null) return;
         if (placement.allVariants == null) return;
-
         float ts = placement.terrainBuilder != null ? placement.terrainBuilder.TileSize : 4f;
         float sectorWorld = placement.sectorSize * ts;
         Vector3 origin;
@@ -193,20 +172,19 @@ public class NatureRenderer : MonoBehaviour
         Vector3 playerLocal = (placement.streamGround != null)
             ? player.position
             : placement.terrainBuilder.WorldToMapLocal(player.position);
-
         int pcx = Mathf.FloorToInt((playerLocal.x - origin.x) / sectorWorld);
         int pcz = Mathf.FloorToInt((playerLocal.z - origin.z) / sectorWorld);
         int r = Mathf.CeilToInt(drawRadius / sectorWorld);
         int stamp = placement.StreamStamp;
-
         bool dirty = stamp != _cacheStamp || pcx != _cachePcx || pcz != _cachePcz || r != _cacheR
             || _drawCache.Count != placement.allVariants.Count;
         if (dirty)
             RebuildDrawCache(pcx, pcz, r, stamp);
-
-        if (fadeTreesInVision && playerVision != null)
+        bool doFadeCheck = Time.time >= _nextFadeCheck;
+        if (doFadeCheck)
+            _nextFadeCheck = Time.time + Mathf.Max(0.5f, fadeCheckInterval);
+        if (fadeTreesInVision && playerVision != null && doFadeCheck)
             RefreshVisibleCenters();
-
         for (int vi = 0; vi < placement.allVariants.Count; vi++)
         {
             var v = placement.allVariants[vi];
@@ -218,30 +196,35 @@ public class NatureRenderer : MonoBehaviour
             var shadows = v.castShadows
                 ? UnityEngine.Rendering.ShadowCastingMode.On
                 : UnityEngine.Rendering.ShadowCastingMode.Off;
-
             bool canFade = fadeTreesInVision && layer != null && layer.IsTree && playerVision != null;
             if (!canFade)
             {
                 DrawNative(v, roots, v.propertyBlock, shadows);
                 continue;
             }
-
             _solidRoots.Clear();
             _fadeRoots.Clear();
             _fadeLevel.Clear();
-
             float dt = Time.deltaTime;
             float darkStep = dt / Mathf.Max(0.05f, darkenSeconds);
             float fadeStep = dt / Mathf.Max(0.05f, fadeSeconds);
-
             for (int i = 0; i < roots.Count; i++)
             {
                 Vector3 pos = roots[i].GetColumn(3);
                 long h = PosHash(pos);
                 _fadeSeen.Add(h);
-                bool covers = CoversVisibleCell(pos);
+                float target = 0f;
+                if (doFadeCheck)
+                {
+                    if (CoversVisibleCell(pos)) target = 2f;
+                    _fadeTargets[h] = target;
+                }
+                else
+                {
+                    _fadeTargets.TryGetValue(h, out target);
+                }
                 _fade.TryGetValue(h, out float t);
-                if (covers)
+                if (target > 0f)
                 {
                     if (t < 1f) t = Mathf.Min(1f, t + darkStep);
                     else t = Mathf.Min(2f, t + fadeStep);
@@ -261,13 +244,11 @@ public class NatureRenderer : MonoBehaviour
                 _fadeRoots.Add(roots[i]);
                 _fadeLevel.Add(t);
             }
-
             if (_solidRoots.Count > 0)
                 DrawNative(v, _solidRoots, v.propertyBlock, shadows);
             for (int i = 0; i < _fadeRoots.Count; i++)
                 DrawFadingOne(v, _fadeRoots[i], _fadeLevel[i], shadows);
         }
-
         if (_fade.Count > 0)
         {
             _fadeDrop.Clear();
@@ -280,14 +261,12 @@ public class NatureRenderer : MonoBehaviour
                 _fade.Remove(_fadeDrop[i]);
             _fadeSeen.Clear();
         }
-
         if (Time.unscaledTime >= _nextSummary)
         {
             _nextSummary = Time.unscaledTime + 8f;
             Debug.Log($"[AF.Load] NatureRenderer cache stamp={_cacheStamp} sector={_cachePcx},{_cachePcz} r={_cacheR} matrices={_lastRebuildMatrices} rebuild={_lastRebuildMs:0.0}ms");
         }
     }
-
     private void RebuildDrawCache(int pcx, int pcz, int r, int stamp)
     {
         float t0 = Time.realtimeSinceStartup;
@@ -323,36 +302,56 @@ public class NatureRenderer : MonoBehaviour
         _lastRebuildMs = (Time.realtimeSinceStartup - t0) * 1000f;
         Debug.Log($"[AF.Load] NatureRenderer.RebuildDrawCache {_lastRebuildMs:0.0}ms matrices={total} stamp={stamp} sector={pcx},{pcz} r={r}");
     }
-
-
     private void RefreshVisibleCenters()
     {
         _visCenters.Clear();
+        _visSet.Clear();
         if (playerVision == null || playerVision.mapGrid == null || !playerVision.mapGrid.IsReady)
             return;
         playerVision.CollectVisibleCells(_visCells);
+        for (int i = 0; i < _visCells.Count; i++)
+            _visSet.Add(_visCells[i]);
         var grid = playerVision.mapGrid;
         for (int i = 0; i < _visCells.Count; i++)
         {
             var c = _visCells[i];
+            bool edge = IsVisEdge(c);
+            // крайние — все; внутренние — через одну (шахматка)
+            if (!edge && ((c.x + c.y) & 1) != 0) continue;
             _visCenters.Add(grid.CellCenterWorld(c.x, c.y));
         }
     }
-
+    private bool IsVisEdge(Vector2Int c)
+    {
+        for (int dx = -1; dx <= 1; dx++)
+            for (int dz = -1; dz <= 1; dz++)
+            {
+                if (dx == 0 && dz == 0) continue;
+                if (!_visSet.Contains(new Vector2Int(c.x + dx, c.y + dz)))
+                    return true;
+            }
+        return false;
+    }
     private bool CoversVisibleCell(Vector3 treePos)
     {
         if (cam == null || _visCenters.Count == 0) return false;
         Vector3 camPos = cam.transform.position;
+        float behind = Mathf.Max(0f, coverBehindCamera);
         float r2 = coverRadius * coverRadius;
         for (int i = 0; i < _visCenters.Count; i++)
         {
             Vector3 cell = _visCenters[i];
             Vector3 toCell = cell - camPos;
-            float len2 = toCell.sqrMagnitude;
+            float len = toCell.magnitude;
+            if (len < 2f) continue;
+            Vector3 dir = toCell / len;
+            Vector3 start = camPos - dir * behind;
+            Vector3 toCellFromStart = cell - start;
+            float len2 = toCellFromStart.sqrMagnitude;
             if (len2 < 4f) continue;
-            float along = Vector3.Dot(treePos - camPos, toCell) / len2;
-            if (along < 0.12f || along > 0.9f) continue;
-            Vector3 closest = camPos + toCell * along;
+            float along = Vector3.Dot(treePos - start, toCellFromStart) / len2;
+            if (along < 0f || along > 1.02f) continue;
+            Vector3 closest = start + toCellFromStart * along;
             float sx = treePos.x - closest.x;
             float sz = treePos.z - closest.z;
             if (sx * sx + sz * sz <= r2)
@@ -360,13 +359,11 @@ public class NatureRenderer : MonoBehaviour
         }
         return false;
     }
-
     private void DrawNative(NaturePlacement.NatureVariant v, List<Matrix4x4> roots,
         MaterialPropertyBlock block, UnityEngine.Rendering.ShadowCastingMode shadows)
     {
         DrawParts(v, roots, block, shadows, false);
     }
-
     private void DrawFadingOne(NaturePlacement.NatureVariant v, Matrix4x4 root, float t,
         UnityEngine.Rendering.ShadowCastingMode shadows)
     {
@@ -376,18 +373,16 @@ public class NatureRenderer : MonoBehaviour
             DrawOne(v, root, v.propertyBlock, shadows, false);
             return;
         }
-
         if (_oneBlock == null) _oneBlock = new MaterialPropertyBlock();
         _oneBlock.Clear();
         float u = t - 1f;
-        float alpha = Mathf.Lerp(0.15f, seeThroughAlpha, u);
-        Color c = silhouetteColor;
-        c.a = alpha;
+        float alpha = Mathf.Lerp(0.12f, seeThroughAlpha, u);
+        // всегда тёмный силуэт, не светлый (инспектор мог быть светлым)
+        Color c = new Color(0.015f, 0.015f, 0.02f, alpha);
         _oneBlock.SetColor("_Color", c);
         _oneBlock.SetColor("_BaseColor", c);
         DrawOne(v, root, _oneBlock, UnityEngine.Rendering.ShadowCastingMode.Off, true);
     }
-
     private void DrawParts(NaturePlacement.NatureVariant v, List<Matrix4x4> roots,
         MaterialPropertyBlock block, UnityEngine.Rendering.ShadowCastingMode shadows, bool ghost)
     {
@@ -414,7 +409,6 @@ public class NatureRenderer : MonoBehaviour
             DrawList(part.mesh, mat, block, list, shadows, part.submesh);
         }
     }
-
     private void DrawOne(NaturePlacement.NatureVariant v, Matrix4x4 root,
         MaterialPropertyBlock block, UnityEngine.Rendering.ShadowCastingMode shadows, bool ghost)
     {
@@ -435,13 +429,11 @@ public class NatureRenderer : MonoBehaviour
             Graphics.DrawMeshInstanced(part.mesh, sub, mat, _oneSlice, 1, block, shadows, false);
         }
     }
-
     private Material SeeThroughOf(Material src)
     {
         if (src == null) return null;
         if (_seeThroughMats.TryGetValue(src, out var cached) && cached != null)
             return cached;
-
         if (_seeThroughShader == null)
             _seeThroughShader = Shader.Find("Nature/TreeSeeThrough");
         if (_seeThroughShader == null)
@@ -450,24 +442,28 @@ public class NatureRenderer : MonoBehaviour
                 Debug.LogWarning("NatureRenderer: нет шейдера Nature/TreeSeeThrough — прозрачность не включится.");
             return src;
         }
-
         var m = new Material(_seeThroughShader);
         m.name = "TreeSilhouette";
-        Color c = silhouetteColor;
-        c.a = seeThroughAlpha;
+        // тёмный, не светлый
+        Color c = new Color(0.015f, 0.015f, 0.02f, seeThroughAlpha);
         m.SetColor(BaseColorId, c);
         m.enableInstancing = true;
         _seeThroughMats[src] = m;
         return m;
     }
-
     private void DrawList(Mesh mesh, Material mat, MaterialPropertyBlock block,
         List<Matrix4x4> list, UnityEngine.Rendering.ShadowCastingMode shadows, int submesh = 0)
     {
         if (list.Count == 0 || mesh == null || mat == null) return;
         if (submesh < 0 || submesh >= mesh.subMeshCount) submesh = 0;
-
         const int BS = 1023;
+        bool pixelizer = mat.shader != null && mat.shader.name.IndexOf("ProPixelizer", System.StringComparison.Ordinal) >= 0;
+        if (pixelizer)
+        {
+            for (int i = 0; i < list.Count; i++)
+                Graphics.DrawMesh(mesh, list[i], mat, 0, null, submesh, block, shadows, false);
+            return;
+        }
         if (_drawSlice == null || _drawSlice.Length < BS)
             _drawSlice = new Matrix4x4[BS];
         for (int start = 0; start < list.Count; start += BS)
@@ -478,16 +474,13 @@ public class NatureRenderer : MonoBehaviour
             Graphics.DrawMeshInstanced(mesh, submesh, mat, _drawSlice, len, block, shadows, false);
         }
     }
-
     private void UpdateLive()
     {
         if (placement.allVariants == null) return;
-
         float enterR2 = liveRadius * liveRadius;
         float exitR = liveRadius + liveExitExtra;
         float exitR2 = exitR * exitR;
         Vector3 pp = player.position;
-
         _toRemove.Clear();
         foreach (var kv in _live)
         {
@@ -505,7 +498,6 @@ public class NatureRenderer : MonoBehaviour
             _live.Remove(k);
             _liveKeys.Remove(k);
         }
-
         float ts = placement.terrainBuilder != null ? placement.terrainBuilder.TileSize : 4f;
         float sectorWorld = placement.sectorSize * ts;
         Vector3 origin;
@@ -518,51 +510,41 @@ public class NatureRenderer : MonoBehaviour
         Vector3 playerLocal = (placement.streamGround != null)
             ? pp
             : (placement.terrainBuilder != null ? placement.terrainBuilder.WorldToMapLocal(pp) : pp);
-
         int pcx = Mathf.FloorToInt((playerLocal.x - origin.x) / sectorWorld);
         int pcz = Mathf.FloorToInt((playerLocal.z - origin.z) / sectorWorld);
         int r = Mathf.CeilToInt(exitR / sectorWorld) + 1;
-
         EnsureLiveRoot();
-
         for (int vi = 0; vi < placement.allVariants.Count; vi++)
         {
             var v = placement.allVariants[vi];
             var layer = placement.variantLayer[vi];
             if (!layer.IsTree || v.prefab == null || v.sectorLists == null) continue;
-
             for (int sx = pcx - r; sx <= pcx + r; sx++)
             {
                 for (int sz = pcz - r; sz <= pcz + r; sz++)
                 {
                     var skey = new Vector2Int(sx, sz);
                     if (!v.sectorLists.TryGetValue(skey, out var list)) continue;
-
                     for (int i = 0; i < list.Count; i++)
                     {
                         Vector3 pos = list[i].GetColumn(3);
                         if ((pos - pp).sqrMagnitude > enterR2) continue;
-
                         long h = PosHash(pos);
                         if (_live.ContainsKey(h)) continue;
-
                         Quaternion rot = list[i].rotation;
                         Vector3 scale = list[i].lossyScale;
                         GameObject go = Instantiate(v.prefab, pos, rot, liveRoot);
                         go.transform.localScale = scale;
                         go.name = $"{v.name}_live";
-
                         var lods = go.GetComponentsInChildren<LODGroup>(true);
                         for (int li = 0; li < lods.Length; li++)
                             lods[li].enabled = false;
-
                         var renderers = go.GetComponentsInChildren<Renderer>(true);
                         for (int ri = 0; ri < renderers.Length; ri++)
                         {
                             if (renderers[ri] != null)
                                 renderers[ri].enabled = false;
                         }
-
                         _live[h] = new LiveEntry
                         {
                             go = go,
@@ -577,7 +559,6 @@ public class NatureRenderer : MonoBehaviour
             }
         }
     }
-
     private void EnsureLiveRoot()
     {
         if (liveRoot != null) return;
@@ -585,7 +566,6 @@ public class NatureRenderer : MonoBehaviour
         go.transform.SetParent(transform, false);
         liveRoot = go.transform;
     }
-
     private static long PosHash(Vector3 p)
     {
         int x = Mathf.RoundToInt(p.x * 100f);
@@ -599,14 +579,12 @@ public class NatureRenderer : MonoBehaviour
             return h;
         }
     }
-
     public bool IsCellFading(int cx, int cz)
     {
         if (!fadeTreesInVision || playerVision == null) return false;
         if (playerVision.mapGrid == null || !playerVision.mapGrid.IsReady) return false;
         return playerVision.InShape(playerVision.mapGrid.CellCenterWorld(cx, cz));
     }
-
     [ContextMenu("Clear Live")]
     public void ClearLive()
     {
@@ -621,14 +599,12 @@ public class NatureRenderer : MonoBehaviour
         _live.Clear();
         _liveKeys.Clear();
     }
-
     void OnGUI()
     {
         if (!drawTreeLetters || !Application.isPlaying) return;
         if (cam == null || player == null) return;
         MapGrid grid = playerVision != null ? playerVision.mapGrid : null;
         if (grid == null || !grid.IsReady) return;
-
         grid.WorldToCell(player.position, out int pcx, out int pcz);
         int span = 18;
         int x0 = Mathf.Max(0, pcx - span);
@@ -636,7 +612,6 @@ public class NatureRenderer : MonoBehaviour
         int z0 = Mathf.Max(0, pcz - span);
         int z1 = Mathf.Min(grid.Depth - 1, pcz + span);
         float yOff = playerVision != null ? playerVision.yOffset : 0.12f;
-
         for (int x = x0; x <= x1; x++)
         {
             for (int z = z0; z <= z1; z++)
@@ -648,7 +623,6 @@ public class NatureRenderer : MonoBehaviour
                 if (sp.z <= 0f) continue;
                 if (sp.x < 0f || sp.x > Screen.width || sp.y < 0f || sp.y > Screen.height)
                     continue;
-
                 GUI.color = treeLetterColor;
                 GUI.Label(new Rect(sp.x - 6f, Screen.height - sp.y - 8f, 20f, 18f), "T");
             }

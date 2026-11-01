@@ -134,7 +134,6 @@ GameObject:
   - component: {fileID: 9263335}
   - component: {fileID: 9263334}
   - component: {fileID: 9263337}
-  - component: {fileID: 9263338}
   m_Layer: 0
   m_Name: NetworkManager
   m_TagString: Untagged
@@ -240,24 +239,6 @@ MonoBehaviour:
     PacketDelayMS: 0
     PacketJitterMS: 0
     PacketDropRate: 0
---- !u!114 &9263338
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 9263333}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 88e1f3342ae17864cb765eb4cebca1d2, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  connectAddress: 127.0.0.1
-  port: 7777
-  hostKey: 104
-  clientKey: 99
-  shutdownKey: 27
-  showOnGui: 1
 --- !u!1 &330585543
 GameObject:
   m_ObjectHideFlags: 0
@@ -1120,13 +1101,14 @@ MonoBehaviour:
     footprint: 3
     variants:
     - name: "\u0414\u0435\u0440\u0435\u0432\u043E"
-      prefab: {fileID: 0}
+      prefab: {fileID: 8432258960026481866, guid: 3c4a2284cf2d72447bdfe2b8724dc70e,
+        type: 3}
       mesh: {fileID: 0}
       material: {fileID: 0}
       sprite: {fileID: 0}
       weight: 100
-      minScale: 2.8
-      maxScale: 4.2
+      minScale: 2
+      maxScale: 2
       heightOffset: 0
       randomYRotation: 1
       castShadows: 1
@@ -1134,9 +1116,15 @@ MonoBehaviour:
       overrideCover: 0
       sightCover: 0
       maxCoverHeight: 2.5
+      hasProtrudingRoots: 1
+      fullCoverRadiusCells: 1
+      highCoverRadiusCells: 2
+      highCoverHeight: 2
+      rootCoverRadiusCells: 4
+      rootCoverHeight: 1
       resolvedMesh: {fileID: 0}
     sightCover: 1
-    maxCoverHeight: 0
+    maxCoverHeight: 5
   - name: "\u041A\u0443\u0441\u0442\u044B"
     kind: 2
     enabled: 1
@@ -1632,8 +1620,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a3a885492575ea0468bb523b06283050, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  width: 250
-  depth: 600
+  width: 400
+  depth: 1500
   chunkedBuilder: {fileID: 0}
   randomSeed: 1
   seed: 0
@@ -1676,6 +1664,7 @@ MonoBehaviour:
   sectorColor: {r: 0.3, g: 0.6, b: 1, a: 0.15}
   regionColor: {r: 1, g: 0.5, b: 0.1, a: 0.1}
   gizmoYOffset: 0.08
+  gizmoTreeRadius: 80
 --- !u!114 &1950520786
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -1699,59 +1688,15 @@ MonoBehaviour:
     enabled: 1
     footprint: 3
     variants:
-    - name: Tree_Main
-      prefab: {fileID: 1478839899352244680, guid: 56097d59501df1043b06ebeb1df3db6b,
+    - name: "\u0414\u0435\u0440\u0435\u0432\u043E"
+      prefab: {fileID: 8432258960026481866, guid: 3c4a2284cf2d72447bdfe2b8724dc70e,
         type: 3}
-      mesh: {fileID: -8437849265212345515, guid: 66d4573ab249b2e42a966d9ff59951c8,
-        type: 3}
-      material: {fileID: 2100000, guid: 90544257649ad194b8ccfc566c346375, type: 2}
-      sprite: {fileID: 0}
-      weight: 100
-      minScale: 5
-      maxScale: 5
-      heightOffset: 0
-      randomYRotation: 1
-      castShadows: 1
-      spriteEuler: {x: 0, y: 0, z: 0}
-      overrideCover: 0
-      sightCover: 2
-      maxCoverHeight: 2.5
-      resolvedMesh: {fileID: 0}
-    sightCover: 1
-    maxCoverHeight: 5
-  - name: "\u041C\u0430\u043B\u0435\u043D\u044C\u043A\u0438\u0435 \u0434\u0435\u0440\u0435\u0432\u044C\u044F"
-    kind: 1
-    enabled: 1
-    footprint: 1
-    variants:
-    - name: SmallTree_Stub
-      prefab: {fileID: 6894764567499446686, guid: 70c4552c857b77046aa6889397c25838,
-        type: 3}
-      mesh: {fileID: -255742167384542859, guid: dae630d25492ee845a8a1c03367ae4e5,
-        type: 3}
-      material: {fileID: 2100000, guid: 90544257649ad194b8ccfc566c346375, type: 2}
-      sprite: {fileID: 0}
-      weight: 100
-      minScale: 6
-      maxScale: 6
-      heightOffset: 0
-      randomYRotation: 1
-      castShadows: 1
-      spriteEuler: {x: 0, y: 0, z: 0}
-      overrideCover: 0
-      sightCover: 0
-      maxCoverHeight: 2.5
-      resolvedMesh: {fileID: 0}
-    - name: SmallTree_Stub
-      prefab: {fileID: 1478839899352244680, guid: 56097d59501df1043b06ebeb1df3db6b,
-        type: 3}
-      mesh: {fileID: -255742167384542859, guid: dae630d25492ee845a8a1c03367ae4e5,
-        type: 3}
+      mesh: {fileID: 0}
       material: {fileID: 0}
       sprite: {fileID: 0}
       weight: 100
-      minScale: 6
-      maxScale: 6
+      minScale: 2
+      maxScale: 2
       heightOffset: 0
       randomYRotation: 1
       castShadows: 1
@@ -1759,86 +1704,44 @@ MonoBehaviour:
       overrideCover: 0
       sightCover: 0
       maxCoverHeight: 2.5
+      hasProtrudingRoots: 1
+      fullCoverRadiusCells: 1
+      highCoverRadiusCells: 2
+      highCoverHeight: 2
+      rootCoverRadiusCells: 4
+      rootCoverHeight: 1
       resolvedMesh: {fileID: 0}
-    sightCover: 0
-    maxCoverHeight: 2.5
+    sightCover: 1
+    maxCoverHeight: 5
   - name: "\u041A\u0443\u0441\u0442\u044B"
     kind: 2
     enabled: 1
     footprint: 1
     variants:
-    - name: Bush_Stub
-      prefab: {fileID: 213899067198857939, guid: fbd37a08d1a089840b0e9ce1e199395a,
-        type: 3}
-      mesh: {fileID: 0}
-      material: {fileID: 0}
-      sprite: {fileID: 0}
-      weight: 100
-      minScale: 1
-      maxScale: 1
-      heightOffset: 0
-      randomYRotation: 1
-      castShadows: 1
-      spriteEuler: {x: 0, y: 0, z: 0}
-      overrideCover: 0
-      sightCover: 0
-      maxCoverHeight: 2.5
-      resolvedMesh: {fileID: 0}
-    - name: Bush_Stub
-      prefab: {fileID: 1301040729513061559, guid: c62992837f845bf4ea6feb789bcde0de,
-        type: 3}
-      mesh: {fileID: 0}
-      material: {fileID: 0}
-      sprite: {fileID: 0}
-      weight: 100
-      minScale: 1
-      maxScale: 1
-      heightOffset: 0
-      randomYRotation: 1
-      castShadows: 1
-      spriteEuler: {x: 0, y: 0, z: 0}
-      overrideCover: 0
-      sightCover: 0
-      maxCoverHeight: 2.5
-      resolvedMesh: {fileID: 0}
-    sightCover: 0
-    maxCoverHeight: 2.5
-  - name: "\u0420\u0430\u0441\u0442\u0435\u043D\u0438\u044F"
-    kind: 3
-    enabled: 0
-    footprint: 1
-    variants:
-    - name: Plant_Stub
+    - name: "\u041A\u0443\u0441\u0442"
       prefab: {fileID: 0}
       mesh: {fileID: 0}
       material: {fileID: 0}
       sprite: {fileID: 0}
       weight: 100
-      minScale: 0.6
-      maxScale: 1
+      minScale: 0.7
+      maxScale: 1.1
       heightOffset: 0
       randomYRotation: 1
-      castShadows: 1
+      castShadows: 0
       spriteEuler: {x: 0, y: 0, z: 0}
       overrideCover: 0
       sightCover: 0
       maxCoverHeight: 2.5
       resolvedMesh: {fileID: 0}
-    sightCover: 0
-    maxCoverHeight: 2.5
-  - name: "\u0422\u0440\u0430\u0432\u0430 (Unity later)"
-    kind: 4
-    enabled: 0
-    footprint: 1
-    variants: []
-    sightCover: 0
-    maxCoverHeight: 2.5
+    sightCover: 2
+    maxCoverHeight: 1.2
   layout: {fileID: 0}
   waterLevel: 0
   borderCells: 2
   sectorSize: 16
-  streamRadius: 80
-  unloadExtra: 25
+  streamRadius: 50
+  unloadExtra: 30
   grassUnderTreeMult: 0.28
   grassClusterNoiseScale: 0.09
   grassClusterOffset: {x: 41.2, y: 8.7}
@@ -1859,8 +1762,7 @@ MonoBehaviour:
   placement: {fileID: 1950520786}
   player: {fileID: 3200823202175224380, guid: 4f15a7177df3aeb47968e1a129db1000, type: 3}
   cam: {fileID: 330585545}
-  playerVision: {fileID: -1399369340103738705, guid: 4f15a7177df3aeb47968e1a129db1000,
-    type: 3}
+  playerVision: {fileID: 0}
   drawRadius: 70
   liveRadius: 15
   liveExitExtra: 10
@@ -1871,10 +1773,11 @@ MonoBehaviour:
   seeThroughAlpha: 0.32
   silhouetteColor: {r: 0.82, g: 0.84, b: 0.86, a: 1}
   coverRadius: 3.2
+  coverBehindCamera: 1.5
+  fadeCheckInterval: 0.5
   liveCheckEveryNFrames: 4
   liveRoot: {fileID: 0}
-  streamCheckEveryNFrames: 8
-  drawTreeLetters: 1
+  drawTreeLetters: 0
   treeLetterColor: {r: 0.2, g: 0.85, b: 0.25, a: 1}
 --- !u!114 &1950520790
 MonoBehaviour:
@@ -1888,7 +1791,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 63a76262ae063aa4986c83e7e805d555, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  player: {fileID: 3200823202175224380, guid: 4f15a7177df3aeb47968e1a129db1000, type: 3}
+  player: {fileID: 0}
   seed: 42
   tileSize: 4
   hexSize: 100
@@ -1896,6 +1799,8 @@ MonoBehaviour:
   loadRadiusChunks: 3
   unloadRadiusChunks: 5
   chunksPerFrame: 2
+  treeRadiusChunks: 1
+  roadVerge: 12
   heightStep: 0.5
   forestBase: 2.5
   forestVariation: 1.5

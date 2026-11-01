@@ -18,6 +18,8 @@ public class NpcPerception : MonoBehaviour
     public bool omnidirectional = false;
     [Tooltip("Резать луч клетками MapGrid (как PlayerVision).")]
     public bool useCover = true;
+    [Tooltip("Упрощённое зрение: только дистанция + конус, без клеток и Physics. Для дальних NPC.")]
+    public bool simpleVision;
     [Tooltip("Дополнительный Physics.Raycast. По умолчанию выкл — деревья уже на сетке.")]
     public bool usePhysicsLos = false;
     public bool useHearing = true;
@@ -169,6 +171,7 @@ public class NpcPerception : MonoBehaviour
     private float _cueRadius = 1f;
     private float _cueAge;
     private bool _forcedHunt;
+    private float _nextSimpleTick;
 
     void Awake()
     {
@@ -278,8 +281,17 @@ public class NpcPerception : MonoBehaviour
                 BindPlayer(nearest);
         }
 
-        TickSenses(Time.deltaTime);
-        if (drawGizmos && useSight)
+        if (simpleVision)
+        {
+            if (Time.time >= _nextSimpleTick)
+            {
+                _nextSimpleTick = Time.time + 1f;
+                TickSenses(1f);
+            }
+        }
+        else
+            TickSenses(Time.deltaTime);
+        if (drawGizmos && useSight && !simpleVision)
             DrawSight((a, b, c) => Debug.DrawLine(a, b, c));
     }
 
@@ -356,14 +368,14 @@ public class NpcPerception : MonoBehaviour
             _stalker.IsConcealedAt(target.position, transform.position))
             return false;
 
-        if (useCover)
+        if (useCover && !simpleVision)
         {
             EnsureMapGrid();
             if (mapGrid != null && mapGrid.IsReady && !mapGrid.HasSightLos(a, b))
                 return false;
         }
 
-        if (usePhysicsLos)
+        if (usePhysicsLos && !simpleVision)
         {
             Vector3 to = b - a;
             float d = to.magnitude;
@@ -632,7 +644,7 @@ public class NpcPerception : MonoBehaviour
 #if UNITY_EDITOR
     void OnDrawGizmos()
     {
-        if (!drawGizmos || !useSight) return;
+        if (!drawGizmos || !useSight || simpleVision) return;
         DrawSight((a, b, c) => { Gizmos.color = c; Gizmos.DrawLine(a, b); });
     }
 #endif

@@ -2,7 +2,7 @@ Shader "Nature/TreeSeeThrough"
 {
     Properties
     {
-        _BaseColor ("Color", Color) = (0.06, 0.06, 0.07, 0.72)
+        _BaseColor ("Color", Color) = (0.015, 0.015, 0.02, 0.65)
     }
 
     SubShader

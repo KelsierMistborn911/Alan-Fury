@@ -195,7 +195,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   walk:
-    speed: 12.2
+    speed: 3
     acceleration: 90
     deceleration: 80
     stepDistance: 2.1
@@ -203,7 +203,7 @@ MonoBehaviour:
     stepFrequency: 5
     stepHop: 0
   run:
-    speed: 10
+    speed: 7
     acceleration: 28
     deceleration: 20
     stepDistance: 1.75
@@ -211,7 +211,7 @@ MonoBehaviour:
     stepFrequency: 3.6
     stepHop: 0
   sprint:
-    speed: 12.5
+    speed: 9
     acceleration: 95
     deceleration: 55
     stepDistance: 1.85
@@ -219,26 +219,26 @@ MonoBehaviour:
     stepFrequency: 3.8
     stepHop: 0
   combatWalk:
-    speed: 14.3
+    speed: 5
     acceleration: 80
     deceleration: 70
-    stepDistance: 3.74
+    stepDistance: 1.15
     stepDuration: 0.23
     stepFrequency: 4.3
     stepHop: 0
   combatRun:
-    speed: 14.9
+    speed: 7.5
     acceleration: 85
     deceleration: 70
-    stepDistance: 2.25
+    stepDistance: 1.35
     stepDuration: 0.18
     stepFrequency: 5.2
     stepHop: 0
   combatSprint:
-    speed: 12.5
+    speed: 9
     acceleration: 95
     deceleration: 55
-    stepDistance: 2.05
+    stepDistance: 1.6
     stepDuration: 0.18
     stepFrequency: 3.7
     stepHop: 0

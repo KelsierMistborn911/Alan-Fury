@@ -24,12 +24,13 @@ public class GrassField : MonoBehaviour
     public int skipBorderCells = 2;
     [Tooltip("Пропуск клетки, если размах высот углов больше этого (м).")]
     public float maxSlope = 1.6f;
-
     [Header("Полоски")]
-    [Tooltip("Сколько пучков на клетку. Пучок = три травинки рядом, один кустик.")]
-    [Range(1, 32)] public int stripsPerCell = 12;
-    public float stripWidth = 0.09f;
-    public float stripHeight = 1.3f;
+    [Tooltip("Сколько пучков на клетку. Пучок = 6–8 полосок рядом.")]
+    [Range(1, 32)] public int stripsPerCell = 8;
+    public float stripWidth = 0.18f;
+    public float stripHeight = 0.62f;
+    [Tooltip("Две травинки в одной точке, зазор между ними (м).")]
+    public float pairGap = 0.06f;
 
     [Header("Плотность / вид (пишется в материал)")]
     [Tooltip("Густота в центре открытого поля.")]
@@ -60,7 +61,7 @@ public class GrassField : MonoBehaviour
 
     [Header("Стриминг")]
     [Tooltip("Как NatureRenderer.streamCheckEveryNFrames.")]
-    public int streamCheckEveryNFrames = 60;
+    public int streamCheckEveryNFrames = 45;
     [Tooltip("За сколько метров дальше drawRadius держать сектор.")]
     public float unloadExtra = 25f;
 
@@ -82,14 +83,14 @@ public class GrassField : MonoBehaviour
     public bool growInForest = true;
     public bool growInThicket = true;
     public bool growInClearing = true;
-    [Range(0f, 1f)] public float densityGrove = 0.62f;
-    [Range(0f, 1f)] public float densityForest = 0.22f;
-    [Range(0f, 1f)] public float densityThicket = 0.06f;
+    [Range(0f, 1f)] public float densityGrove = 0.9f;
+    [Range(0f, 1f)] public float densityForest = 0.75f;
+    [Range(0f, 1f)] public float densityThicket = 0.55f;
     [Tooltip("Доля клеток зоны, которым вообще даём траву. Меньше — реже пятна.")]
-    [Range(0.05f, 1f)] public float cellKeep = 0.8f;
+    [Range(0.05f, 1f)] public float cellKeep = 0.98f;
     public float patchNoiseScale = 0.07f;
     public Vector2 patchOffset = new Vector2(41.2f, 8.7f);
-    [Range(0f, 1f)] public float underTreeMult = 0.22f;
+    [Range(0f, 1f)] public float underTreeMult = 0.45f;
     [Range(2f, 32f)] public float pixelSteps = 6f;
     [Range(2f, 64f)] public float colorLevels = 16f;
 
@@ -130,14 +131,8 @@ public class GrassField : MonoBehaviour
     private readonly List<Vector3> _verts = new List<Vector3>(4096);
     private readonly List<int> _tris = new List<int>(4096);
     private readonly List<Vector2> _uvs = new List<Vector2>(4096);
-    private readonly List<Vector2> _tufts = new List<Vector2>(4096);
+    private readonly List<Vector2> _tuft = new List<Vector2>(4096);
     private readonly List<Color> _cols = new List<Color>(4096);
-
-    // Смещения/масштабы для трёх травинок в пучке (раздвинуты сильнее)
-    private static readonly float[] TuftDx = { 0.00f, 0.12f, -0.10f };
-    private static readonly float[] TuftDz = { 0.00f, 0.08f, 0.14f };
-    private static readonly float[] TuftHm = { 1.00f, 0.75f, 0.85f };
-    private static readonly float[] TuftSm = { 1.00f, 0.85f, 0.92f };
 
     private void Start()
     {
@@ -241,8 +236,10 @@ public class GrassField : MonoBehaviour
         _border = _stream ? 0 : Mathf.Max(0, skipBorderCells);
         _sectorSize = naturePlacement != null ? Mathf.Max(1, naturePlacement.sectorSize) : 16;
         stripWidth = 0.09f;
-        stripHeight = 1.3f;
-        stripsPerCell = 12;
+        stripHeight = 0.76f;
+        stripsPerCell = 24;
+        pushStrength = 0.4f;
+        cellKeep = 0.98f;
         EnsureMaterial();
         EnsureRoot();
         _prepared = true;
@@ -330,7 +327,7 @@ public class GrassField : MonoBehaviour
         _verts.Clear();
         _tris.Clear();
         _uvs.Clear();
-        _tufts.Clear();
+        _tuft.Clear();
         _cols.Clear();
 
         for (int x = x0; x < x1; x++)
@@ -341,25 +338,14 @@ public class GrassField : MonoBehaviour
                     continue;
                 if (!AcceptCell(x, z)) continue;
 
-                float h00 = CellHeight(x, z);
-                float h10 = CellHeight(x + 1, z);
-                float h11 = CellHeight(x + 1, z + 1);
-                float h01 = CellHeight(x, z + 1);
-                if (Mathf.Max(Mathf.Max(h00, h10), Mathf.Max(h11, h01)) - Mathf.Min(Mathf.Min(h00, h10), Mathf.Min(h11, h01)) > maxSlope)
-                    continue;
-
                 float mapX = _origin.x + x * _ts;
                 float mapZ = _origin.z + z * _ts;
                 float open = OpenAt(mapX + _ts * 0.5f, mapZ + _ts * 0.5f) * CellOpen(x, z);
                 if (open < 0.05f) continue;
 
-                // Считаем плотность для этой клетки. Чем больше плотность — тем больше пучков.
-                var zone = ResolveZone(x, z);
-                float dens = GrassDensity(zone);
-                int n = Mathf.RoundToInt(stripsPerCell * dens);
-                if (n <= 0) continue;
-
-                float yBase = (h00 + h10 + h11 + h01) * 0.25f + heightOffset;
+                int n = Mathf.Max(8, Mathf.RoundToInt(stripsPerCell * Mathf.Lerp(0.75f, 1f, open)));
+                // клетка плоская: своя высота + луч вниз на реальный меш (после чистки террас)
+                float yBase = GroundY(mapX + _ts * 0.5f, mapZ + _ts * 0.5f) + heightOffset;
                 for (int k = 0; k < n; k++)
                 {
                     float hx = Hash01(x, z, k, 3);
@@ -367,7 +353,19 @@ public class GrassField : MonoBehaviour
                     float h = stripHeight * Mathf.Lerp(0.85f, 1.1f, Hash01(x, z, k, 21));
                     float px = mapX + hx * _ts;
                     float pz = mapZ + hz * _ts;
-                    EmitStrip(px, yBase, pz, stripWidth, h, open);
+                    Vector3 c0 = WorldOf(px, 0f, pz);
+                    var center = new Vector2(c0.x, c0.z);
+                    int bunch = 6 + (int)(Hash01(x, z, k, 5) * 3f);
+                    for (int b = 0; b < bunch; b++)
+                    {
+                        float ang = Hash01(x, z, k, 30 + b) * 6.283185f;
+                        float rad = 0.08f + Hash01(x, z, k, 40 + b) * 0.24f;
+                        float ox = Mathf.Cos(ang) * rad;
+                        float oz = Mathf.Sin(ang) * rad;
+                        float bh = h * Mathf.Lerp(0.88f, 1.05f, Hash01(x, z, k, 50 + b));
+                        float tone = open * Mathf.Lerp(0.86f, 1.12f, Hash01(x, z, k, 60 + b));
+                        EmitStrip(px + ox, yBase, pz + oz, bh, tone, center);
+                    }
                 }
             }
         }
@@ -381,9 +379,9 @@ public class GrassField : MonoBehaviour
             mesh.SetVertices(_verts);
             mesh.SetTriangles(_tris, 0);
             mesh.SetUVs(0, _uvs);
-            mesh.SetUVs(1, _tufts);
+            mesh.SetUVs(1, _tuft);
             mesh.SetColors(_cols);
-            // mesh.RecalculateNormals(); — убрано для производительности (Cull Off и так работает)
+            mesh.RecalculateNormals();
             mesh.RecalculateBounds();
 
             var go = new GameObject(mesh.name);
@@ -406,48 +404,28 @@ public class GrassField : MonoBehaviour
         Debug.Log($"[AF.Load] GrassField.BakeSector {sx},{sz} {ms:0.0}ms verts={_verts.Count}");
     }
 
-    /// <summary>Пучок из трёх травинок вокруг точки (x,z). Все гнутся от общего центра пучка.</summary>
-    void EmitStrip(float x, float y, float z, float w, float h, float shade)
+    void EmitStrip(float x, float y, float z, float h, float shade, Vector2 center)
     {
-        Vector3 centerWorld = WorldOf(x, y, z);
-        var tuftCenter = new Vector2(centerWorld.x, centerWorld.z);
-
-        for (int b = 0; b < 3; b++)
-        {
-            float bx = x + TuftDx[b];
-            float bz = z + TuftDz[b];
-            float bh = h * TuftHm[b];
-            float bs = shade * TuftSm[b];
-
-            int i = _verts.Count;
-            var col = new Color(bs, bs, bs, 1f);
-
-            _verts.Add(ToMesh(bx, y, bz));
-            _verts.Add(ToMesh(bx, y, bz));
-            _verts.Add(ToMesh(bx, y + bh, bz));
-            _verts.Add(ToMesh(bx, y + bh, bz));
-
-            _uvs.Add(new Vector2(0f, 0f));
-            _uvs.Add(new Vector2(1f, 0f));
-            _uvs.Add(new Vector2(1f, 1f));
-            _uvs.Add(new Vector2(0f, 1f));
-
-            // Общий центр пучка — один и тот же для всех трёх травинок
-            _tufts.Add(tuftCenter);
-            _tufts.Add(tuftCenter);
-            _tufts.Add(tuftCenter);
-            _tufts.Add(tuftCenter);
-
-            _cols.Add(col);
-            _cols.Add(col);
-            _cols.Add(col);
-            _cols.Add(col);
-
-            _tris.Add(i); _tris.Add(i + 2); _tris.Add(i + 1);
-            _tris.Add(i); _tris.Add(i + 3); _tris.Add(i + 2);
-
-            _ = w; // ширина травинки задаётся в шейдере через _Width
-        }
+        int i = _verts.Count;
+        var col = new Color(shade, shade, shade, 1f);
+        _verts.Add(ToMesh(x, y, z));
+        _verts.Add(ToMesh(x, y, z));
+        _verts.Add(ToMesh(x, y + h, z));
+        _verts.Add(ToMesh(x, y + h, z));
+        _uvs.Add(new Vector2(0f, 0f));
+        _uvs.Add(new Vector2(1f, 0f));
+        _uvs.Add(new Vector2(1f, 1f));
+        _uvs.Add(new Vector2(0f, 1f));
+        _tuft.Add(center);
+        _tuft.Add(center);
+        _tuft.Add(center);
+        _tuft.Add(center);
+        _cols.Add(col);
+        _cols.Add(col);
+        _cols.Add(col);
+        _cols.Add(col);
+        _tris.Add(i); _tris.Add(i + 2); _tris.Add(i + 1);
+        _tris.Add(i); _tris.Add(i + 3); _tris.Add(i + 2);
     }
 
     private void UnloadSector(Vector2Int key)
@@ -628,7 +606,7 @@ public class GrassField : MonoBehaviour
         _block.SetFloat("_BladeWidth", bladeWidth);
         _block.SetFloat("_ScreenPad", screenPad);
         _block.SetFloat("_Width", stripWidth);
-        _block.SetColor("_Color", new Color(0.16f, 0.34f, 0.12f, 1f));
+        _block.SetColor("_Color", new Color(0.28f, 0.42f, 0.18f, 1f));
         _block.SetColor("_TipColor", new Color(0.22f, 0.42f, 0.16f, 1f));
         _block.SetFloat("_Brightness", 0.62f);
         _block.SetFloat("_WindStrength", windStrength);
@@ -664,14 +642,29 @@ public class GrassField : MonoBehaviour
         }
         else if (mapGrid != null && mapGrid.IsReady)
         {
-            if (skipRoads && mapGrid.HasFlag(x, z, MapGrid.OccupancyFlags.Road)) return false;
+            if (skipRoads && mapGrid.HasFlag(x, z, MapGrid.OccupancyFlags.Road))
+                return false;
         }
 
         var zone = ResolveZone(x, z);
         float dens = GrassDensity(zone);
         if (dens <= 0.0001f) return false;
-
+        if (Hash01(x, z, 71, 19) > dens * cellKeep) return false;
         return true;
+    }
+
+    float GroundY(float wx, float wz)
+    {
+        var origin = new Vector3(wx, 800f, wz);
+        if (Physics.Raycast(origin, Vector3.down, out RaycastHit hit, 1600f, TerrainMask()))
+            return hit.point.y;
+        return CellHeight(Mathf.FloorToInt(wx / _ts), Mathf.FloorToInt(wz / _ts));
+    }
+
+    int TerrainMask()
+    {
+        int m = LayerMask.GetMask("Terrain");
+        return m != 0 ? m : ~0;
     }
 
     float CellHeight(int x, int z)
